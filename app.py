@@ -1,11 +1,3 @@
-L'errore IndentationError è dovuto al fatto che l'istruzione except: pass non è allineata correttamente con il blocco try corrispondente. In Python, anche un solo spazio fuori posto interrompe l'esecuzione del codice.
-
-Ho colto l'occasione per integrare la logica V12.7 "Sync & Clean" in questo fix. Questa versione è progettata per evitare i "vicoli ciechi" della domenica, filtrando le leghe a bassa produttività e premiando solo quando c'è Sincronia tra il calo della quota della favorita e il calo della quota Over 2.5.
-
-🛠️ Sniper V12.7 - Fix Indentazione e Logica Sync
-Sostituisci tutto il codice nel tuo file app.py con questo blocco. Ho curato meticolosamente gli spazi per evitare nuovi errori di esecuzione.
-
-Python
 import streamlit as st
 import requests
 import pandas as pd
