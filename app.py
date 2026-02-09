@@ -4,14 +4,16 @@ import pandas as pd
 import time
 from datetime import datetime
 
-st.set_page_config(page_title="Sniper V12.4.1 - Pro View", layout="wide")
-st.title("🎯 SNIPER V12.4.1 - Professional Value Hunter")
+# --- CONFIGURAZIONE PAGINA ---
+st.set_page_config(page_title="Sniper V12.4.2 - Pro View", layout="wide")
+st.title("🎯 SNIPER V12.4.2 - Professional Value Hunter")
 
 # --- CONFIGURAZIONE API ---
 API_KEY = "5977f2e2446bf2620d4c2d356ce590c9"
 HOST = "v3.football.api-sports.io"
 HEADERS = {"x-apisports-key": API_KEY}
 
+# --- LISTA CAMPIONATI ---
 IDS = [135, 136, 140, 141, 78, 79, 61, 62, 39, 88, 94, 103, 113, 119, 120, 110, 106, 283, 137, 138, 139, 95, 114, 128, 71, 72, 281, 98, 99]
 
 if st.button('🚀 AVVIA ANALISI COMPLETA'):
@@ -22,7 +24,7 @@ if st.button('🚀 AVVIA ANALISI COMPLETA'):
     da_analizzare = [m for m in partite if m['league']['id'] in IDS and m['fixture']['status']['short'] == 'NS' and "Women" not in m['league']['name']]
     
     if not da_analizzare:
-        st.warning("Nessun match trovato.")
+        st.warning("Nessun match trovato per i campionati selezionati.")
     else:
         results = []
         bar = st.progress(0)
@@ -35,7 +37,7 @@ if st.button('🚀 AVVIA ANALISI COMPLETA'):
             
             sc = 40
             drop_status, inv_status, market_tag = "No", "No", "Standard"
-            q_o25 = 0
+            q1, qx, q2, q_o25 = 0.0, 0.0, 0.0, 0.0
             
             try:
                 r_o = requests.get(f"https://{HOST}/odds", headers=HEADERS, params={"fixture": f_id})
@@ -45,7 +47,7 @@ if st.button('🚀 AVVIA ANALISI COMPLETA'):
                     
                     # 1. ANALISI 1X2
                     o1x2 = next(b for b in bets if b['id'] == 1)['values']
-                    q1, q2 = float(o1x2[0]['odd']), float(o1x2[2]['odd'])
+                    q1, qx, q2 = float(o1x2[0]['odd']), float(o1x2[1]['odd']), float(o1x2[2]['odd'])
                     fav_q = min(q1, q2)
                     
                     if fav_q <= 1.75:
@@ -69,18 +71,17 @@ if st.button('🚀 AVVIA ANALISI COMPLETA'):
             results.append({
                 "Ora": m['fixture']['date'][11:16],
                 "Match": f"{h_n} - {a_n}",
+                "1": q1, "X": qx, "2": q2,
                 "Drop": drop_status,
                 "Inv": inv_status,
-                "Mercato": market_tag,
-                "Quota O2.5": q_o25,
+                "O2.5": q_o25,
                 "Rating": sc,
                 "CONSIGLIO": "🔥 VALUE BOMBA" if sc >= 80 else "✅ OTTIMO" if sc >= 65 else "No Bet"
             })
             time.sleep(0.2)
             bar.progress((i+1)/len(da_analizzare))
 
-   if results:
+        if results:
             df = pd.DataFrame(results).sort_values(by="Rating", ascending=False)
             st.success(f"Analisi completata!")
-            # Tabella con colonne esplicite
             st.dataframe(df, use_container_width=True)
