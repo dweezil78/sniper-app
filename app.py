@@ -8,21 +8,20 @@ from typing import Any, Dict, List, Optional, Tuple
 # 1) CONFIG PAGINA
 # ----------------------------
 st.set_page_config(page_title="ARAB SNIPER", layout="wide")
-st.title("🎯 ARAB SNIPER - Official Version")
-st.markdown("Elite Selection: Market Drop & Value Analysis")
+st.title("🎯 ARAB SNIPER - Goal Hunter Version")
+st.markdown("Elite Selection: Market Drop & 'Fame di Goal' Analysis")
 
 # ----------------------------
 # 2) CONFIG API
 # ----------------------------
 API_KEY = st.secrets.get("API_SPORTS_KEY")
 if not API_KEY:
-    st.error('Manca API_SPORTS_KEY in .streamlit/secrets.toml')
+    st.error('Manca API_SPORTS_KEY nei Secrets di Streamlit')
     st.stop()
 
 HOST = "v3.football.api-sports.io"
 HEADERS = {"x-apisports-key": API_KEY}
 
-# Leghe Target (Elite + Serie C + Pacific)
 IDS = sorted(set([
     135, 136, 140, 141, 78, 79, 61, 62, 39, 40, 41, 42,
     137, 138, 139, 810, 811, 812, 181, 203, 204, 98, 99, 101,
@@ -34,7 +33,7 @@ IDS = sorted(set([
 EXCLUDE_NAME_TOKENS = ["Women", "Femminile", "U19", "U20", "U21", "U23", "Primavera"]
 
 # ----------------------------
-# 3) HELPERS & CACHING
+# 3) HELPERS & CACHING (Salva Crediti)
 # ----------------------------
 def api_get(session: requests.Session, path: str, params: Dict[str, Any]) -> Dict[str, Any]:
     url = f"https://{HOST}/{path}"
@@ -47,12 +46,28 @@ def get_spectacle_index(team_id: int) -> float:
     with requests.Session() as s:
         data = api_get(s, "fixtures", {"team": team_id, "last": 5})
     matches = data.get("response", [])
-    totals: List[int] = []
+    totals = []
     for f in matches:
         gh, ga = f.get("goals", {}).get("home"), f.get("goals", {}).get("away")
         if gh is not None and ga is not None:
             totals.append(int(gh) + int(ga))
     return round(sum(totals) / len(totals), 1) if totals else 0.0
+
+@st.cache_data(ttl=3600)
+def check_last_match_no_goal(team_id: int) -> bool:
+    """Ritorna True se la squadra non ha segnato nell'ultima partita giocata."""
+    try:
+        with requests.Session() as s:
+            data = api_get(s, "fixtures", {"team": team_id, "last": 1})
+        match = data.get("response", [])
+        if not match: return False
+        
+        # Identifica se la squadra era Home o Away nell'ultimo match per trovare i suoi gol
+        is_home = match[0]['teams']['home']['id'] == team_id
+        goals = match[0]['goals']['home'] if is_home else match[0]['goals']['away']
+        return goals == 0
+    except:
+        return False
 
 @st.cache_data(ttl=900)
 def get_odds_fixture(fixture_id: int) -> Dict[str, Any]:
@@ -85,19 +100,19 @@ def safe_extract_odds(odds_json: Dict[str, Any]) -> Tuple[float, float, float, f
     return q1, qx, q2, q_o25
 
 # ----------------------------
-# 4) LOGICA RATING & FILTRI
+# 4) LOGICA RATING AGGIORNATA
 # ----------------------------
-def score_match(h_si: float, a_si: float, q1: float, q2: float, q_o25: float) -> Tuple[int, str, str, bool]:
+def score_match(h_si: float, a_si: float, q1: float, q2: float, q_o25: float, h_fame: bool, a_fame: bool) -> Tuple[int, str, str, bool]:
     sc = 40
     reasons = []
     d_icon = "↔️"
     
-    # FILTRO QUOTA TRAPPOLA (Sotto 1.50)
+    # FILTRO QUOTA TRAPPOLA
     is_trap = 0 < q_o25 < 1.50
     if is_trap:
         return 0, "🚫", "⚠️ TRAPPOLA <1.50", True
 
-    # ANALISI DROP / FAVORITO
+    # ANALISI DROP
     if q1 > 0 and q2 > 0:
         if q1 <= 1.80:
             d_icon, sc = "🏠📉", sc + 20
@@ -106,14 +121,18 @@ def score_match(h_si: float, a_si: float, q1: float, q2: float, q_o25: float) ->
             d_icon, sc = "🚀📉", sc + 25
             reasons.append("🚀+25")
 
-    # ANALISI OVER 2.5 VALUE (Range 1.50 - 2.15)
+    # ANALISI OVER 2.5 VALUE (1.50 - 2.15)
     if 1.50 <= q_o25 <= 2.15:
         sc += 15
         reasons.append("🎯+15")
-        avg_si = (h_si + a_si) / 2
-        if 2.2 <= avg_si < 3.8:
+        if 2.2 <= (h_si + a_si) / 2 < 3.8:
             sc += 10
             reasons.append("🔥+10")
+    
+    # BONUS FAME DI GOAL (Sblocco Goal)
+    if h_fame or a_fame:
+        sc += 15
+        reasons.append("⚽+15 Sblocco")
     
     # PENALITÀ SATURAZIONE
     if h_si >= 3.8 or a_si >= 3.8:
@@ -129,7 +148,7 @@ def style_rows(row):
     return [''] * len(row)
 
 # ----------------------------
-# 5) UI & LOGICA PRINCIPALE
+# 5) UI & MAIN LOOP
 # ----------------------------
 st.sidebar.header("⚙️ Filtri Selezione")
 min_rating = st.sidebar.slider("Rating Minimo", 0, 85, 60)
@@ -158,14 +177,18 @@ if st.button("🚀 AVVIA ARAB SNIPER"):
         status_box = st.empty()
 
         for i, m in enumerate(da_analizzare):
+            h_id, a_id = m["teams"]["home"]["id"], m["teams"]["away"]["id"]
             h_n, a_n = m["teams"]["home"]["name"], m["teams"]["away"]["name"]
-            status_box.text(f"Analisi: {h_n} - {a_n}")
+            status_box.text(f"Puntando il mirino: {h_n} - {a_n}")
 
-            h_si = get_spectacle_index(m["teams"]["home"]["id"])
-            a_si = get_spectacle_index(m['teams']['away']['id'])
+            h_si = get_spectacle_index(h_id)
+            a_si = get_spectacle_index(a_id)
             
-            # Icona estetica SI
-            icon = "🔥" if 2.2 <= (h_si+a_si)/2 < 3.8 else "↔️"
+            # Controllo Fame di Goal (Bonus Sblocco)
+            h_fame = check_last_match_no_goal(h_id)
+            a_fame = check_last_match_no_goal(a_id)
+            
+            icon = "⚽" if (h_fame or a_fame) else ("🔥" if 2.2 <= (h_si+a_si)/2 < 3.8 else "↔️")
             if h_si >= 3.8 or a_si >= 3.8: icon = "⚠️"
 
             q1 = qx = q2 = q_o25 = 0.0
@@ -174,7 +197,7 @@ if st.button("🚀 AVVIA ARAB SNIPER"):
                 q1, qx, q2, q_o25 = safe_extract_odds(odds_json)
             except: pass
 
-            rating, d_icon, reasons, trap = score_match(h_si, a_si, q1, q2, q_o25)
+            rating, d_icon, reasons, trap = score_match(h_si, a_si, q1, q2, q_o25, h_fame, a_fame)
 
             if rating >= min_rating:
                 if not (hide_traps and trap):
@@ -203,7 +226,7 @@ if st.button("🚀 AVVIA ARAB SNIPER"):
                 }
             )
         else:
-            st.info("Nessun match supera i filtri impostati.")
+            st.info("Nessun match trovato con i criteri attuali.")
 
     except Exception as e:
         st.error(f"Errore: {e}")
