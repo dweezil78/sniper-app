@@ -5,10 +5,10 @@ import time
 from datetime import datetime
 
 # --- 1. CONFIGURAZIONE PAGINA ---
-st.set_page_config(page_title="SNIPER ARAB V12.9.1", layout="wide")
+st.set_page_config(page_title="SNIPER ARAB V12.9.2", layout="wide")
 
-st.title("🎯 SNIPER ARAB V12.9.1")
-st.subheader("Clean Interface: Drop, Stable & Spectacle Index")
+st.title("🎯 SNIPER ARAB V12.9.2")
+st.subheader("Regression Control: Anti-Saturation & Professional Radar")
 
 # --- 2. CONFIGURAZIONE API ---
 API_KEY = "5977f2e2446bf2620d4c2d356ce590c9"
@@ -34,13 +34,12 @@ def get_spectacle_index(team_id):
     except: return 0.0
 
 def style_rows(row):
-    """Colorazione selettiva: Solo segnali di valore"""
     if row.Rating >= 75: return ['background-color: #1b4332; color: #d8f3dc; font-weight: bold'] * len(row)
     elif row.Rating >= 60: return ['background-color: #d4edda; color: #155724'] * len(row)
     return [''] * len(row)
 
 # --- 3. LOGICA DI ANALISI ---
-if st.button('🚀 LANCIA SNIPER ARAB V12.9.1'):
+if st.button('🚀 AVVIA SNIPER ARAB V12.9.2'):
     oggi = datetime.now().strftime('%Y-%m-%d')
     try:
         res = requests.get(f"https://{HOST}/fixtures", headers=HEADERS, params={"date": oggi, "timezone": "Europe/Rome"})
@@ -53,7 +52,7 @@ if st.button('🚀 LANCIA SNIPER ARAB V12.9.1'):
         ]
         
         if not da_analizzare:
-            st.warning("Nessun match rilevato.")
+            st.warning("Nessun match rilevato per i parametri SNIPER ARAB.")
         else:
             results = []
             bar = st.progress(0)
@@ -62,12 +61,22 @@ if st.button('🚀 LANCIA SNIPER ARAB V12.9.1'):
             for i, m in enumerate(da_analizzare):
                 f_id, h_id, a_id = m['fixture']['id'], m['teams']['home']['id'], m['teams']['away']['id']
                 h_n, a_n = m['teams']['home']['name'], m['teams']['away']['name']
-                status.text(f"Analisi V12.9.1: {h_n} - {a_n}")
+                status.text(f"Analisi V12.9.2: {h_n} - {a_n}")
                 
                 h_si = get_spectacle_index(h_id)
                 a_si = get_spectacle_index(a_id)
-                icona_special = "💥" if (h_si >= 3.0 and a_si >= 3.0) else ("🔥" if (h_si >= 2.5 and a_si >= 2.5) else "")
                 
+                # SOGLIA SATURAZIONE 3.8 (Anti-Regressione)
+                is_saturated = (h_si >= 3.8 or a_si >= 3.8)
+                
+                icona_special = "↔️"
+                if 2.5 <= h_si < 3.8 and 2.5 <= a_si < 3.8:
+                    icona_special = "🔥"
+                    if h_si >= 3.0 and a_si >= 3.0:
+                        icona_special = "💥"
+                elif is_saturated:
+                    icona_special = "⚠️" # Rischio regressione media
+
                 sc = 40
                 d_icon, q1, qx, q2, q_o25 = "↔️", 0.0, 0.0, 0.0, 0.0
                 
@@ -76,7 +85,6 @@ if st.button('🚀 LANCIA SNIPER ARAB V12.9.1'):
                     o_data = r_o.json().get('response', [])
                     if o_data:
                         bets = o_data[0]['bookmakers'][0]['bets']
-                        # 1X2 Drop
                         o1x2 = next((b for b in bets if b['id'] == 1), None)
                         if o1x2:
                             v = o1x2['values']
@@ -84,14 +92,18 @@ if st.button('🚀 LANCIA SNIPER ARAB V12.9.1'):
                             if q1 <= 1.80: d_icon, sc = "🏠📉", sc + 20
                             elif q2 <= 1.90: d_icon, sc = "🚀📉", sc + 25
                         
-                        # Over 2.5 (1.40 - 2.10)
                         o25 = next((b for b in bets if b['id'] == 5), None)
                         if o25:
                             q_o25 = float(next((v['odd'] for v in o25['values'] if v['value'] == 'Over 2.5'), 0))
                             if 1.40 <= q_o25 <= 2.10:
                                 sc += 15
-                                if h_si + a_si >= 5.5: sc += 10
-                            elif q_o25 > 2.30: sc -= 20
+                                # Bonus solo se NON saturo
+                                if 2.5 <= (h_si + a_si) / 2 < 3.8:
+                                    sc += 10
+                                # Malus Regressione
+                                elif is_saturated:
+                                    sc -= 20
+                            elif q_o25 > 2.30: sc -= 25
                     else:
                         if m['league']['country'] in ['Italy', 'Australia', 'Japan']: sc = 1
                 except: sc = 1
@@ -116,7 +128,6 @@ if st.button('🚀 LANCIA SNIPER ARAB V12.9.1'):
                     use_container_width=True,
                     column_config={
                         "Rating": st.column_config.ProgressColumn("Sniper Rating", format="%d", min_value=0, max_value=100),
-                        "S.I. (H|A)": st.column_config.TextColumn("📊 Indice Spettacolo"),
                         "Ora": "⏰", "O2.5": st.column_config.NumberColumn("Quota O2.5", format="%.2f")
                     }
                 )
