@@ -51,8 +51,6 @@ if st.button('🚀 LANCIA SNIPER ARAB V12.9.3'):
             and not any(x in m['league']['name'] for x in ["Women", "Femminile", "U19", "U20", "U21", "U23", "Primavera"])
         ]
         
-        if not da_analizzare:
-            st.warning("Nessun match rilevato.")
         else:
             results = []
             bar = st.progress(0)
