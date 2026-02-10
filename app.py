@@ -5,10 +5,10 @@ import time
 from datetime import datetime
 
 # --- 1. CONFIGURAZIONE PAGINA ---
-st.set_page_config(page_title="SNIPER ARAB V12.9.2", layout="wide")
+st.set_page_config(page_title="SNIPER ARAB V12.9.3", layout="wide")
 
-st.title("🎯 SNIPER ARAB V12.9.2")
-st.subheader("Regression Control: Anti-Saturation & Professional Radar")
+st.title("🎯 SNIPER ARAB V12.9.3")
+st.subheader("Filtro Sbarramento S.I. < 2.0 & Regression Control 3.8")
 
 # --- 2. CONFIGURAZIONE API ---
 API_KEY = "5977f2e2446bf2620d4c2d356ce590c9"
@@ -34,12 +34,12 @@ def get_spectacle_index(team_id):
     except: return 0.0
 
 def style_rows(row):
-    if row.Rating >= 75: return ['background-color: #1b4332; color: #d8f3dc; font-weight: bold'] * len(row)
-    elif row.Rating >= 60: return ['background-color: #d4edda; color: #155724'] * len(row)
+    if row.Rating >= 85: return ['background-color: #1b4332; color: #d8f3dc; font-weight: bold'] * len(row)
+    elif row.Rating >= 70: return ['background-color: #d4edda; color: #155724'] * len(row)
     return [''] * len(row)
 
 # --- 3. LOGICA DI ANALISI ---
-if st.button('🚀 AVVIA SNIPER ARAB V12.9.2'):
+if st.button('🚀 LANCIA SNIPER ARAB V12.9.3'):
     oggi = datetime.now().strftime('%Y-%m-%d')
     try:
         res = requests.get(f"https://{HOST}/fixtures", headers=HEADERS, params={"date": oggi, "timezone": "Europe/Rome"})
@@ -52,7 +52,7 @@ if st.button('🚀 AVVIA SNIPER ARAB V12.9.2'):
         ]
         
         if not da_analizzare:
-            st.warning("Nessun match rilevato per i parametri SNIPER ARAB.")
+            st.warning("Nessun match rilevato.")
         else:
             results = []
             bar = st.progress(0)
@@ -61,21 +61,24 @@ if st.button('🚀 AVVIA SNIPER ARAB V12.9.2'):
             for i, m in enumerate(da_analizzare):
                 f_id, h_id, a_id = m['fixture']['id'], m['teams']['home']['id'], m['teams']['away']['id']
                 h_n, a_n = m['teams']['home']['name'], m['teams']['away']['name']
-                status.text(f"Analisi V12.9.2: {h_n} - {a_n}")
+                status.text(f"Analisi V12.9.3: {h_n} - {a_n}")
                 
                 h_si = get_spectacle_index(h_id)
                 a_si = get_spectacle_index(a_id)
                 
-                # SOGLIA SATURAZIONE 3.8 (Anti-Regressione)
-                is_saturated = (h_si >= 3.8 or a_si >= 3.8)
+                # SOGLIE CRITICHE
+                is_saturated = (h_si >= 3.8 or a_si >= 3.8) # Regressione
+                is_dead_match = (h_si < 2.0 or a_si < 2.0)  # Sbarramento Under
                 
                 icona_special = "↔️"
-                if 2.5 <= h_si < 3.8 and 2.5 <= a_si < 3.8:
+                if 2.0 <= h_si < 3.8 and 2.0 <= a_si < 3.8:
                     icona_special = "🔥"
                     if h_si >= 3.0 and a_si >= 3.0:
                         icona_special = "💥"
                 elif is_saturated:
-                    icona_special = "⚠️" # Rischio regressione media
+                    icona_special = "⚠️"
+                elif is_dead_match:
+                    icona_special = "🧊" # Match "freddo"
 
                 sc = 40
                 d_icon, q1, qx, q2, q_o25 = "↔️", 0.0, 0.0, 0.0, 0.0
@@ -97,10 +100,13 @@ if st.button('🚀 AVVIA SNIPER ARAB V12.9.2'):
                             q_o25 = float(next((v['odd'] for v in o25['values'] if v['value'] == 'Over 2.5'), 0))
                             if 1.40 <= q_o25 <= 2.10:
                                 sc += 15
-                                # Bonus solo se NON saturo
-                                if 2.5 <= (h_si + a_si) / 2 < 3.8:
+                                # BONUS AREA OTTIMALE
+                                if 2.2 <= (h_si + a_si) / 2 < 3.8 and not is_dead_match:
                                     sc += 10
-                                # Malus Regressione
+                                # MALUS SBARRAMENTO (Under Match)
+                                if is_dead_match:
+                                    sc -= 30
+                                # MALUS REGRESSIONE
                                 elif is_saturated:
                                     sc -= 20
                             elif q_o25 > 2.30: sc -= 25
