@@ -25,7 +25,7 @@ IDS = [
 ]
 
 def style_rows(row):
-    """Gestione colori: Verde (Elite), Verde Chiaro (Buono), Azzurro (Serie C)"""
+    """Gestione colori: Verde (Elite), Verde Chiaro (Buono), Azzurro (Serie C/B)"""
     if row.Rating >= 75:
         return ['background-color: #1e7e34; color: white'] * len(row)
     elif row.Rating >= 60:
@@ -35,10 +35,83 @@ def style_rows(row):
     return [''] * len(row)
 
 if st.button('🚀 AVVIA RADAR PROFONDO'):
-    # Usiamo la data corrente impostata sul 10 Febbraio 2026
     oggi = datetime.now().strftime('%Y-%m-%d')
-    res = requests.get(f"https://{HOST}/fixtures", headers=HEADERS, params={"date": oggi, "timezone": "Europe/Rome"})
-    partite = res.json().get('response', [])
     
-    # Debug info in sidebar
-    st.sidebar.
+    try:
+        res = requests.get(f"https://{HOST}/fixtures", headers=HEADERS, params={"date": oggi, "timezone": "Europe/Rome"})
+        partite = res.json().get('response', [])
+        
+        # Sidebar info pulita
+        st.sidebar.write(f"Match totali oggi: {len(partite)}")
+        
+        da_analizzare = [m for m in partite if m['league']['id'] in IDS and m['fixture']['status']['short'] == 'NS']
+        
+        if not da_analizzare:
+            st.warning(f"Nessun match trovato per i campionati selezionati oggi ({oggi}).")
+        else:
+            results = []
+            progress_bar = st.progress(0)
+            status_text = st.empty()
+            
+            for i, m in enumerate(da_analizzare):
+                f_id = m['fixture']['id']
+                h_n, a_n = m['teams']['home']['name'], m['teams']['away']['name']
+                lega_n = m['league']['name']
+                
+                status_text.text(f"Analisi ({i+1}/{len(da_analizzare)}): {h_n} - {a_n}")
+                
+                sc = 40
+                d_icon, q1, qx, q2, q_o25 = "⚪", 0.0, 0.0, 0.0, 0.0
+                
+                try:
+                    r_o = requests.get(f"https://{HOST}/odds", headers=HEADERS, params={"fixture": f_id})
+                    o_data = r_o.json().get('response', [])
+                    if o_data:
+                        bets = o_data[0]['bookmakers'][0]['bets']
+                        
+                        o1x2 = next((b for b in bets if b['id'] == 1), None)
+                        if o1x2:
+                            vals = o1x2['values']
+                            q1, qx, q2 = float(vals[0]['odd']), float(vals[1]['odd']), float(vals[2]['odd'])
+                            if q1 <= 1.80: d_icon, sc = "🏠📉", sc + 20
+                            elif q2 <= 1.90: d_icon, sc = "🚀📉", sc + 25
+
+                        o25_bet = next((b for b in bets if b['id'] == 5), None)
+                        if o25_bet:
+                            q_o25 = float(next((v['odd'] for v in o25_bet['values'] if v['value'] == 'Over 2.5'), 0))
+                            if 1.40 <= q_o25 <= 1.95: sc += 15
+                            elif q_o25 > 2.20: sc -= 25
+                except:
+                    pass
+
+                results.append({
+                    "Ora": m['fixture']['date'][11:16],
+                    "Lega": lega_n,
+                    "Match": f"{h_n} - {a_n}",
+                    "1X2": f"{q1} | {qx} | {q2}",
+                    "Drop": d_icon,
+                    "O2.5": q_o25,
+                    "Rating": sc
+                })
+                
+                time.sleep(0.12)
+                progress_bar.progress((i+1)/len(da_analizzare))
+
+            if results:
+                df = pd.DataFrame(results).sort_values(by=["Rating", "Ora"], ascending=[False, True])
+                st.success(f"Analisi completata: {len(df)} match monitorati.")
+                
+                st.dataframe(
+                    df.style.apply(style_rows, axis=1),
+                    use_container_width=True,
+                    column_config={
+                        "Rating": st.column_config.ProgressColumn(
+                            "Rating", format="%d", min_value=0, max_value=100
+                        ),
+                        "Ora": "⏰",
+                        "O2.5": st.column_config.NumberColumn("Quota O2.5", format="%.2f"),
+                        "Drop": "📉"
+                    }
+                )
+    except Exception as e:
+        st.error(f"Errore generale: {e}")
