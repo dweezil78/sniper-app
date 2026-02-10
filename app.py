@@ -2,7 +2,7 @@ import streamlit as st
 import requests
 import pandas as pd
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Tuple
 
 # ----------------------------
 # 1) CONFIG PAGINA
@@ -22,7 +22,7 @@ if not API_KEY:
 HOST = "v3.football.api-sports.io"
 HEADERS = {"x-apisports-key": API_KEY}
 
-# Top Europe + Serie C + Pacific (come tuo elenco, ripulito con set)
+# IDS SELEZIONATI (Top Europe + Serie C + Pacific) - ripulito con set
 IDS = sorted(set([
     135, 136, 140, 141, 78, 79, 61, 62, 39, 40, 41, 42,
     137, 138, 139, 810, 811, 812, 181, 203, 204, 98, 99, 101,
@@ -44,14 +44,15 @@ def api_get(session: requests.Session, path: str, params: Dict[str, Any]) -> Dic
     return r.json()
 
 
-@st.cache_data(ttl=60 * 60)  # 1 ora: SI non cambia ogni minuto
+@st.cache_data(ttl=60 * 60)  # 1 ora
 def get_spectacle_index(team_id: int) -> float:
-    """Media gol totali (home+away) sulle ultime 5 partite VALIDE."""
+    """Media gol totali (home+away) su ultime 5 partite VALIDE."""
     with requests.Session() as s:
         data = api_get(s, "fixtures", {"team": team_id, "last": 5})
-    matches = data.get("response", [])
 
+    matches = data.get("response", [])
     totals: List[int] = []
+
     for f in matches:
         gh = f.get("goals", {}).get("home")
         ga = f.get("goals", {}).get("away")
@@ -64,7 +65,7 @@ def get_spectacle_index(team_id: int) -> float:
     return round(sum(totals) / len(totals), 1)
 
 
-@st.cache_data(ttl=15 * 60)  # 15 min: odds possono variare
+@st.cache_data(ttl=15 * 60)  # 15 minuti
 def get_odds_fixture(fixture_id: int) -> Dict[str, Any]:
     with requests.Session() as s:
         return api_get(s, "odds", {"fixture": fixture_id})
@@ -72,11 +73,8 @@ def get_odds_fixture(fixture_id: int) -> Dict[str, Any]:
 
 def pick_icon(h_si: float, a_si: float) -> Tuple[str, bool]:
     """
-    Eliminata funzione 'ghiaccio' (dead match).
-    Rimane:
-    - 🔥 / 💥 se SI in range "buono"
-    - ⚠️ se match 'saturo' (regressione)
-    - ↔️ default
+    Eliminata funzione ghiaccio (dead match).
+    Rimane: 🔥/💥 se SI ok, ⚠️ se saturo, ↔️ default.
     """
     is_saturated = (h_si >= 3.8 or a_si >= 3.8)
 
@@ -92,10 +90,7 @@ def pick_icon(h_si: float, a_si: float) -> Tuple[str, bool]:
 
 
 def safe_extract_odds(odds_json: Dict[str, Any]) -> Tuple[float, float, float, float]:
-    """
-    Estrae q1, qx, q2 e quota Over 2.5 in modo robusto.
-    Se manca qualcosa -> 0.0
-    """
+    """Estrae q1,qx,q2 e quota Over 2.5 in modo robusto. Se manca qualcosa -> 0.0."""
     q1 = qx = q2 = q_o25 = 0.0
     o_data = odds_json.get("response") or []
     if not o_data:
@@ -105,7 +100,7 @@ def safe_extract_odds(odds_json: Dict[str, Any]) -> Tuple[float, float, float, f
     if not bookmakers:
         return q1, qx, q2, q_o25
 
-    # prendi il primo bookmaker con bets non vuoto
+    # primo bookmaker con bets validi
     bets = None
     for bm in bookmakers:
         b = bm.get("bets") or []
@@ -115,7 +110,7 @@ def safe_extract_odds(odds_json: Dict[str, Any]) -> Tuple[float, float, float, f
     if not bets:
         return q1, qx, q2, q_o25
 
-    # 1X2
+    # 1X2 (id 1)
     o1x2 = next((b for b in bets if b.get("id") == 1), None)
     if o1x2 and o1x2.get("values") and len(o1x2["values"]) >= 3:
         v = o1x2["values"]
@@ -124,7 +119,7 @@ def safe_extract_odds(odds_json: Dict[str, Any]) -> Tuple[float, float, float, f
         except Exception:
             q1 = qx = q2 = 0.0
 
-    # Over/Under 2.5 (id 5 in API-Sports)
+    # Over/Under 2.5 (id 5)
     o25 = next((b for b in bets if b.get("id") == 5), None)
     if o25 and o25.get("values"):
         try:
@@ -142,63 +137,57 @@ def score_match(
     q2: float,
     q_o25: float,
     is_saturated: bool
-) -> Tuple[int, str, str]:
+) -> Tuple[int, str, List[str]]:
     """
-    Calcolo rating + drop icon + motivi.
-    Eliminata penalità 'ghiaccio/dead match'.
+    Calcolo rating + drop icon + breakdown (lista).
+    Eliminata logica ghiaccio/dead match.
     """
     sc = 40
-    reasons: List[str] = []
-
+    details: List[str] = []
     d_icon = "↔️"
 
-    # 1X2 favorito
+    # Favorito 1X2
     if q1 > 0 and q2 > 0:
         if q1 <= 1.80:
             d_icon = "🏠📉"
             sc += 20
-            reasons.append("+20 fav casa (≤1.80)")
+            details.append("+20 fav casa (≤1.80)")
         elif q2 <= 1.90:
             d_icon = "🚀📉"
             sc += 25
-            reasons.append("+25 fav trasf (≤1.90)")
+            details.append("+25 fav trasf (≤1.90)")
 
     # Over 2.5 in range
     if 1.40 <= q_o25 <= 2.10:
         sc += 15
-        reasons.append("+15 O2.5 in range")
+        details.append("+15 O2.5 in range")
 
         avg_si = (h_si + a_si) / 2
         if 2.2 <= avg_si < 3.8:
             sc += 10
-            reasons.append("+10 SI medio ok")
+            details.append("+10 SI medio ok")
 
     # Saturazione (regressione)
     if is_saturated:
         sc -= 20
-        reasons.append("-20 SI saturo (regressione)")
+        details.append("-20 SI saturo (regressione)")
 
-    # clamp 0..100
     sc = int(max(0, min(100, sc)))
-
-    if not reasons:
-        reasons_txt = "—"
-    else:
-        reasons_txt = "; ".join(reasons)
-
-    return sc, d_icon, reasons_txt
+    return sc, d_icon, details
 
 
 def style_rows(row):
-    if row.Rating >= 85:
+    # usa la colonna numerica "Rating_Num" per colorare
+    r = row.get("Rating_Num", 0)
+    if r >= 85:
         return ['background-color: #1b4332; color: #d8f3dc; font-weight: bold'] * len(row)
-    elif row.Rating >= 70:
+    elif r >= 70:
         return ['background-color: #d4edda; color: #155724'] * len(row)
     return [''] * len(row)
 
 
 # ----------------------------
-# 4) UI: diagnostica quota API (opzionale)
+# 4) UI: diagnostica API (opzionale)
 # ----------------------------
 with st.expander("📡 Diagnostica API (facoltativa)"):
     if st.button("Controlla /status"):
@@ -220,7 +209,6 @@ if st.button("🚀 AVVIA ARAB SNIPER (Tutti i match)"):
             data = api_get(session, "fixtures", {"date": oggi, "timezone": "Europe/Rome"})
             partite = data.get("response", [])
 
-        # Filtra match NS + leghe selezionate (o Italy) + escludi Women/Uxx
         da_analizzare = []
         for m in partite:
             league = m.get("league", {})
@@ -259,16 +247,15 @@ if st.button("🚀 AVVIA ARAB SNIPER (Tutti i match)"):
             a_si = get_spectacle_index(a_id)
             icon, is_saturated = pick_icon(h_si, a_si)
 
-            # Odds (cached 15 min)
+            # Odds (cached)
             q1 = qx = q2 = q_o25 = 0.0
             try:
                 odds_json = get_odds_fixture(f_id)
                 q1, qx, q2, q_o25 = safe_extract_odds(odds_json)
             except Exception:
-                # se odds falliscono, restano 0.0 e rating verrà calcolato più neutro
                 pass
 
-            rating, drop_icon, reasons = score_match(
+            rating_num, drop_icon, details = score_match(
                 h_si=h_si,
                 a_si=a_si,
                 q1=q1,
@@ -276,6 +263,12 @@ if st.button("🚀 AVVIA ARAB SNIPER (Tutti i match)"):
                 q_o25=q_o25,
                 is_saturated=is_saturated
             )
+
+            # Costruisci la cella Rating con breakdown
+            if details:
+                rating_cell = f"{rating_num}\n" + "\n".join([f"• {d}" for d in details])
+            else:
+                rating_cell = str(rating_num)
 
             results.append({
                 "Ora": m["fixture"]["date"][11:16],
@@ -285,22 +278,31 @@ if st.button("🚀 AVVIA ARAB SNIPER (Tutti i match)"):
                 "1X2": f"{q1}|{qx}|{q2}" if q1 > 0 else "N.D.",
                 "Drop": drop_icon,
                 "O2.5": q_o25 if q_o25 > 0 else None,
-                "Rating": rating,
-                "Motivi": reasons
+                "Rating": rating_cell,       # <-- colonna mostrata
+                "Rating_Num": rating_num     # <-- colonna tecnica (per ordinare/colorare)
             })
 
             bar.progress((i + 1) / len(da_analizzare))
 
-        df = pd.DataFrame(results).sort_values(by="Rating", ascending=False)
+        df = pd.DataFrame(results)
+
+        # Ordina usando la colonna numerica
+        df = df.sort_values(by="Rating_Num", ascending=False)
+
+        # Visualizza senza la colonna tecnica
+        df_show = df.drop(columns=["Rating_Num"])
 
         st.dataframe(
-            df.style.apply(style_rows, axis=1),
+            df_show.style.apply(style_rows, axis=1),
             use_container_width=True,
             column_config={
-                "Rating": st.column_config.ProgressColumn("Sniper Rating", format="%d", min_value=0, max_value=100),
                 "Ora": "⏰",
                 "O2.5": st.column_config.NumberColumn("Quota O2.5", format="%.2f"),
-                "Motivi": st.column_config.TextColumn("Perché (breakdown)")
+                "Rating": st.column_config.TextColumn(
+                    "Sniper Rating (con breakdown)",
+                    help="Rating finale + dettagli punteggio",
+                    width="large"
+                ),
             }
         )
 
