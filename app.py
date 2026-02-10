@@ -5,17 +5,10 @@ import time
 from datetime import datetime
 
 # --- 1. CONFIGURAZIONE PAGINA ---
-st.set_page_config(page_title="SNIPER ARAB PRO", layout="wide")
+st.set_page_config(page_title="SNIPER ARAB V12.9", layout="wide")
 
-st.markdown("""
-    <style>
-    .main { background-color: #f5f7f9; }
-    .stButton>button { width: 100%; border-radius: 5px; height: 3em; background-color: #004b23; color: white; font-weight: bold; }
-    </style>
-    """, unsafe_allow_html=True)
-
-st.title("🎯 SNIPER ARAB V12.8")
-st.subheader("Professional Radar: Stats Live & Fiamma Sniper 🔥")
+st.title("🎯 SNIPER ARAB V12.9")
+st.subheader("Indice Spettacolo (Fatti+Subiti) & High-Value Over")
 
 # --- 2. CONFIGURAZIONE API ---
 API_KEY = "5977f2e2446bf2620d4c2d356ce590c9"
@@ -30,25 +23,26 @@ IDS = [
     179, 180, 262, 218, 143
 ]
 
-def get_form(team_id):
-    """Recupera la media gol segnati nelle ultime 5 partite"""
+def get_spectacle_index(team_id):
+    """Calcola la media totale gol (Fatti + Subiti) delle ultime 5"""
     try:
         res = requests.get(f"https://{HOST}/fixtures", headers=HEADERS, params={"team": team_id, "last": 5})
         matches = res.json().get('response', [])
         if not matches: return 0.0
-        # Calcolo media gol fatti
-        g_fatti = sum([(f['goals']['home'] if f['teams']['home']['id'] == team_id else f['goals']['away']) for f in matches if f['goals']['home'] is not None])
-        return round(g_fatti / len(matches), 1)
+        total_g = 0
+        for f in matches:
+            if f['goals']['home'] is not None:
+                total_g += (f['goals']['home'] + f['goals']['away'])
+        return round(total_g / len(matches), 1)
     except: return 0.0
 
 def style_rows(row):
     if row.Rating >= 75: return ['background-color: #1b4332; color: #d8f3dc; font-weight: bold'] * len(row)
-    elif row.Rating >= 60: return ['background-color: #d8f3dc; color: #081c15'] * len(row)
-    elif any(x in str(row.Lega) for x in ["Serie C", "Lega Pro", "Serie B"]): return ['background-color: #caf0f8; color: #03045e'] * len(row)
+    elif row.Rating >= 60: return ['background-color: #d4edda; color: #155724'] * len(row)
+    elif any(x in str(row.Lega) for x in ["Serie C", "Lega Pro", "Serie B"]): return ['background-color: #e3f2fd; color: #0d47a1'] * len(row)
     return [''] * len(row)
 
-# --- 3. LOGICA PRINCIPALE ---
-if st.button('🚀 LANCIA SNIPER ARAB PRO'):
+if st.button('🚀 LANCIA SNIPER ARAB V12.9'):
     oggi = datetime.now().strftime('%Y-%m-%d')
     try:
         res = requests.get(f"https://{HOST}/fixtures", headers=HEADERS, params={"date": oggi, "timezone": "Europe/Rome"})
@@ -70,12 +64,12 @@ if st.button('🚀 LANCIA SNIPER ARAB PRO'):
             for i, m in enumerate(da_analizzare):
                 f_id, h_id, a_id = m['fixture']['id'], m['teams']['home']['id'], m['teams']['away']['id']
                 h_n, a_n = m['teams']['home']['name'], m['teams']['away']['name']
-                status.text(f"Analisi Pro: {h_n} - {a_n}")
+                status.text(f"Analisi V12.9: {h_n} - {a_n}")
                 
-                # Stats Form
-                h_avg = get_form(h_id)
-                a_avg = get_form(a_id)
-                fiamma = "🔥" if (h_avg >= 1.5 and a_avg >= 1.5) else ""
+                # Indice Spettacolo (Fatti + Subiti)
+                h_si = get_spectacle_index(h_id)
+                a_si = get_spectacle_index(a_id)
+                icona_special = "💥" if (h_si >= 3.0 and a_si >= 3.0) else ("🔥" if (h_si >= 2.5 and a_si >= 2.5) else "")
                 
                 sc = 40
                 d_icon, q1, qx, q2, q_o25 = "⚪", 0.0, 0.0, 0.0, 0.0
@@ -85,18 +79,23 @@ if st.button('🚀 LANCIA SNIPER ARAB PRO'):
                     o_data = r_o.json().get('response', [])
                     if o_data:
                         bets = o_data[0]['bookmakers'][0]['bets']
+                        # 1X2 Drop
                         o1x2 = next((b for b in bets if b['id'] == 1), None)
                         if o1x2:
                             v = o1x2['values']
-                            q1, q2 = float(v[0]['odd']), float(v[2]['odd'])
-                            qx = float(v[1]['odd'])
+                            q1, qx, q2 = float(v[0]['odd']), float(v[1]['odd']), float(v[2]['odd'])
                             if q1 <= 1.80: d_icon, sc = "🏠📉", sc + 20
                             elif q2 <= 1.90: d_icon, sc = "🚀📉", sc + 25
+                        
+                        # Over 2.5 - Logica Espansa (fino a 2.10)
                         o25 = next((b for b in bets if b['id'] == 5), None)
                         if o25:
                             q_o25 = float(next((v['odd'] for v in o25['values'] if v['value'] == 'Over 2.5'), 0))
-                            if 1.40 <= q_o25 <= 1.95: sc += 15
-                            elif q_o25 > 2.20: sc -= 25
+                            if 1.40 <= q_o25 <= 2.10: # Range allungato
+                                sc += 15
+                                # Bonus extra se l'indice spettacolo è alto nonostante la quota alta
+                                if h_si + a_si >= 5.5: sc += 10
+                            elif q_o25 > 2.30: sc -= 20
                     else:
                         if m['league']['country'] in ['Italy', 'Australia', 'Japan']: sc = 1
                 except: sc = 1
@@ -104,14 +103,14 @@ if st.button('🚀 LANCIA SNIPER ARAB PRO'):
                 results.append({
                     "Ora": m['fixture']['date'][11:16],
                     "Lega": m['league']['name'],
-                    "Match": f"{fiamma} {h_n} - {a_n}",
-                    "Media Gol (H|A)": f"{h_avg} | {a_avg}",
+                    "Match": f"{icona_special} {h_n} - {a_n}",
+                    "Indice Spett. (H|A)": f"{h_si} | {a_si}",
                     "1X2": f"{q1}|{qx}|{q2}" if q1 > 0 else "N.D.",
                     "Drop": d_icon,
                     "O2.5": q_o25,
                     "Rating": sc
                 })
-                time.sleep(0.1)
+                time.sleep(0.12)
                 bar.progress((i+1)/len(da_analizzare))
 
             if results:
@@ -121,6 +120,7 @@ if st.button('🚀 LANCIA SNIPER ARAB PRO'):
                     use_container_width=True,
                     column_config={
                         "Rating": st.column_config.ProgressColumn("Rating Sniper", format="%d", min_value=0, max_value=100),
+                        "Indice Spett. (H|A)": st.column_config.TextColumn("📊 Tot. Gol L5 (F+S)"),
                         "Ora": "⏰", "O2.5": st.column_config.NumberColumn("Quota O2.5", format="%.2f")
                     }
                 )
