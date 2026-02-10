@@ -5,17 +5,16 @@ import time
 from datetime import datetime
 
 # --- 1. CONFIGURAZIONE PAGINA ---
-st.set_page_config(page_title="ARAB SNIPER V12.9.3", layout="wide")
+st.set_page_config(page_title="SNIPER ARAB V12.9.3", layout="wide")
 
-st.title("🎯 ARAB SNIPER")
-st.subheader("Official Standard: V12.9.3 - Sbarramento & Regression Control")
+st.title("🎯 SNIPER ARAB V12.9.3")
+st.subheader("Filtro Sbarramento S.I. < 2.0 & Regression Control 3.8")
 
 # --- 2. CONFIGURAZIONE API ---
 API_KEY = "5977f2e2446bf2620d4c2d356ce590c9"
 HOST = "v3.football.api-sports.io"
 HEADERS = {"x-apisports-key": API_KEY}
 
-# IDS SELEZIONATI (Top Europe + Serie C + Pacific)
 IDS = [
     135, 136, 140, 141, 78, 79, 61, 62, 39, 40, 41, 42, 
     137, 138, 139, 810, 811, 812, 181, 203, 204, 98, 99, 101, 
@@ -35,19 +34,16 @@ def get_spectacle_index(team_id):
     except: return 0.0
 
 def style_rows(row):
-    """Colorazione Rating Arab Sniper"""
     if row.Rating >= 85: return ['background-color: #1b4332; color: #d8f3dc; font-weight: bold'] * len(row)
     elif row.Rating >= 70: return ['background-color: #d4edda; color: #155724'] * len(row)
     return [''] * len(row)
 
 # --- 3. LOGICA DI ANALISI ---
-if st.button('🚀 AVVIA ARAB SNIPER'):
+if st.button('🚀 LANCIA SNIPER ARAB V12.9.3'):
     oggi = datetime.now().strftime('%Y-%m-%d')
     try:
         res = requests.get(f"https://{HOST}/fixtures", headers=HEADERS, params={"date": oggi, "timezone": "Europe/Rome"})
         partite = res.json().get('response', [])
-        
-        # Filtro Arab Sniper (Professionistico Maschile)
         da_analizzare = [
             m for m in partite 
             if (m['league']['id'] in IDS or m['league']['country'] == 'Italy') 
@@ -56,7 +52,7 @@ if st.button('🚀 AVVIA ARAB SNIPER'):
         ]
         
         if not da_analizzare:
-            st.warning("Nessun match rilevato per i parametri Arab Sniper.")
+            st.warning("Nessun match rilevato.")
         else:
             results = []
             bar = st.progress(0)
@@ -65,14 +61,14 @@ if st.button('🚀 AVVIA ARAB SNIPER'):
             for i, m in enumerate(da_analizzare):
                 f_id, h_id, a_id = m['fixture']['id'], m['teams']['home']['id'], m['teams']['away']['id']
                 h_n, a_n = m['teams']['home']['name'], m['teams']['away']['name']
-                status.text(f"Puntando il mirino: {h_n} - {a_n}")
+                status.text(f"Analisi V12.9.3: {h_n} - {a_n}")
                 
                 h_si = get_spectacle_index(h_id)
                 a_si = get_spectacle_index(a_id)
                 
-                # SOGLIE CRITICHE ARAB SNIPER
-                is_saturated = (h_si >= 3.8 or a_si >= 3.8) # Regressione verso la media
-                is_dead_match = (h_si < 2.0 or a_si < 2.0)  # Sbarramento Ghiaccio
+                # SOGLIE CRITICHE
+                is_saturated = (h_si >= 3.8 or a_si >= 3.8) # Regressione
+                is_dead_match = (h_si < 2.0 or a_si < 2.0)  # Sbarramento Under
                 
                 icona_special = "↔️"
                 if 2.0 <= h_si < 3.8 and 2.0 <= a_si < 3.8:
@@ -82,7 +78,7 @@ if st.button('🚀 AVVIA ARAB SNIPER'):
                 elif is_saturated:
                     icona_special = "⚠️"
                 elif is_dead_match:
-                    icona_special = "🧊"
+                    icona_special = "🧊" # Match "freddo"
 
                 sc = 40
                 d_icon, q1, qx, q2, q_o25 = "↔️", 0.0, 0.0, 0.0, 0.0
@@ -92,7 +88,6 @@ if st.button('🚀 AVVIA ARAB SNIPER'):
                     o_data = r_o.json().get('response', [])
                     if o_data:
                         bets = o_data[0]['bookmakers'][0]['bets']
-                        # 1X2 Drop
                         o1x2 = next((b for b in bets if b['id'] == 1), None)
                         if o1x2:
                             v = o1x2['values']
@@ -100,16 +95,21 @@ if st.button('🚀 AVVIA ARAB SNIPER'):
                             if q1 <= 1.80: d_icon, sc = "🏠📉", sc + 20
                             elif q2 <= 1.90: d_icon, sc = "🚀📉", sc + 25
                         
-                        # Over 2.5
                         o25 = next((b for b in bets if b['id'] == 5), None)
                         if o25:
                             q_o25 = float(next((v['odd'] for v in o25['values'] if v['value'] == 'Over 2.5'), 0))
                             if 1.40 <= q_o25 <= 2.10:
                                 sc += 15
+                                # BONUS AREA OTTIMALE
                                 if 2.2 <= (h_si + a_si) / 2 < 3.8 and not is_dead_match:
                                     sc += 10
-                                if is_dead_match: sc -= 30
-                                elif is_saturated: sc -= 20
+                                # MALUS SBARRAMENTO (Under Match)
+                                if is_dead_match:
+                                    sc -= 30
+                                # MALUS REGRESSIONE
+                                elif is_saturated:
+                                    sc -= 20
+                            elif q_o25 > 2.30: sc -= 25
                     else:
                         if m['league']['country'] in ['Italy', 'Australia', 'Japan']: sc = 1
                 except: sc = 1
