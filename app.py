@@ -4,11 +4,11 @@ import pandas as pd
 import time
 from datetime import datetime
 
-# --- 1. CONFIGURAZIONE PAGINA (Deve essere la prima istruzione) ---
-st.set_page_config(page_title="Sniper V12.7.5", layout="wide")
+# --- 1. CONFIGURAZIONE PAGINA ---
+st.set_page_config(page_title="Sniper V12.7.6", layout="wide")
 
-# --- 2. TITOLI E INTERFACCIA ---
-st.title("🎯 SNIPER V12.7.5 - Radar Assoluto")
+# --- 2. TITOLI ---
+st.title("🎯 SNIPER V12.7.6 - Radar Assoluto")
 st.markdown("Monitoraggio forzato Serie C (Lega Pro) + Top Leghe Globali.")
 
 # --- 3. CONFIGURAZIONE API ---
@@ -37,8 +37,7 @@ def style_rows(row):
         return ['background-color: #e3f2fd; color: #0d47a1'] * len(row)
     return [''] * len(row)
 
-# --- 4. TASTO DI AVVIO ---
-# Assicurati che non ci siano spazi prima di 'if'
+# --- 4. TASTO DI AVVIO E LOGICA ---
 if st.button('🚀 AVVIA SCAN TOTALE (INCLUSA SERIE C)'):
     oggi = datetime.now().strftime('%Y-%m-%d')
     try:
@@ -67,7 +66,7 @@ if st.button('🚀 AVVIA SCAN TOTALE (INCLUSA SERIE C)'):
                 f_id = m['fixture']['id']
                 h_n, a_n = m['teams']['home']['name'], m['teams']['away']['name']
                 lega_n = m['league']['name']
-                status_text.text(f"Analisi: {h_n} - {a_n}")
+                status_text.text(f"Analisi ({i+1}/{len(da_analizzare)}): {h_n} - {a_n}")
                 
                 sc = 0
                 d_icon, q1, qx, q2, q_o25 = "⚪", 0.0, 0.0, 0.0, 0.0
@@ -92,7 +91,7 @@ if st.button('🚀 AVVIA SCAN TOTALE (INCLUSA SERIE C)'):
                             if 1.40 <= q_o25 <= 1.95: sc += 15
                             elif q_o25 > 2.20: sc -= 25
                     else:
-                        # Se è un match italiano ma mancano le quote, Rating 1
+                        # Forza visibilità se è Italia
                         if m['league']['country'] == 'Italy':
                             sc = 1
                             d_icon = "⏳"
@@ -114,4 +113,14 @@ if st.button('🚀 AVVIA SCAN TOTALE (INCLUSA SERIE C)'):
             if results:
                 df = pd.DataFrame(results).sort_values(by=["Rating", "Ora"], ascending=[False, True])
                 st.dataframe(
-                    df.style.apply
+                    df.style.apply(style_rows, axis=1),
+                    use_container_width=True,
+                    column_config={
+                        "Rating": st.column_config.ProgressColumn("Rating", format="%d", min_value=0, max_value=100),
+                        "Ora": "⏰", 
+                        "O2.5": st.column_config.NumberColumn("Quota O2.5", format="%.2f"), 
+                        "Drop": "📉"
+                    }
+                )
+    except Exception as e:
+        st.error(f"Errore: {e}")
