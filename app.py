@@ -108,3 +108,25 @@ if st.button('🚀 AVVIA ANALISI ARAB PRO'):
                     "Lega": m['league']['name'],
                     "Match": f"{h_n} - {a_n}",
                     "Forma (H/A)": f"{h_avg} | {a_avg}",
+                    "1X2": f"{q1}|{qx}|{q2}" if q1 > 0 else "N.D.",
+                    "Drop": d_icon,
+                    "O2.5": q_o25,
+                    "Rating": sc
+                })
+                time.sleep(0.1)
+                bar.progress((i+1)/len(da_analizzare))
+
+            if results:
+                df = pd.DataFrame(results).sort_values(by="Rating", ascending=False)
+                st.dataframe(
+                    df.style.apply(style_rows, axis=1),
+                    use_container_width=True,
+                    column_config={
+                        "Rating": st.column_config.ProgressColumn("Rating Sniper", format="%d", min_value=0, max_value=100),
+                        "Forma (H/A)": st.column_config.TextColumn("⚽ Media Gol (L5)"),
+                        "Ora": "⏰", "O2.5": st.column_config.NumberColumn("Quota O2.5", format="%.2f")
+                    }
+                )
+    except Exception as e:
+        st.error(f"Errore: {e}")
+                    "Forma (H/A)": f"{h_avg} | {a_avg}",
