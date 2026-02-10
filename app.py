@@ -5,16 +5,16 @@ import time
 from datetime import datetime
 
 # --- CONFIGURAZIONE PAGINA ---
-st.set_page_config(page_title="Sniper V12.7.8 - Professional Only", layout="wide")
-st.title("🎯 SNIPER V12.7.8 - Professional Only")
-st.markdown("Monitoraggio: Top Europe, Serie A/B/C + Australia & Giappone (Escluso Femminile).")
+st.set_page_config(page_title="SNIPER ARAB", layout="wide")
+st.title("🎯 SNIPER ARAB - Professional Radar")
+st.markdown("Elite Selection: Serie A/B/C + Pacific & Global Leagues (Solo Professionismo Maschile).")
 
 # --- CONFIGURAZIONE API ---
 API_KEY = "5977f2e2446bf2620d4c2d356ce590c9"
 HOST = "v3.football.api-sports.io"
 HEADERS = {"x-apisports-key": API_KEY}
 
-# IDS AGGIORNATI (Maschili)
+# IDS SELEZIONATI (Inclusi Australia, Giappone e Serie C)
 IDS = [
     135, 136, 140, 141, 78, 79, 61, 62, 39, 40, 41, 42, 
     137, 138, 139, 810, 811, 812, 181, 
@@ -26,31 +26,35 @@ IDS = [
 ]
 
 def style_rows(row):
+    """Schema Colori Sniper Arab"""
     if row.Rating >= 75:
-        return ['background-color: #1e7e34; color: white'] * len(row)
+        return ['background-color: #1e7e34; color: white'] * len(row) # Verde Sniper
     elif row.Rating >= 60:
-        return ['background-color: #d4edda; color: #155724'] * len(row)
-    elif any(x in str(row.Lega) for x in ["A-League", "J1 League", "J2 League", "Serie C", "Serie B"]):
-        return ['background-color: #e3f2fd; color: #0d47a1'] * len(row)
+        return ['background-color: #d4edda; color: #155724'] * len(row) # Verde Monitor
+    elif row.Rating == 1:
+        return ['background-color: #f8f9fa; color: #6c757d; font-style: italic'] * len(row) # Attesa
+    elif any(x in str(row.Lega) for x in ["Serie C", "Lega Pro", "Serie B", "A-League", "J1", "J2"]):
+        return ['background-color: #e3f2fd; color: #0d47a1'] * len(row) # Focus Lega
     return [''] * len(row)
 
-if st.button('🚀 AVVIA RADAR PROFESSIONALE'):
+if st.button('🚀 LANCIA SNIPER ARAB'):
     oggi = datetime.now().strftime('%Y-%m-%d')
     try:
         res = requests.get(f"https://{HOST}/fixtures", headers=HEADERS, params={"date": oggi, "timezone": "Europe/Rome"})
         partite = res.json().get('response', [])
         
-        # FILTRO: IDS scelti O Paese Italia + ESCLUSIONE FEMMINILE
+        # FILTRO PROFESSIONALE: Paese Italia + IDS + Esclusione Donne e Under
         da_analizzare = [
             m for m in partite 
             if (m['league']['id'] in IDS or m['league']['country'] == 'Italy') 
             and m['fixture']['status']['short'] == 'NS'
-            and "Women" not in m['league']['name'] 
-            and "Femminile" not in m['league']['name']
+            and not any(x in m['league']['name'] for x in ["Women", "Femminile", "U19", "U20", "U21", "U23", "Primavera"])
         ]
         
+        st.sidebar.success(f"Sniper Arab ha agganciato {len(da_analizzare)} match")
+        
         if not da_analizzare:
-            st.warning("Nessun match trovato per i parametri impostati.")
+            st.warning("Nessun match rilevato nel raggio d'azione.")
         else:
             results = []
             progress_bar = st.progress(0)
@@ -73,7 +77,7 @@ if st.button('🚀 AVVIA RADAR PROFESSIONALE'):
                         o1x2 = next((b for b in bets if b['id'] == 1), None)
                         if o1x2:
                             vals = o1x2['values']
-                            q1, qx, q2 = float(vals[0]['odd']), float(vals[1]['odd']), float(vals[2]['odd'])
+                            q1, q2 = float(vals[0]['odd']), float(vals[2]['odd'])
                             if q1 <= 1.80: d_icon, sc = "🏠📉", sc + 20
                             elif q2 <= 1.90: d_icon, sc = "🚀📉", sc + 25
 
@@ -92,7 +96,7 @@ if st.button('🚀 AVVIA RADAR PROFESSIONALE'):
                     "Ora": m['fixture']['date'][11:16],
                     "Lega": lega_n,
                     "Match": f"{h_n} - {a_n}",
-                    "1X2": f"{q1}|{qx}|{q2}" if q1 > 0 else "Attesa Quote",
+                    "1X2": f"{q1}|{qx}|{q2}" if q1 > 0 else "N.D.",
                     "Drop": d_icon,
                     "O2.5": q_o25,
                     "Rating": sc
