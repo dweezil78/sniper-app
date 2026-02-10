@@ -5,27 +5,34 @@ import time
 from datetime import datetime
 
 # --- CONFIGURAZIONE PAGINA ---
-st.set_page_config(page_title="Sniper V12.4.1 - Full View", layout="wide")
-st.title("🎯 SNIPER V12.4.1 - Full Visibility Mode")
-st.markdown("Monitoraggio completo Serie B, C e Leghe Inglesi. I match **Elite (75-80)** sono evidenziati.")
+st.set_page_config(page_title="Sniper V12.7 - Global Hunter", layout="wide")
+st.title("🎯 SNIPER V12.7 - Global Hunter")
+st.markdown("Monitoraggio Totale: Top Leghe, Serie B/C, Championship, Est Europa e Sud America.")
 
 # --- CONFIGURAZIONE API ---
 API_KEY = "5977f2e2446bf2620d4c2d356ce590c9"
 HOST = "v3.football.api-sports.io"
 HEADERS = {"x-apisports-key": API_KEY}
 
-# Lista IDS Completa (Inclusi match di oggi)
+# IDS TOTALI (Espansi al massimo per includere Serie C e minori)
 IDS = [
-    135, 136, 140, 141, 78, 79, 61, 62, 39, 40, 41, 42, 88, 94, 
-    103, 113, 119, 120, 110, 106, 283, 137, 138, 139, 179,
-    95, 114, 128, 71, 72, 281, 98, 99
+    135, 136, 140, 141, 78, 79, 61, 62, 39, 40, 41, 42, # Top Europe + Eng Minori
+    137, 138, 139, # SERIE C ITALIA (Girone A, B, C)
+    106, 107, 108, 110, 111, 94, 95, 119, 120, 113, 114, 103, 104, # Europa Mid
+    283, 284, 285, 197, 198, 203, 204, # Est + Turchia + Grecia
+    71, 72, 73, 128, 129, 118, 101, 144, # Sud America (Bra A/B, Arg, Col, Cile)
+    179, 180, 262, 218, 143 # Extra: Scozia, Austria, Belgio, Svizzera
 ]
 
-def highlight_elite(row):
-    """Funzione per colorare di verde le righe Elite 75-80"""
-    return ['background-color: #d4edda; color: #155724' if 75 <= row.Rating <= 80 else '' for _ in row]
+def style_rows(row):
+    """Colorazione dinamica: Verde Scuro per Elite, Verde Chiaro per Buoni"""
+    if row.Rating >= 75:
+        return ['background-color: #1e7e34; color: white'] * len(row)
+    elif row.Rating >= 60:
+        return ['background-color: #d4edda; color: #155724'] * len(row)
+    return [''] * len(row)
 
-if st.button('🚀 AVVIA ANALISI COMPLETA'):
+if st.button('🚀 AVVIA RADAR GLOBALE'):
     oggi = datetime.now().strftime('%Y-%m-%d')
     res = requests.get(f"https://{HOST}/fixtures", headers=HEADERS, params={"date": oggi, "timezone": "Europe/Rome"})
     partite = res.json().get('response', [])
@@ -33,39 +40,40 @@ if st.button('🚀 AVVIA ANALISI COMPLETA'):
     da_analizzare = [m for m in partite if m['league']['id'] in IDS and m['fixture']['status']['short'] == 'NS']
     
     if not da_analizzare:
-        st.warning(f"Nessun match trovato per oggi ({oggi}).")
+        st.warning(f"Nessun match trovato per oggi nelle leghe selezionate.")
     else:
         results = []
-        bar = st.progress(0)
+        progress_bar = st.progress(0)
+        status_text = st.empty()
         
         for i, m in enumerate(da_analizzare):
             f_id, h_id, a_id = m['fixture']['id'], m['teams']['home']['id'], m['teams']['away']['id']
             h_n, a_n = m['teams']['home']['name'], m['teams']['away']['name']
             
+            status_text.text(f"Analizzando: {h_n} - {a_n} ({m['league']['name']})")
             sc = 40
-            d_icon, f_icon = "⚪", "⚪"
-            q1, qx, q2, q_o25 = 0.0, 0.0, 0.0, 0.0
+            d_icon, q1, qx, q2, q_o25 = "⚪", 0.0, 0.0, 0.0, 0.0
             
             try:
-                # 1. ANALISI QUOTE
+                # Recupero Quote
                 r_o = requests.get(f"https://{HOST}/odds", headers=HEADERS, params={"fixture": f_id})
                 o_data = r_o.json().get('response', [])
                 if o_data:
                     bets = o_data[0]['bookmakers'][0]['bets']
-                    o1x2 = next(b for b in bets if b['id'] == 1)['values']
-                    q1, qx, q2 = float(o1x2[0]['odd']), float(o1x2[1]['odd']), float(o1x2[2]['odd'])
-                    
-                    if q1 <= 1.80: d_icon, sc = "🏠📉", sc + 20
-                    elif q2 <= 1.90: d_icon, sc = "🚀📉", sc + 25
+                    # 1X2
+                    o1x2 = next((b for b in bets if b['id'] == 1), None)
+                    if o1x2:
+                        vals = o1x2['values']
+                        q1, qx, q2 = float(vals[0]['odd']), float(vals[1]['odd']), float(vals[2]['odd'])
+                        if q1 <= 1.80: d_icon, sc = "🏠📉", sc + 20
+                        elif q2 <= 1.90: d_icon, sc = "🚀📉", sc + 25
 
-                    o25 = next(b for b in bets if b['id'] == 5)['values']
-                    q_o25 = float(next(v['odd'] for v in o25 if v['value'] == 'Over 2.5'))
-                    if q_o25 <= 1.95: sc += 15
-                    elif q_o25 > 2.20: sc -= 25 
-
-                # 2. FAME GOL (Check veloce)
-                # Nota: per velocizzare il caricamento di molti match, abbiamo rimosso i check extra API sulle ultime partite qui,
-                # ma se ti servono possiamo riattivarli.
+                    # Over 2.5
+                    o25_bet = next((b for b in bets if b['id'] == 5), None)
+                    if o25_bet:
+                        q_o25 = float(next((v['odd'] for v in o25_bet['values'] if v['value'] == 'Over 2.5'), 0))
+                        if 1.40 <= q_o25 <= 1.95: sc += 15
+                        elif q_o25 > 2.20: sc -= 25
             except: pass
 
             results.append({
@@ -75,17 +83,16 @@ if st.button('🚀 AVVIA ANALISI COMPLETA'):
                 "1X2": f"{q1}|{qx}|{q2}",
                 "Drop": d_icon,
                 "O2.5": q_o25,
-                "Rating": sc,
-                "Status": "💎 ELITE" if 75 <= sc <= 80 else "Monitor"
+                "Rating": sc
             })
             
-            time.sleep(0.2)
-            bar.progress((i+1)/len(da_analizzare))
+            time.sleep(0.15) # Ottimizzato per velocità
+            progress_bar.progress((i+1)/len(da_analizzare))
 
         if results:
             df = pd.DataFrame(results).sort_values(by=["Rating", "Ora"], ascending=[False, True])
-            # Applicazione dello stile verde
-            st.success(f"Analisi completata! {len(df)} match monitorati.")
-            st.dataframe(df.style.apply(highlight_elite, axis=1), use_container_width=True)
-        else:
-            st.info("Nessun match trovato per i parametri selezionati.")
+            st.success(f"Radar completato: {len(df)} match pronti.")
+            st.dataframe(df.style.apply(style_rows, axis=1), use_container_width=True)
+            
+            # Download per backup
+            st.download_button("📥 Scarica Report CSV", df.to_csv(index=False), "radar_sniper.csv", "text/csv")
