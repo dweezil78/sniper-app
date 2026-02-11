@@ -3,14 +3,36 @@ import requests
 import pandas as pd
 from datetime import datetime
 import base64
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Tuple, Optional
+
+# Timezone robust
+try:
+    from zoneinfo import ZoneInfo
+    ROME_TZ = ZoneInfo("Europe/Rome")
+except Exception:
+    ROME_TZ = None
 
 # ============================
-# 1) CONFIG PAGINA
+# 1) CONFIG PAGINA E STILI
 # ============================
-st.set_page_config(page_title="ARAB SNIPER V14.2", layout="wide")
-st.title("🎯 ARAB SNIPER V14.2 - Elite Full Engine")
-st.markdown("Analisi Integrata: Rating a destra, graduazione di verde e breakdown dettagliato.")
+st.set_page_config(page_title="ARAB SNIPER V14.6", layout="wide")
+st.title("🎯 ARAB SNIPER V14.6 - Elite Synthetix")
+
+def apply_custom_css():
+    st.markdown("""
+        <style>
+            .main { background-color: #0e1117; }
+            table { width: 100%; border-collapse: collapse; color: white; margin-bottom: 20px; }
+            th { background-color: #1a1c23; color: #00e5ff; padding: 12px; text-align: center; border: 1px solid #444; }
+            td { padding: 12px; border: 1px solid #333; vertical-align: top; text-align: center; }
+            .match-cell { text-align: left !important; font-weight: bold; }
+            .rating-box { padding: 8px; border-radius: 6px; font-weight: 900; font-size: 1.05em; }
+            .details-text { font-size: 0.78em; margin-top: 6px; line-height: 1.25; opacity: 0.9; text-align: left; }
+            .tag { font-size: 0.82em; font-weight: 800; }
+        </style>
+    """, unsafe_allow_html=True)
+
+apply_custom_css()
 
 # ============================
 # 2) CONFIG API
@@ -22,131 +44,150 @@ HEADERS = {"x-apisports-key": API_KEY}
 IDS = sorted(set([135, 136, 140, 141, 78, 79, 61, 62, 39, 40, 41, 42, 137, 138, 139, 810, 811, 812, 181, 203, 204, 98, 99, 101, 106, 107, 108, 110, 111, 94, 95, 119, 120, 113, 114, 103, 104, 283, 284, 285, 197, 198, 71, 72, 73, 128, 129, 118, 144, 179, 180, 262, 218, 143]))
 
 # ============================
-# 3) HELPERS
+# 3) HELPERS & CACHE
 # ============================
+@st.cache_data(ttl=3600)
+def get_team_metrics(team_id: int):
+    with requests.Session() as s:
+        # SI e Fame
+        fx_r = s.get(f"https://{HOST}/fixtures", headers=HEADERS, params={"team": team_id, "last": 5, "status": "FT"}).json()
+    
+    fx = fx_r.get("response", [])
+    if not fx: return 0.0, 0.0, 0.0, False
+    
+    # SI (Media Gol)
+    goals = [int(f["goals"]["home"]) + int(f["goals"]["away"]) for f in fx if f["goals"]["home"] is not None]
+    avg_si = round(sum(goals)/len(goals), 1) if goals else 0.0
+    
+    # Fame (Ultima a secco)
+    last = fx[0]
+    is_h = last["teams"]["home"]["id"] == team_id
+    fame = int(last["goals"]["home"] if is_h else last["goals"]["away"]) == 0
+    
+    # Stats (Tiri/Corner)
+    shots, corners = [], []
+    with requests.Session() as s2:
+        for f in fx[:3]: # Campione di 3 per velocità
+            st_r = s2.get(f"https://{HOST}/fixtures/statistics", headers=HEADERS, params={"fixture": f["fixture"]["id"], "team": team_id}).json()
+            if st_r.get("response"):
+                smap = {x["type"]: x["value"] for x in st_r["response"][0]["statistics"]}
+                shots.append(int(smap.get("Total Shots", 0) or 0))
+                corners.append(int(smap.get("Corner Kicks", 0) or 0))
+                
+    avg_sh = sum(shots)/len(shots) if shots else 0
+    avg_co = sum(corners)/len(corners) if corners else 0
+    return avg_sh, avg_co, avg_si, fame
+
+@st.cache_data(ttl=900)
+def fetch_odds(fixture_id: int):
+    with requests.Session() as s:
+        return s.get(f"https://{HOST}/odds", headers=HEADERS, params={"fixture": fixture_id}).json()
+
 def get_download_link(html, filename):
     b64 = base64.b64encode(html.encode()).decode()
     return f'<a href="data:text/html;base64,{b64}" download="{filename}" style="text-decoration:none;"><button style="padding:10px 20px; background-color:#1b4332; color:white; border:none; border-radius:5px; cursor:pointer; font-weight:bold;">💾 SCARICA ANALISI COMPLETA</button></a>'
 
-@st.cache_data(ttl=3600)
-def get_spectacle_index(team_id: int) -> float:
-    with requests.Session() as s:
-        r = s.get(f"https://{HOST}/fixtures", headers=HEADERS, params={"team": team_id, "last": 5}).json()
-    totals = [int(f["goals"]["home"]) + int(f["goals"]["away"]) for f in r.get("response", []) if f.get("goals", {}).get("home") is not None]
-    return round(sum(totals) / len(totals), 1) if totals else 0.0
+# ============================
+# 4) UNIFIED ENGINE V14.6
+# ============================
+def unified_engine(m, q1, q2, q_o25):
+    h_sh, h_co, h_si, h_fa = get_team_metrics(m["teams"]["home"]["id"])
+    a_sh, a_co, a_si, a_fa = get_team_metrics(m["teams"]["away"]["id"])
+    
+    # Stats Favorita
+    is_h_fav = q1 < q2
+    f_sh, f_co = (h_sh, h_co) if is_h_fav else (a_sh, a_co)
+    avg_si = (h_si + a_si) / 2
 
-@st.cache_data(ttl=3600)
-def team_scored_last(team_id: int) -> bool:
-    with requests.Session() as s:
-        r = s.get(f"https://{HOST}/fixtures", headers=HEADERS, params={"team": team_id, "last": 1}).json()
-    res = r.get("response", [])
-    if not res: return True
-    is_home = res[0]["teams"]["home"]["id"] == team_id
-    g = res[0]["goals"]["home"] if is_home else res[0]["goals"]["away"]
-    return g is not None and int(g) > 0
+    # Motori
+    sc_o, sc_g = 40, 40
+    d_o, d_g = [], []
+    
+    # 1. Bonus Favorita (Casa/Trasferta)
+    if 1.60 <= q1 <= 1.85:
+        sc_o += 10; sc_g += 10; d_o.append("Fav. Casa (+10)"); d_g.append("Fav. Casa (+10)")
+    elif 1.60 <= q2 <= 1.85:
+        sc_o += 15; sc_g += 15; d_o.append("Fav. Trasf. (+15)"); d_g.append("Fav. Trasf. (+15)")
 
-@st.cache_data(ttl=900)
-def get_odds_data(fixture_id: int):
-    with requests.Session() as s:
-        return s.get(f"https://{HOST}/odds", headers=HEADERS, params={"fixture": fixture_id}).json()
+    # 2. Pressione (Uniformato)
+    t_ok, c_ok = f_sh > 12.5, f_co > 5.5
+    p_v = 15 if (t_ok and c_ok) else (8 if t_ok else (7 if c_ok else 0))
+    if p_v > 0:
+        lab = f"Press. {'Totale' if p_v==15 else ('Tiri' if p_v==8 else 'Corn')} (+{p_v})"
+        sc_o += p_v; d_o.append(lab); sc_g += p_v; d_g.append(lab)
 
-def extract_info(odds_json):
-    q1 = qx = q2 = q_o25 = 0.0
-    drop = "↔️"
-    r = odds_json.get("response", [])
-    if not r: return q1, qx, q2, q_o25, drop
-    bets = r[0].get("bookmakers", [{}])[0].get("bets", [])
-    o1x2 = next((b for b in bets if b.get("id") == 1), None)
-    if o1x2:
-        q1, qx, q2 = float(o1x2["values"][0]["odd"]), float(o1x2["values"][1]["odd"]), float(o1x2["values"][2]["odd"])
-        if q1 <= 1.70: drop = "🏠📉 Drop Casa"
-        elif q2 <= 1.75: drop = "🚀📉 Drop Trasferta"
-    o25 = next((b for b in bets if b.get("id") == 5), None)
-    if o25:
-        try: q_o25 = float(next(v["odd"] for v in o25["values"] if v.get("value") == "Over 2.5"))
-        except: pass
-    return q1, qx, q2, q_o25, drop
+    # 3. SI & Fame
+    if 2.4 <= avg_si <= 3.4: sc_o += 15; d_o.append("SI OK (+15)")
+    if h_fa or a_fa: sc_g += 5; d_g.append("Fame (+5)")
+
+    # 4. Sinergia
+    diff = abs(sc_o - sc_g)
+    lo, lg = "", ""
+    if diff <= 10:
+        sc_o += 5; sc_g += 5
+        d_o.append("COMBO (+5)"); d_g.append("COMBO (+5)")
+    elif sc_o > sc_g + 20: lo = "<br><span class='tag' style='color:#00e5ff;'>🎯 SOLO OVER</span>"
+    elif sc_g > sc_o + 20: lg = "<br><span class='tag' style='color:#ff80ab;'>🎯 SOLO GG</span>"
+
+    if 0 < q_o25 < 1.50: sc_o = 0
+    return sc_o, d_o, sc_g, d_g, lo, lg, f"{f_sh} tiri | {f_co} corn"
 
 # ============================
-# 4) ENGINE & STYLING
+# 5) RENDERING & STYLE
 # ============================
-def score_engine(h_id, a_id, q1, q2, q_o25, h_si, a_si):
-    # Logica Over 2.5
-    sc_o25, d_o = 40, []
-    if 0 < q_o25 < 1.50: sc_o25 = 0; d_o.append("TRAP")
-    else:
-        if 1.80 <= q_o25 <= 2.10: sc_o25 += 12; d_o.append("Sweet Q.")
-        if 2.4 <= (h_si+a_si)/2 <= 3.4: sc_o25 += 12; d_o.append("SI OK")
-    
-    # Logica BTTS
-    sc_btts, d_b = 40, []
-    if not team_scored_last(h_id) or not team_scored_last(a_id): sc_btts += 15; d_b.append("Fame")
-    if 2.0 <= (h_si+a_si)/2 <= 3.2: sc_btts += 10; d_b.append("SI OK")
-    
-    return sc_o25, d_o, sc_btts, d_b
-
-def format_rating_col(sc, det):
-    # Didascalia e badge pulito
-    details_str = f"<div style='font-size:0.75em; opacity:0.8; margin-top:2px;'>{', '.join(det)}</div>"
-    return f"<b>{sc}</b>{details_str}"
-
 def apply_row_style(row):
-    # Determina il colore della riga in base al rating massimo tra O2.5 e BTTS
-    r_max = max(row['R_O25_VAL'], row['R_BTTS_VAL'])
+    r_max = max(row['RO_VAL'], row['RG_VAL'])
     if r_max >= 85: return ['background-color: #1b4332; color: white;'] * len(row)
     if r_max >= 70: return ['background-color: #2d6a4f; color: #d8f3dc;'] * len(row)
     return [''] * len(row)
 
+def render_rating_html(sc, det, label):
+    details = "".join([f"<div>• {d}</div>" for d in det])
+    return f"<div class='rating-box'>{sc}{label}<div class='details-text'>{details}</div></div>"
+
 # ============================
-# 5) MAIN
+# 6) MAIN EXECUTION
 # ============================
-if st.button("🚀 AVVIA ANALISI"):
-    oggi = datetime.now().strftime("%Y-%m-%d")
+st.sidebar.header("⚙️ Settings V14.6")
+min_r = st.sidebar.slider("Rating Minimo", 0, 85, 60)
+
+if st.button("🚀 AVVIA ELITE SNIPER"):
+    oggi = datetime.now(ROME_TZ).strftime("%Y-%m-%d") if ROME_TZ else datetime.now().strftime("%Y-%m-%d")
     with requests.Session() as s:
         data = s.get(f"https://{HOST}/fixtures", headers=HEADERS, params={"date": oggi, "timezone": "Europe/Rome"}).json()
     
-    fixtures = [m for m in data.get("response", []) if m["fixture"]["status"]["short"] == "NS" and (m["league"]["id"] in IDS or m["league"]["country"] == "Italy")]
+    fixtures = [f for f in (data.get("response", []) or []) if f["fixture"]["status"]["short"] == "NS" and (f["league"]["id"] in IDS or f["league"]["country"] == "Italy")]
     
+    if not fixtures: st.info("Nessun match."); st.stop()
+
     results = []
     progress = st.progress(0)
     for i, m in enumerate(fixtures):
-        f_id = m["fixture"]["id"]
         progress.progress((i+1)/len(fixtures))
+        q1, qx, q2, q_o25 = 0.0, 0.0, 0.0, 0.0
+        odds_res = fetch_odds(m["fixture"]["id"])
+        if odds_res.get("response"):
+            bets = odds_res["response"][0].get("bookmakers", [{}])[0].get("bets", [])
+            o1x2 = next((b for b in bets if b["id"] == 1), None)
+            if o1x2: q1, q2 = float(o1x2["values"][0]["odd"]), float(o1x2["values"][2]["odd"])
+            o25 = next((b for b in bets if b["id"] == 5), None)
+            if o25: q_o25 = float(next(v["odd"] for v in o25["values"] if v["value"] == "Over 2.5"))
+
+        ro, do, rg, dg, lo, lg, stats = unified_engine(m, q1, q2, q_o25)
         
-        q1, qx, q2, q_o25, drop = extract_info(get_odds_data(f_id))
-        h_si, a_si = get_spectacle_index(m["teams"]["home"]["id"]), get_spectacle_index(m["teams"]["away"]["id"])
-        r_o25, d_o, r_btts, d_b = score_engine(m["teams"]["home"]["id"], m["teams"]["away"]["id"], q1, q2, q_o25, h_si, a_si)
-        
-        if r_o25 >= 60 or r_btts >= 60:
+        if ro >= min_r or rg >= min_r:
             results.append({
                 "Ora": m["fixture"]["date"][11:16],
-                "Match": f"<b>{m['teams']['home']['name']} - {m['teams']['away']['name']}</b><br><small style='color:#ffcc00'>{drop}</small>",
+                "Match": f"<div class='match-cell'>{m['teams']['home']['name']} - {m['teams']['away']['name']}<br><span style='color:#ffcc00; font-size:0.8em;'>{stats}</span></div>",
                 "Lega": m["league"]["name"],
-                "S.I.": f"{h_si} | {a_si}",
-                "O2.5 Quota": q_o25,
-                "R_O25_VAL": r_o25, # di servizio
-                "R_BTTS_VAL": r_btts, # di servizio
-                "Rating O2.5": format_rating_col(r_o25, d_o),
-                "Rating BTTS": format_rating_col(r_btts, d_b)
+                "Over 2.5": render_rating_html(ro, do, lo),
+                "BTTS (GG)": render_rating_html(rg, dg, lg),
+                "RO_VAL": ro, "RG_VAL": rg # Di servizio
             })
 
     if results:
         df = pd.DataFrame(results).sort_values("Ora")
+        styled_html = df.drop(columns=["RO_VAL", "RG_VAL"]).style.apply(apply_row_style, axis=1).to_html(escape=False, index=False)
+        st.markdown(get_download_link(styled_html, f"Elite_Sniper_{oggi}.html"), unsafe_allow_html=True)
+        st.markdown(styled_html, unsafe_allow_html=True)
         
-        # Rendering con righe colorate
-        st.markdown(get_download_link(df.to_html(escape=False, index=False), f"Report_{oggi}.html"), unsafe_allow_html=True)
-        st.markdown("<br>", unsafe_allow_html=True)
-        
-        # Visualizzazione tabella Streamlit con stili
-        styled_df = df.style.apply(apply_row_style, axis=1)
-        st.write(styled_df.to_html(escape=False, index=False), unsafe_allow_html=True)
-        
-        st.markdown("""
-        <style>
-            table { width: 100%; border-collapse: collapse; font-family: sans-serif; }
-            th { background-color: #1a1c23; color: white; padding: 12px; text-align: left; }
-            td { padding: 12px; border-bottom: 1px solid #444; vertical-align: top; }
-        </style>
-        """, unsafe_allow_html=True)
-    else:
-        st.info("Nessun match rilevante trovato.")
