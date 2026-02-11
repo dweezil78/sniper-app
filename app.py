@@ -139,25 +139,23 @@ def score_match(h_si, a_si, q1, q2, q_o25, h_fame, a_fame):
     return sc, d_icon, details, False
 
 def make_rating_cell(rating, details):
-    # Definizione colori richiesti
     if rating >= 100:
-        bg_color = "#ff4b4b"  # Rosso
+        bg_color = "#ff4b4b" 
         text_color = "white"
     elif rating >= 85:
-        bg_color = "#1b4332"  # Verde Scuro
+        bg_color = "#1b4332" 
         text_color = "#d8f3dc"
     elif rating >= 70:
-        bg_color = "#d4edda"  # Verde Chiaro
+        bg_color = "#d4edda" 
         text_color = "#155724"
     else:
         bg_color = "transparent"
         text_color = "inherit"
 
     style = f"background-color: {bg_color}; color: {text_color}; padding: 10px; border-radius: 5px; font-weight: bold;"
-    
     cell_content = f"<div style='{style}'>{rating}</div>"
     if details:
-        details_list = "".join([f"<div style='font-size: 0.8em; margin-top: 3px;'>• {d}</div>" for d in details])
+        details_list = "".join([ f"<div style='font-size: 0.8em; margin-top: 3px;'>• {d}</div>" for d in details])
         return f"{cell_content}{details_list}"
     return cell_content
 
@@ -179,18 +177,32 @@ if st.button("🚀 AVVIA ARAB SNIPER"):
             data = api_get(s, "fixtures", {"date": oggi, "timezone": "Europe/Rome"})
         fixtures = data.get("response", [])
 
-        results = []
-
+        # --- FILTRO INIZIALE PER LA BARRA ---
+        da_analizzare = []
         for m in fixtures:
-            if m["fixture"]["status"]["short"] != "NS":
-                continue
-            if any(x in m["league"]["name"] for x in EXCLUDE_NAME_TOKENS):
-                continue
-            if not (m["league"]["id"] in IDS or m["league"]["country"] == "Italy"):
-                continue
+            if m["fixture"]["status"]["short"] != "NS": continue
+            if any(x in m["league"]["name"] for x in EXCLUDE_NAME_TOKENS): continue
+            if not (m["league"]["id"] in IDS or m["league"]["country"] == "Italy"): continue
+            da_analizzare.append(m)
 
+        if not da_analizzare:
+            st.info("Nessun match trovato per oggi.")
+            st.stop()
+
+        results = []
+        
+        # --- RIPRISTINO PROGRESS BAR ---
+        progress_bar = st.progress(0)
+        status_text = st.empty()
+        total_matches = len(da_analizzare)
+
+        for i, m in enumerate(da_analizzare):
             h_id, a_id = m["teams"]["home"]["id"], m["teams"]["away"]["id"]
             h_n, a_n = m["teams"]["home"]["name"], m["teams"]["away"]["name"]
+
+            # Feedback visivo
+            status_text.text(f"Analisi {i+1}/{total_matches}: {h_n} - {a_n}")
+            progress_bar.progress((i + 1) / total_matches)
 
             h_si = get_spectacle_index(h_id)
             a_si = get_spectacle_index(a_id)
@@ -201,14 +213,11 @@ if st.button("🚀 AVVIA ARAB SNIPER"):
 
             rating, drop, details, trap = score_match(h_si, a_si, q1, q2, q_o25, h_fame, a_fame)
 
-            if trap and hide_traps:
-                continue
-            if not trap and rating < min_rating:
-                continue
+            if trap and hide_traps: continue
+            if not trap and rating < min_rating: continue
 
             icon = "⚽" if (h_fame or a_fame) else "🔥" if 2.2 <= (h_si + a_si) / 2 < 3.8 else "↔️"
-            if h_si >= 3.8 or a_si >= 3.8:
-                icon = "⚠️"
+            if h_si >= 3.8 or a_si >= 3.8: icon = "⚠️"
 
             results.append({
                 "Ora": m["fixture"]["date"][11:16],
@@ -221,8 +230,12 @@ if st.button("🚀 AVVIA ARAB SNIPER"):
                 "Rating_Num": rating
             })
 
+        # Pulizia status a fine processo
+        status_text.empty()
+        progress_bar.empty()
+
         if not results:
-            st.info("Nessun match trovato.")
+            st.info("Nessun match ha superato i filtri di Rating.")
             st.stop()
 
         df = pd.DataFrame(results).sort_values("Rating_Num", ascending=False)
