@@ -169,4 +169,4 @@ if st.button("🚀 AVVIA ARAB SNIPER 12.9.3"):
 
         styler = df.style.apply(apply_row_style, axis=1).hide(subset=["R_VAL"], axis=1)
         st.markdown(styler.to_html(escape=False, index=False), unsafe_allow_html=True)
-        
+    
