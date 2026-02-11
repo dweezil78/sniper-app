@@ -2,47 +2,27 @@ import streamlit as st
 import requests
 import pandas as pd
 from datetime import datetime
-import base64
-from typing import Any, Dict, List, Tuple, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
-# Timezone robusta
-try:
-    from zoneinfo import ZoneInfo
-    ROME_TZ = ZoneInfo("Europe/Rome")
-except Exception:
-    ROME_TZ = None
+# ----------------------------
+# 1) CONFIG PAGINA
+# ----------------------------
+st.set_page_config(page_title="ARAB SNIPER", layout="wide")
+st.title("🎯 ARAB SNIPER - Official Version")
+st.markdown("Elite Selection: Market Drop & Value Analysis")
 
-# ============================
-# 1) CONFIG PAGINA E STILI V12.9.3
-# ============================
-st.set_page_config(page_title="ARAB SNIPER V 12.9.3", layout="wide")
-st.title("🎯 ARAB SNIPER V 12.9.3 - Stable Restore Point")
-
-def apply_custom_css():
-    st.markdown("""
-        <style>
-            .main { background-color: #0e1117; }
-            table { width: 100%; border-collapse: collapse; color: white; margin-bottom: 20px; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
-            th { background-color: #1a1c23; color: #00e5ff; padding: 15px; text-align: center; border: 1px solid #444; font-size: 0.9em; text-transform: uppercase; }
-            td { padding: 12px; border: 1px solid #333; vertical-align: middle; text-align: center; }
-            .match-cell { text-align: left !important; min-width: 250px; }
-            .rating-badge { padding: 10px; border-radius: 8px; font-weight: 900; font-size: 1.2em; display: inline-block; min-width: 50px; }
-            .details-list { font-size: 0.75em; margin-top: 8px; line-height: 1.3; opacity: 0.85; text-align: left; }
-            .drop-tag { color: #ffcc00; font-size: 0.85em; font-weight: bold; margin-top: 4px; display: block; }
-            .stats-tag { color: #00ffcc; font-size: 0.8em; opacity: 0.8; }
-        </style>
-    """, unsafe_allow_html=True)
-
-apply_custom_css()
-
-# ============================
-# 2) CONFIG API (IDS ORIGINALI)
-# ============================
+# ----------------------------
+# 2) CONFIG API
+# ----------------------------
 API_KEY = st.secrets.get("API_SPORTS_KEY")
+if not API_KEY:
+    st.error('Manca API_SPORTS_KEY in .streamlit/secrets.toml')
+    st.stop()
+
 HOST = "v3.football.api-sports.io"
 HEADERS = {"x-apisports-key": API_KEY}
 
-# Lista IDS completa ripristinata
+# Leghe Target (Elite + Serie C + Pacific)
 IDS = sorted(set([
     135, 136, 140, 141, 78, 79, 61, 62, 39, 40, 41, 42,
     137, 138, 139, 810, 811, 812, 181, 203, 204, 98, 99, 101,
@@ -51,122 +31,180 @@ IDS = sorted(set([
     179, 180, 262, 218, 143
 ]))
 
-# ============================
-# 3) HELPERS & CACHE
-# ============================
+EXCLUDE_NAME_TOKENS = ["Women", "Femminile", "U19", "U20", "U21", "U23", "Primavera"]
+
+# ----------------------------
+# 3) HELPERS & CACHING
+# ----------------------------
+def api_get(session: requests.Session, path: str, params: Dict[str, Any]) -> Dict[str, Any]:
+    url = f"https://{HOST}/{path}"
+    r = session.get(url, headers=HEADERS, params=params, timeout=20)
+    r.raise_for_status()
+    return r.json()
+
 @st.cache_data(ttl=3600)
-def get_metrics(team_id: int):
+def get_spectacle_index(team_id: int) -> float:
     with requests.Session() as s:
-        r = s.get(f"https://{HOST}/fixtures", headers=HEADERS, params={"team": team_id, "last": 5, "status": "FT"}).json()
-    fx = r.get("response", [])
-    if not fx: return 0.0, 0.0, 0.0, False
-    
-    avg_si = round(sum([int(f["goals"]["home"]) + int(f["goals"]["away"]) for f in fx if f["goals"]["home"] is not None])/len(fx), 1)
-    fame = int(fx[0]["goals"]["home"] if fx[0]["teams"]["home"]["id"] == team_id else fx[0]["goals"]["away"]) == 0
-    
-    shots, corners = [], []
-    with requests.Session() as s2:
-        for f in fx[:3]:
-            st_r = s2.get(f"https://{HOST}/fixtures/statistics", headers=HEADERS, params={"fixture": f["fixture"]["id"], "team": team_id}).json()
-            if st_r.get("response"):
-                smap = {x["type"]: x["value"] for x in st_r["response"][0]["statistics"]}
-                shots.append(int(smap.get("Total Shots", 0) or 0))
-                corners.append(int(smap.get("Corner Kicks", 0) or 0))
-                
-    return (sum(shots)/len(shots) if shots else 0), (sum(corners)/len(corners) if corners else 0), avg_si, fame
+        data = api_get(s, "fixtures", {"team": team_id, "last": 5})
+    matches = data.get("response", [])
+    totals: List[int] = []
+    for f in matches:
+        gh, ga = f.get("goals", {}).get("home"), f.get("goals", {}).get("away")
+        if gh is not None and ga is not None:
+            totals.append(int(gh) + int(ga))
+    return round(sum(totals) / len(totals), 1) if totals else 0.0
 
 @st.cache_data(ttl=900)
-def fetch_odds(f_id):
-    with requests.Session() as s: 
-        return s.get(f"https://{HOST}/odds", headers=HEADERS, params={"fixture": f_id}).json()
-
-def get_download_link(html, filename):
-    b64 = base64.b64encode(html.encode()).decode()
-    return f'<a href="data:text/html;base64,{b64}" download="{filename}" style="text-decoration:none;"><button style="padding:10px 20px; background-color:#1b4332; color:white; border:none; border-radius:5px; cursor:pointer; font-weight:bold;">💾 SCARICA ANALISI</button></a>'
-
-# ============================
-# 4) ENGINE V12.9.3
-# ============================
-def engine_v12_9_3(m, q1, q2, q_o25):
-    h_sh, h_co, h_si, h_fa = get_metrics(m["teams"]["home"]["id"])
-    a_sh, a_co, a_si, a_fa = get_metrics(m["teams"]["away"]["id"])
-    
-    is_h_fav = q1 < q2
-    f_sh, f_co = (h_sh, h_co) if is_h_fav else (a_sh, a_co)
-    avg_si = (h_si + a_si) / 2
-    drop = "🏠📉 DROP CASA" if q1 <= 1.70 else ("🚀📉 DROP TRASF" if q2 <= 1.75 else "↔️ STABILE")
-
-    sc_o, sc_g = 40, 40
-    d_o, d_g = [], []
-    
-    if 1.60 <= q1 <= 1.85: sc_o += 10; sc_g += 10; d_o.append("Fav. Casa (+10)")
-    elif 1.60 <= q2 <= 1.85: sc_o += 15; sc_g += 15; d_o.append("Fav. Trasf. (+15)")
-
-    t_ok, c_ok = f_sh > 12.5, f_co > 5.5
-    p_v = 15 if (t_ok and c_ok) else (8 if t_ok else (7 if c_ok else 0))
-    if p_v > 0:
-        sc_o += p_v; d_o.append(f"Press. (+{p_v})"); sc_g += p_v; d_g.append(f"Press. (+{p_v})")
-
-    if 2.4 <= avg_si <= 3.4: sc_o += 15; d_o.append("SI OK (+15)")
-    if h_fa or a_fa: sc_g += 5; d_g.append("Fame (+5)")
-
-    if abs(sc_o - sc_g) <= 10: sc_o += 5; sc_g += 5; d_o.append("COMBO (+5)")
-    
-    if 0 < q_o25 < 1.50: sc_o = 0
-    
-    return sc_o, d_o, sc_g, d_g, f"{round(f_sh,1)} tiri | {round(f_co,1)} corn", drop
-
-def render_rating(sc, det):
-    bg = "#1b4332" if sc >= 85 else ("#2d6a4f" if sc >= 70 else "transparent")
-    details = "".join([f"<div>• {d}</div>" for d in det])
-    return f"<div class='rating-badge' style='background:{bg};'>{sc}</div><div class='details-list'>{details}</div>"
-
-# ============================
-# 5) MAIN EXECUTION
-# ============================
-if st.button("🚀 AVVIA ARAB SNIPER 12.9.3"):
-    oggi = datetime.now(ROME_TZ).strftime("%Y-%m-%d") if ROME_TZ else datetime.now().strftime("%Y-%m-%d")
+def get_odds_fixture(fixture_id: int) -> Dict[str, Any]:
     with requests.Session() as s:
-        data = s.get(f"https://{HOST}/fixtures", headers=HEADERS, params={"date": oggi, "timezone": "Europe/Rome"}).json()
+        return api_get(s, "odds", {"fixture": fixture_id})
+
+def safe_extract_odds(odds_json: Dict[str, Any]) -> Tuple[float, float, float, float]:
+    q1 = qx = q2 = q_o25 = 0.0
+    o_data = odds_json.get("response") or []
+    if not o_data: return q1, qx, q2, q_o25
+    bookmakers = o_data[0].get("bookmakers") or []
+    if not bookmakers: return q1, qx, q2, q_o25
     
-    fixtures = [f for f in (data.get("response", []) or []) if f["fixture"]["status"]["short"] == "NS" and (f["league"]["id"] in IDS or f["league"]["country"] == "Italy")]
+    bets = None
+    for bm in bookmakers:
+        b = bm.get("bets") or []
+        if b: 
+            bets = b
+            break
+    if not bets: return q1, qx, q2, q_o25
+
+    o1x2 = next((b for b in bets if b.get("id") == 1), None)
+    if o1x2 and len(o1x2["values"]) >= 3:
+        v = o1x2["values"]
+        q1, qx, q2 = float(v[0]["odd"]), float(v[1]["odd"]), float(v[2]["odd"])
+
+    o25 = next((b for b in bets if b.get("id") == 5), None)
+    if o25:
+        q_o25 = float(next((x["odd"] for x in o25["values"] if x.get("value") == "Over 2.5"), 0))
+    return q1, qx, q2, q_o25
+
+# ----------------------------
+# 4) LOGICA RATING & FILTRI
+# ----------------------------
+def score_match(h_si: float, a_si: float, q1: float, q2: float, q_o25: float) -> Tuple[int, str, str, bool]:
+    sc = 40
+    reasons = []
+    d_icon = "↔️"
     
-    results = []
-    progress = st.progress(0)
-    for i, m in enumerate(fixtures):
-        progress.progress((i+1)/len(fixtures))
-        q1, qx, q2, q_o25 = 0.0, 0.0, 0.0, 0.0
-        odds_res = fetch_odds(m["fixture"]["id"])
-        if odds_res.get("response"):
+    # FILTRO QUOTA TRAPPOLA (Sotto 1.50)
+    is_trap = 0 < q_o25 < 1.50
+    if is_trap:
+        return 0, "🚫", "⚠️ TRAPPOLA <1.50", True
+
+    # ANALISI DROP / FAVORITO
+    if q1 > 0 and q2 > 0:
+        if q1 <= 1.80:
+            d_icon, sc = "🏠📉", sc + 20
+            reasons.append("🏠+20")
+        elif q2 <= 1.90:
+            d_icon, sc = "🚀📉", sc + 25
+            reasons.append("🚀+25")
+
+    # ANALISI OVER 2.5 VALUE (Range 1.50 - 2.15)
+    if 1.50 <= q_o25 <= 2.15:
+        sc += 15
+        reasons.append("🎯+15")
+        avg_si = (h_si + a_si) / 2
+        if 2.2 <= avg_si < 3.8:
+            sc += 10
+            reasons.append("🔥+10")
+    
+    # PENALITÀ SATURAZIONE
+    if h_si >= 3.8 or a_si >= 3.8:
+        sc -= 20
+        reasons.append("⚠️-20")
+
+    sc = int(max(0, min(100, sc)))
+    return sc, d_icon, " ".join(reasons) if reasons else "—", False
+
+def style_rows(row):
+    if row.Rating >= 85: return ['background-color: #1b4332; color: #d8f3dc; font-weight: bold'] * len(row)
+    elif row.Rating >= 70: return ['background-color: #d4edda; color: #155724'] * len(row)
+    return [''] * len(row)
+
+# ----------------------------
+# 5) UI & LOGICA PRINCIPALE
+# ----------------------------
+st.sidebar.header("⚙️ Filtri Selezione")
+min_rating = st.sidebar.slider("Rating Minimo", 0, 85, 60)
+hide_traps = st.sidebar.checkbox("Nascondi Quote Trappola (<1.50)", value=True)
+
+if st.button("🚀 AVVIA ARAB SNIPER"):
+    oggi = datetime.now().strftime("%Y-%m-%d")
+    try:
+        with requests.Session() as session:
+            data = api_get(session, "fixtures", {"date": oggi, "timezone": "Europe/Rome"})
+            partite = data.get("response", [])
+
+        da_analizzare = [
+            m for m in partite 
+            if m.get("fixture", {}).get("status", {}).get("short") == "NS"
+            and not any(x in m.get("league", {}).get("name", "") for x in EXCLUDE_NAME_TOKENS)
+            and (m.get("league", {}).get("id") in IDS or m.get("league", {}).get("country") == "Italy")
+        ]
+
+        if not da_analizzare:
+            st.warning("Nessun match rilevato.")
+            st.stop()
+
+        results = []
+        bar = st.progress(0)
+        status_box = st.empty()
+
+        for i, m in enumerate(da_analizzare):
+            h_n, a_n = m["teams"]["home"]["name"], m["teams"]["away"]["name"]
+            status_box.text(f"Analisi: {h_n} - {a_n}")
+
+            h_si = get_spectacle_index(m["teams"]["home"]["id"])
+            a_si = get_spectacle_index(m['teams']['away']['id'])
+            
+            # Icona estetica SI
+            icon = "🔥" if 2.2 <= (h_si+a_si)/2 < 3.8 else "↔️"
+            if h_si >= 3.8 or a_si >= 3.8: icon = "⚠️"
+
+            q1 = qx = q2 = q_o25 = 0.0
             try:
-                bets = odds_res["response"][0].get("bookmakers", [{}])[0].get("bets", [])
-                o1x2 = next((b for b in bets if b["id"] == 1), None)
-                if o1x2: q1, qx, q2 = float(o1x2["values"][0]["odd"]), float(o1x2["values"][1]["odd"]), float(o1x2["values"][2]["odd"])
-                o25 = next((b for b in bets if b["id"] == 5), None)
-                if o25: q_o25 = float(next((v["odd"] for v in o25["values"] if v["value"] == "Over 2.5"), 0))
+                odds_json = get_odds_fixture(m["fixture"]["id"])
+                q1, qx, q2, q_o25 = safe_extract_odds(odds_json)
             except: pass
 
-        ro, do, rg, dg, stats, drop = engine_v12_9_3(m, q1, q2, q_o25)
+            rating, d_icon, reasons, trap = score_match(h_si, a_si, q1, q2, q_o25)
+
+            if rating >= min_rating:
+                if not (hide_traps and trap):
+                    results.append({
+                        "Ora": m["fixture"]["date"][11:16],
+                        "Lega": m["league"]["name"],
+                        "Match": f"{icon} {h_n} - {a_n}",
+                        "S.I. (H|A)": f"{h_si} | {a_si}",
+                        "Drop": d_icon,
+                        "O2.5": q_o25 if q_o25 > 0 else None,
+                        "Rating": rating,
+                        "Dettagli": reasons
+                    })
+            bar.progress((i + 1) / len(da_analizzare))
+
+        if results:
+            df = pd.DataFrame(results).sort_values(by="Rating", ascending=False)
+            st.dataframe(
+                df.style.apply(style_rows, axis=1),
+                use_container_width=True,
+                column_config={
+                    "Rating": st.column_config.ProgressColumn("Rating", format="%d", min_value=0, max_value=100, width="small"),
+                    "Ora": st.column_config.TextColumn("⏰", width="small"),
+                    "O2.5": st.column_config.NumberColumn("O2.5", format="%.2f", width="small"),
+                    "Dettagli": st.column_config.TextColumn("Breakdown", width="medium")
+                }
+            )
+        else:
+            st.info("Nessun match supera i filtri impostati.")
+
+    except Exception as e:
+        st.error(f"Errore: {e}")
         
-        if ro >= 60 or rg >= 60:
-            results.append({
-                "Ora": m["fixture"]["date"][11:16],
-                "Match": f"<div class='match-cell'>{m['teams']['home']['name']} - {m['teams']['away']['name']}<br><span class='drop-tag'>{drop}</span><br><span class='stats-tag'>{stats}</span></div>",
-                "Lega": m["league"]["name"],
-                "1X2": f"{q1} | {qx} | {q2}",
-                "Rating Over": render_rating(ro, do),
-                "Rating GG": render_rating(rg, dg),
-                "R_VAL": max(ro, rg)
-            })
-
-    if results:
-        df = pd.DataFrame(results).sort_values("Ora")
-        def apply_row_style(row):
-            rm = row['R_VAL']
-            if rm >= 85: return ['background-color: #1b4332;'] * len(row)
-            if rm >= 70: return ['background-color: #143628;'] * len(row)
-            return [''] * len(row)
-
-        styler = df.style.apply(apply_row_style, axis=1).hide(subset=["R_VAL"], axis=1)
-        st.markdown(styler.to_html(escape=False, index=False), unsafe_allow_html=True)
-    
