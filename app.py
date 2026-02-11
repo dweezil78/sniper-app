@@ -77,13 +77,11 @@ def safe_extract_odds(odds_json: Dict[str, Any]) -> Tuple[float, float, float, f
     r = odds_json.get("response", [])
     if not r:
         return q1, qx, q2, q_o25
-
     bookmakers = r[0].get("bookmakers", [])
     for bm in bookmakers:
         bets = bm.get("bets", [])
         if not bets:
             continue
-
         o1x2 = next((b for b in bets if b.get("id") == 1), None)
         if o1x2 and len(o1x2.get("values", [])) >= 3:
             try:
@@ -92,7 +90,6 @@ def safe_extract_odds(odds_json: Dict[str, Any]) -> Tuple[float, float, float, f
                                          o1x2["values"][2]["odd"]])
             except Exception:
                 pass
-
         o25 = next((b for b in bets if b.get("id") == 5), None)
         if o25:
             try:
@@ -100,7 +97,6 @@ def safe_extract_odds(odds_json: Dict[str, Any]) -> Tuple[float, float, float, f
             except Exception:
                 pass
         break
-
     return q1, qx, q2, q_o25
 
 # ============================
@@ -143,9 +139,27 @@ def score_match(h_si, a_si, q1, q2, q_o25, h_fame, a_fame):
     return sc, d_icon, details, False
 
 def make_rating_cell(rating, details):
-    if not details:
-        return str(rating)
-    return f"{rating}<br>" + "<br>".join([f"• {d}" for d in details])
+    # Definizione colori richiesti
+    if rating >= 100:
+        bg_color = "#ff4b4b"  # Rosso
+        text_color = "white"
+    elif rating >= 85:
+        bg_color = "#1b4332"  # Verde Scuro
+        text_color = "#d8f3dc"
+    elif rating >= 70:
+        bg_color = "#d4edda"  # Verde Chiaro
+        text_color = "#155724"
+    else:
+        bg_color = "transparent"
+        text_color = "inherit"
+
+    style = f"background-color: {bg_color}; color: {text_color}; padding: 10px; border-radius: 5px; font-weight: bold;"
+    
+    cell_content = f"<div style='{style}'>{rating}</div>"
+    if details:
+        details_list = "".join([f"<div style='font-size: 0.8em; margin-top: 3px;'>• {d}</div>" for d in details])
+        return f"{cell_content}{details_list}"
+    return cell_content
 
 # ============================
 # 5) UI CONTROLS
@@ -217,10 +231,11 @@ if st.button("🚀 AVVIA ARAB SNIPER"):
         st.markdown(
             """
             <style>
-            table { width: 100%; border-collapse: collapse; }
-            th, td { padding: 8px; border: 1px solid #33333322; vertical-align: top; }
+            table { width: 100%; border-collapse: collapse; background-color: #0e1117; color: white; }
+            th, td { padding: 12px; border: 1px solid #444; vertical-align: top; text-align: left; }
             td { white-space: normal !important; }
-            th { background: #0e1117; color: white; position: sticky; top: 0; }
+            th { background: #1a1c23; color: #ffffff; position: sticky; top: 0; }
+            tr:hover { background-color: #262730; }
             </style>
             """,
             unsafe_allow_html=True
