@@ -13,35 +13,43 @@ except Exception:
     ROME_TZ = None
 
 # ============================
-# 1) CONFIG PAGINA E STILI ELITE
+# 1) CONFIG PAGINA E STILI V15
 # ============================
-st.set_page_config(page_title="ARAB SNIPER V 14.9", layout="wide")
-st.title("🎯 ARAB SNIPER V 14.9 - Professional Edition")
+st.set_page_config(page_title="ARAB SNIPER V 15.0", layout="wide")
+st.title("🎯 ARAB SNIPER V 15.0 - Full Italian Support")
 
 def apply_custom_css():
     st.markdown("""
         <style>
             .main { background-color: #0e1117; }
-            table { width: 100%; border-collapse: collapse; color: white; margin-bottom: 20px; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+            table { width: 100%; border-collapse: collapse; color: #ffffff !important; margin-bottom: 20px; font-family: 'Segoe UI', sans-serif; }
             th { background-color: #1a1c23; color: #00e5ff; padding: 15px; text-align: center; border: 1px solid #444; font-size: 0.9em; text-transform: uppercase; }
-            td { padding: 12px; border: 1px solid #333; vertical-align: middle; text-align: center; }
-            .match-cell { text-align: left !important; min-width: 250px; }
-            .rating-badge { padding: 10px; border-radius: 8px; font-weight: 900; font-size: 1.2em; display: inline-block; min-width: 50px; }
-            .details-list { font-size: 0.75em; margin-top: 8px; line-height: 1.3; opacity: 0.85; text-align: left; }
+            td { padding: 12px; border: 1px solid #333; vertical-align: middle; text-align: center; color: #ffffff !important; }
+            .match-cell { text-align: left !important; min-width: 260px; color: #ffffff !important; }
+            .rating-badge { padding: 10px; border-radius: 8px; font-weight: 900; font-size: 1.2em; display: inline-block; min-width: 54px; color: #ffffff !important; }
+            .details-list { font-size: 0.75em; margin-top: 8px; line-height: 1.3; opacity: 0.9; text-align: left; color: #ffffff !important; }
             .drop-tag { color: #ffcc00; font-size: 0.85em; font-weight: bold; margin-top: 4px; display: block; }
-            .stats-tag { color: #00ffcc; font-size: 0.8em; opacity: 0.8; }
+            .stats-tag { color: #00ffcc; font-size: 0.8em; opacity: 0.9; }
         </style>
     """, unsafe_allow_html=True)
 
 apply_custom_css()
 
 # ============================
-# 2) CONFIG API
+# 2) CONFIG API (CON AGGIUNTA SERIE C)
 # ============================
 API_KEY = st.secrets.get("API_SPORTS_KEY")
 HOST = "v3.football.api-sports.io"
 HEADERS = {"x-apisports-key": API_KEY}
-IDS = sorted(set([135, 136, 140, 141, 78, 79, 61, 62, 39, 40, 41, 42, 137, 138, 139, 810, 811, 812, 181, 203, 204, 98, 99, 101, 106, 107, 108, 110, 111, 94, 95, 119, 120, 113, 114, 103, 104, 283, 284, 285, 197, 198, 71, 72, 73, 128, 129, 118, 144, 179, 180, 262, 218, 143]))
+
+# Aggiunti ID Serie C: 137 (C-A), 138 (C-B), 139 (C-C), 810 (Coppa Serie C)
+IDS = sorted(set([
+    135, 136, 140, 141, 78, 79, 61, 62, 39, 40, 41, 42,
+    137, 138, 139, 810, 811, 812, 181, 203, 204, 98, 99, 101,
+    106, 107, 108, 110, 111, 94, 95, 119, 120, 113, 114, 103, 104,
+    283, 284, 285, 197, 198, 71, 72, 73, 128, 129, 118, 144,
+    179, 180, 262, 218, 143
+]))
 
 # ============================
 # 3) HELPERS & CACHE
@@ -52,10 +60,9 @@ def get_metrics(team_id: int):
         r = s.get(f"https://{HOST}/fixtures", headers=HEADERS, params={"team": team_id, "last": 5, "status": "FT"}).json()
     fx = r.get("response", [])
     if not fx: return 0.0, 0.0, 0.0, False
-    
     avg_si = round(sum([int(f["goals"]["home"]) + int(f["goals"]["away"]) for f in fx if f["goals"]["home"] is not None])/len(fx), 1)
-    fame = int(fx[0]["goals"]["home"] if fx[0]["teams"]["home"]["id"] == team_id else fx[0]["goals"]["away"]) == 0
-    
+    is_h = fx[0]["teams"]["home"]["id"] == team_id
+    fame = int(fx[0]["goals"]["home"] if is_h else fx[0]["goals"]["away"]) == 0
     shots, corners = [], []
     with requests.Session() as s2:
         for f in fx[:3]:
@@ -63,50 +70,41 @@ def get_metrics(team_id: int):
             if st_r.get("response"):
                 smap = {x["type"]: x["value"] for x in st_r["response"][0]["statistics"]}
                 shots.append(int(smap.get("Total Shots", 0) or 0)); corners.append(int(smap.get("Corner Kicks", 0) or 0))
-                
     return (sum(shots)/len(shots) if shots else 0), (sum(corners)/len(corners) if corners else 0), avg_si, fame
 
 @st.cache_data(ttl=900)
-def fetch_odds(f_id):
+def fetch_odds(f_id: int):
     with requests.Session() as s: return s.get(f"https://{HOST}/odds", headers=HEADERS, params={"fixture": f_id}).json()
 
 def get_download_link(html, filename):
     b64 = base64.b64encode(html.encode()).decode()
-    return f'<a href="data:text/html;base64,{b64}" download="{filename}" style="text-decoration:none;"><button style="padding:10px 20px; background-color:#1b4332; color:white; border:none; border-radius:5px; cursor:pointer; font-weight:bold;">💾 SCARICA ANALISI COMPLETA</button></a>'
+    return f'<a href="data:text/html;base64,{b64}" download="{filename}" style="text-decoration:none;"><button style="padding:10px 20px; background-color:#1b4332; color:white; border:none; border-radius:5px; cursor:pointer; font-weight:bold;">💾 SCARICA ANALISI</button></a>'
 
 # ============================
-# 4) ENGINE V 14.9
+# 4) ENGINE V15.0
 # ============================
-def engine_v14_9(m, q1, q2, q_o25):
+def engine_v15(m, q1, q2, q_o25):
     h_sh, h_co, h_si, h_fa = get_metrics(m["teams"]["home"]["id"])
     a_sh, a_co, a_si, a_fa = get_metrics(m["teams"]["away"]["id"])
-    
     is_h_fav = q1 < q2
     f_sh, f_co = (h_sh, h_co) if is_h_fav else (a_sh, a_co)
     avg_si = (h_si + a_si) / 2
     drop = "🏠📉 DROP CASA" if q1 <= 1.70 else ("🚀📉 DROP TRASF" if q2 <= 1.75 else "↔️ STABILE")
-
     sc_o, sc_g = 40, 40
     d_o, d_g = [], []
-    
     if 1.60 <= q1 <= 1.85: sc_o += 10; sc_g += 10; d_o.append("Fav. Casa (+10)"); d_g.append("Fav. Casa (+10)")
     elif 1.60 <= q2 <= 1.85: sc_o += 15; sc_g += 15; d_o.append("Fav. Trasf. (+15)"); d_g.append("Fav. Trasf. (+15)")
-
     t_ok, c_ok = f_sh > 12.5, f_co > 5.5
     p_v = 15 if (t_ok and c_ok) else (8 if t_ok else (7 if c_ok else 0))
     if p_v > 0:
         lab = f"Press. {'Totale' if p_v==15 else ('Tiri' if p_v==8 else 'Corn')} (+{p_v})"
         sc_o += p_v; d_o.append(lab); sc_g += p_v; d_g.append(lab)
-
     if 2.4 <= avg_si <= 3.4: sc_o += 15; d_o.append("SI OK (+15)")
     if h_fa or a_fa: sc_g += 5; d_g.append("Fame (+5)")
-
     if abs(sc_o - sc_g) <= 10: sc_o += 5; sc_g += 5; d_o.append("COMBO (+5)"); d_g.append("COMBO (+5)")
-    
     lo = "<br><span style='color:#00e5ff; font-weight:bold;'>🎯 SOLO OVER</span>" if sc_o > sc_g + 20 else ""
     lg = "<br><span style='color:#ff80ab; font-weight:bold;'>🎯 SOLO GG</span>" if sc_g > sc_o + 20 else ""
     if 0 < q_o25 < 1.50: sc_o = 0
-    
     return sc_o, d_o, sc_g, d_g, lo, lg, f"{round(f_sh,1)} tiri | {round(f_co,1)} corn", drop
 
 def render_rating(sc, det, label):
@@ -117,7 +115,7 @@ def render_rating(sc, det, label):
 # ============================
 # 5) MAIN
 # ============================
-st.sidebar.header("⚙️ Arab Sniper V 14.9")
+st.sidebar.header("⚙️ Arab Sniper V 15.0")
 min_r = st.sidebar.slider("Rating Minimo", 0, 85, 60)
 
 if st.button("🚀 AVVIA ANALISI"):
@@ -125,6 +123,7 @@ if st.button("🚀 AVVIA ANALISI"):
     with requests.Session() as s:
         data = s.get(f"https://{HOST}/fixtures", headers=HEADERS, params={"date": oggi, "timezone": "Europe/Rome"}).json()
     
+    # Filtro Largo: ID in lista O Nazione == Italy
     fixtures = [f for f in (data.get("response", []) or []) if f["fixture"]["status"]["short"] == "NS" and (f["league"]["id"] in IDS or f["league"]["country"] == "Italy")]
     
     results = []
@@ -142,15 +141,15 @@ if st.button("🚀 AVVIA ANALISI"):
                 if o25: q_o25 = float(next((v["odd"] for v in o25["values"] if v["value"] == "Over 2.5"), 0))
             except: pass
 
-        ro, do, rg, dg, lo, lg, stats, drop = engine_v14_9(m, q1, q2, q_o25)
+        ro, do, rg, dg, lo, lg, stats, drop = engine_v15(m, q1, q2, q_o25)
         
-        if (ro >= min_r or rg >= min_r) and "0 tiri" not in stats:
+        if (ro >= min_r or rg >= min_r):
             results.append({
                 "Ora": m["fixture"]["date"][11:16],
                 "Match": f"<div class='match-cell'>{m['teams']['home']['name']} - {m['teams']['away']['name']}<br><span class='drop-tag'>{drop}</span><br><span class='stats-tag'>{stats}</span></div>",
                 "Lega": m["league"]["name"],
-                "1X2": f"<div style='font-size:0.9em;'>{q1} | {qx} | {q2}</div>",
-                "Over 2.5 (Q)": f"<b>{q_o25}</b>",
+                "1X2": f"<div style='font-size:0.9em; color:#ffffff;'>{q1} | {qx} | {q2}</div>",
+                "O2.5 Q": f"<b style='color:#ffffff;'>{q_o25}</b>",
                 "Rating O2.5": render_rating(ro, do, lo),
                 "Rating GG": render_rating(rg, dg, lg),
                 "RO_VAL": ro, "RG_VAL": rg
@@ -158,13 +157,15 @@ if st.button("🚀 AVVIA ANALISI"):
 
     if results:
         df = pd.DataFrame(results).sort_values("Ora")
-        # Applichiamo graduazione verde righe
-        def row_style(row):
+        def apply_row_style(row):
             rm = max(row['RO_VAL'], row['RG_VAL'])
-            return ['background-color: #1b4332;' if rm >= 85 else ('background-color: #143628;' if rm >= 70 else '')] * len(row)
-        
-        styled = df.style.apply(row_style, axis=1).hide(subset=["RO_VAL", "RG_VAL"], axis=1)
-        html = styled.to_html(escape=False, index=False)
-        st.markdown(get_download_link(html, f"Arab_Sniper_V14.9_{oggi}.html"), unsafe_allow_html=True)
+            if rm >= 85: return ['background-color: #1b4332; color: #ffffff !important;'] * len(row)
+            if rm >= 70: return ['background-color: #143628; color: #ffffff !important;'] * len(row)
+            return ['color: #ffffff !important;'] * len(row)
+
+        styler = df.style.apply(apply_row_style, axis=1)
+        html = styler.hide(subset=["RO_VAL", "RG_VAL"], axis=1).to_html(escape=False, index=False)
+        st.markdown(get_download_link(html, f"Arab_Sniper_V15_{oggi}.html"), unsafe_allow_html=True)
         st.markdown(html, unsafe_allow_html=True)
-    
+    else:
+        st.info("Nessun match con rating sufficiente trovato.")
