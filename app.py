@@ -2,21 +2,28 @@ import streamlit as st
 import requests
 import pandas as pd
 from datetime import datetime
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Tuple, Optional
+
+# Timezone robust (Streamlit Cloud spesso è UTC)
+try:
+    from zoneinfo import ZoneInfo
+    ROME_TZ = ZoneInfo("Europe/Rome")
+except Exception:
+    ROME_TZ = None
 
 # ============================
 # 1) CONFIG PAGINA
 # ============================
-st.set_page_config(page_title="ARAB SNIPER", layout="wide")
-st.title("🎯 ARAB SNIPER - Goal Hunter Version")
-st.markdown("Elite Selection: Market Drop & 'Fame di Goal' Analysis")
+st.set_page_config(page_title="ARAB SNIPER V13.1", layout="wide")
+st.title("🎯 ARAB SNIPER V13.1 - Elite Pressure (C)")
+st.markdown("Market Efficiency, Goal Hunger & Offensive Pressure (Home+Away Avg)")
 
 # ============================
 # 2) CONFIG API
 # ============================
 API_KEY = st.secrets.get("API_SPORTS_KEY")
 if not API_KEY:
-    st.error("Manca API_SPORTS_KEY nei Secrets di Streamlit")
+    st.error("Manca API_SPORTS_KEY nei Secrets")
     st.stop()
 
 HOST = "v3.football.api-sports.io"
@@ -43,18 +50,21 @@ def api_get(session: requests.Session, path: str, params: Dict[str, Any]) -> Dic
 
 @st.cache_data(ttl=3600)
 def get_spectacle_index(team_id: int) -> float:
+    """Media gol totali (home+away) su ultime 5 partite con goals validi."""
     with requests.Session() as s:
         data = api_get(s, "fixtures", {"team": team_id, "last": 5})
-    totals = []
+    totals: List[int] = []
     for f in data.get("response", []):
         gh = f.get("goals", {}).get("home")
         ga = f.get("goals", {}).get("away")
-        if gh is not None and ga is not None:
-            totals.append(int(gh) + int(ga))
+        if gh is None or ga is None:
+            continue
+        totals.append(int(gh) + int(ga))
     return round(sum(totals) / len(totals), 1) if totals else 0.0
 
 @st.cache_data(ttl=3600)
 def check_last_match_no_goal(team_id: int) -> bool:
+    """True se la squadra NON ha segnato nell'ultima partita (last=1)."""
     try:
         with requests.Session() as s:
             data = api_get(s, "fixtures", {"team": team_id, "last": 1})
@@ -72,189 +82,313 @@ def get_odds_fixture(fixture_id: int) -> Dict[str, Any]:
     with requests.Session() as s:
         return api_get(s, "odds", {"fixture": fixture_id})
 
-def safe_extract_odds(odds_json: Dict[str, Any]) -> Tuple[float, float, float, float]:
+def safe_extract_odds(odds_json: Dict[str, Any]) -> Tuple[float, float, float, float, bool]:
+    """
+    Ritorna q1,qx,q2,q_o25, odds_ok
+    odds_ok=False se non ci sono odds affidabili.
+    """
     q1 = qx = q2 = q_o25 = 0.0
     r = odds_json.get("response", [])
     if not r:
-        return q1, qx, q2, q_o25
-    bookmakers = r[0].get("bookmakers", [])
+        return q1, qx, q2, q_o25, False
+
+    bookmakers = r[0].get("bookmakers", []) or []
+    if not bookmakers:
+        return q1, qx, q2, q_o25, False
+
+    bets = None
     for bm in bookmakers:
-        bets = bm.get("bets", [])
-        if not bets:
+        b = bm.get("bets", []) or []
+        if b:
+            bets = b
+            break
+    if not bets:
+        return q1, qx, q2, q_o25, False
+
+    # 1X2
+    o1x2 = next((b for b in bets if b.get("id") == 1), None)
+    if o1x2 and o1x2.get("values") and len(o1x2["values"]) >= 3:
+        try:
+            v = o1x2["values"]
+            q1 = float(v[0]["odd"])
+            qx = float(v[1]["odd"])
+            q2 = float(v[2]["odd"])
+        except Exception:
+            q1 = qx = q2 = 0.0
+
+    # Over 2.5
+    o25 = next((b for b in bets if b.get("id") == 5), None)
+    if o25 and o25.get("values"):
+        try:
+            q_o25 = float(next(v["odd"] for v in o25["values"] if v.get("value") == "Over 2.5"))
+        except Exception:
+            q_o25 = 0.0
+
+    odds_ok = (q1 > 0 or q2 > 0 or q_o25 > 0)
+    return q1, qx, q2, q_o25, odds_ok
+
+# ---- PRESSURE (C) ----
+@st.cache_data(ttl=6 * 3600)
+def get_last_ft_fixture_ids(team_id: int, n: int = 5) -> List[int]:
+    """Lista fixture_id delle ultime N partite FT per team."""
+    with requests.Session() as s:
+        data = api_get(s, "fixtures", {"team": team_id, "last": n, "status": "FT"})
+    out: List[int] = []
+    for f in data.get("response", []):
+        try:
+            out.append(int(f["fixture"]["id"]))
+        except Exception:
+            pass
+    return out
+
+@st.cache_data(ttl=24 * 3600)
+def get_fixture_stats_raw(fixture_id: int) -> List[Dict[str, Any]]:
+    """
+    Ritorna la response grezza di /fixtures/statistics?fixture=...
+    Cache 24h: stesso fixture non cambia più.
+    """
+    with requests.Session() as s:
+        data = api_get(s, "fixtures/statistics", {"fixture": fixture_id})
+    return data.get("response", []) or []
+
+def extract_team_pressure_from_fixture_stats(raw: List[Dict[str, Any]], team_id: int) -> Tuple[int, int]:
+    """
+    raw: lista di 2 item (home+away) spesso, ognuno con statistics.
+    Ritorna (total_shots, corners) per il team richiesto, 0 se non trovati.
+    """
+    for item in raw:
+        try:
+            if int(item["team"]["id"]) != int(team_id):
+                continue
+            stats_list = item.get("statistics", []) or []
+            stats_map = {s.get("type"): s.get("value") for s in stats_list}
+            shots = stats_map.get("Total Shots", 0) or 0
+            corners = stats_map.get("Corner Kicks", 0) or 0
+            return int(shots), int(corners)
+        except Exception:
             continue
-        o1x2 = next((b for b in bets if b.get("id") == 1), None)
-        if o1x2 and len(o1x2.get("values", [])) >= 3:
-            try:
-                q1, qx, q2 = map(float, [o1x2["values"][0]["odd"],
-                                         o1x2["values"][1]["odd"],
-                                         o1x2["values"][2]["odd"]])
-            except Exception:
-                pass
-        o25 = next((b for b in bets if b.get("id") == 5), None)
-        if o25:
-            try:
-                q_o25 = float(next(v["odd"] for v in o25["values"] if v["value"] == "Over 2.5"))
-            except Exception:
-                pass
-        break
-    return q1, qx, q2, q_o25
+    return 0, 0
+
+def get_pressure_avg(team_id: int, n: int = 5) -> Tuple[float, float, int]:
+    """
+    Media tiri + media corner sulle ultime N FT.
+    Ritorna (avg_shots, avg_corners, sample_size).
+    """
+    fixture_ids = get_last_ft_fixture_ids(team_id, n=n)
+    if not fixture_ids:
+        return 0.0, 0.0, 0
+
+    shots_list: List[int] = []
+    corners_list: List[int] = []
+
+    for fid in fixture_ids:
+        raw = get_fixture_stats_raw(fid)
+        shots, corners = extract_team_pressure_from_fixture_stats(raw, team_id)
+        # accetta solo se almeno uno è presente (evita falsi 0)
+        if shots == 0 and corners == 0:
+            continue
+        shots_list.append(shots)
+        corners_list.append(corners)
+
+    if not shots_list:
+        return 0.0, 0.0, 0
+
+    avg_shots = sum(shots_list) / len(shots_list)
+    avg_corners = sum(corners_list) / len(corners_list)
+    return round(avg_shots, 1), round(avg_corners, 1), len(shots_list)
 
 # ============================
-# 4) RATING ENGINE
+# 4) RATING ENGINE V13.1 (C)
 # ============================
-def score_match(h_si, a_si, q1, q2, q_o25, h_fame, a_fame):
-    sc = 40
-    details = []
-    d_icon = "↔️"
-
-    if 0 < q_o25 < 1.50:
-        return 0, "🚫", ["⚠️ TRAPPOLA <1.50"], True
-
-    if q1 and q2:
-        if q1 <= 1.80:
-            sc += 20
-            d_icon = "🏠📉"
-            details.append("🏠 +20 Fav casa")
-        elif q2 <= 1.90:
-            sc += 25
-            d_icon = "🚀📉"
-            details.append("🚀 +25 Fav trasferta")
-
-    if 1.50 <= q_o25 <= 2.15:
-        sc += 15
-        details.append("🎯 +15 O2.5 value")
-        if 2.2 <= (h_si + a_si) / 2 < 3.8:
-            sc += 10
-            details.append("🔥 +10 SI medio")
-
-    if h_fame or a_fame:
-        sc += 15
-        details.append("⚽ +15 Fame di goal")
-
-    if h_si >= 3.8 or a_si >= 3.8:
-        sc -= 20
-        details.append("⚠️ -20 Saturazione")
-
-    sc = int(max(0, min(100, sc)))
-    return sc, d_icon, details, False
-
-def make_rating_cell(rating, details):
+def make_rating_cell(rating: int, details: List[str]) -> str:
     if rating >= 100:
-        bg_color = "#ff4b4b" 
-        text_color = "white"
+        bg, txt = "#ff4b4b", "white"
     elif rating >= 85:
-        bg_color = "#1b4332" 
-        text_color = "#d8f3dc"
+        bg, txt = "#1b4332", "#d8f3dc"
     elif rating >= 70:
-        bg_color = "#d4edda" 
-        text_color = "#155724"
+        bg, txt = "#d4edda", "#155724"
     else:
-        bg_color = "transparent"
-        text_color = "inherit"
+        bg, txt = "transparent", "inherit"
 
-    style = f"background-color: {bg_color}; color: {text_color}; padding: 10px; border-radius: 5px; font-weight: bold;"
-    cell_content = f"<div style='{style}'>{rating}</div>"
+    style = f"background-color: {bg}; color: {txt}; padding: 10px; border-radius: 6px; font-weight: 800;"
+    res = f"<div style='{style}'>{rating}</div>"
     if details:
-        details_list = "".join([ f"<div style='font-size: 0.8em; margin-top: 3px;'>• {d}</div>" for d in details])
-        return f"{cell_content}{details_list}"
-    return cell_content
+        res += "".join([f"<div style='font-size: 0.80em; margin-top: 3px;'>• {d}</div>" for d in details])
+    return res
 
 # ============================
-# 5) UI CONTROLS
+# 5) UI
 # ============================
-st.sidebar.header("⚙️ Filtri")
+st.sidebar.header("⚙️ Filtri Elite")
 min_rating = st.sidebar.slider("Rating minimo", 0, 85, 60)
-hide_traps = st.sidebar.checkbox("Nascondi trappole (<1.50)", True)
+show_debug = st.sidebar.checkbox("Mostra Debug", value=True)
 
 # ============================
 # 6) MAIN
 # ============================
-if st.button("🚀 AVVIA ARAB SNIPER"):
-    oggi = datetime.now().strftime("%Y-%m-%d")
+if st.button("🚀 AVVIA ARAB SNIPER V13.1"):
+    oggi = datetime.now(ROME_TZ).strftime("%Y-%m-%d") if ROME_TZ else datetime.now().strftime("%Y-%m-%d")
 
     try:
         with requests.Session() as s:
             data = api_get(s, "fixtures", {"date": oggi, "timezone": "Europe/Rome"})
-        fixtures = data.get("response", [])
 
-        # --- FILTRO INIZIALE PER LA BARRA ---
-        da_analizzare = []
-        for m in fixtures:
-            if m["fixture"]["status"]["short"] != "NS": continue
-            if any(x in m["league"]["name"] for x in EXCLUDE_NAME_TOKENS): continue
-            if not (m["league"]["id"] in IDS or m["league"]["country"] == "Italy"): continue
-            da_analizzare.append(m)
+        all_resp = data.get("response", []) or []
 
-        if not da_analizzare:
-            st.info("Nessun match trovato per oggi.")
+        # Filtri base
+        fixtures = [
+            m for m in all_resp
+            if m.get("fixture", {}).get("status", {}).get("short") == "NS"
+            and not any(x in m.get("league", {}).get("name", "") for x in EXCLUDE_NAME_TOKENS)
+            and (m.get("league", {}).get("id") in IDS or m.get("league", {}).get("country") == "Italy")
+        ]
+
+        if not fixtures:
+            st.info("Nessun match trovato con i filtri attuali.")
+            if show_debug:
+                st.write({"oggi": oggi, "fixtures_api_totali": len(all_resp), "fixtures_filtrate": 0})
             st.stop()
 
         results = []
-        
-        # --- RIPRISTINO PROGRESS BAR ---
         progress_bar = st.progress(0)
         status_text = st.empty()
-        total_matches = len(da_analizzare)
 
-        for i, m in enumerate(da_analizzare):
-            h_id, a_id = m["teams"]["home"]["id"], m["teams"]["away"]["id"]
-            h_n, a_n = m["teams"]["home"]["name"], m["teams"]["away"]["name"]
+        # DEBUG counters
+        cnt_trap = 0
+        cnt_odds_nd = 0
+        cnt_scartati_rating = 0
+        cnt_pressure_na = 0
 
-            # Feedback visivo
-            status_text.text(f"Analisi {i+1}/{total_matches}: {h_n} - {a_n}")
-            progress_bar.progress((i + 1) / total_matches)
+        for i, m in enumerate(fixtures):
+            h_id = m["teams"]["home"]["id"]
+            a_id = m["teams"]["away"]["id"]
+            f_id = m["fixture"]["id"]
+            h_n = m["teams"]["home"]["name"]
+            a_n = m["teams"]["away"]["name"]
 
+            status_text.text(f"Analisi {i+1}/{len(fixtures)}: {h_n} - {a_n}")
+            progress_bar.progress((i + 1) / len(fixtures))
+
+            # Odds
+            q1 = qx = q2 = q_o25 = 0.0
+            odds_ok = False
+            try:
+                odds_json = get_odds_fixture(f_id)
+                q1, qx, q2, q_o25, odds_ok = safe_extract_odds(odds_json)
+            except Exception:
+                odds_ok = False
+
+            if not odds_ok:
+                cnt_odds_nd += 1
+
+            # TRAP
+            if 0 < q_o25 < 1.50:
+                cnt_trap += 1
+                continue
+
+            sc = 40
+            details: List[str] = []
+
+            # 1) QUOTA O2.5 (come tuo)
+            if 1.80 <= q_o25 <= 2.10:
+                sc += 25
+                details.append("🎯 +25 Sweet Spot")
+            elif 2.11 <= q_o25 <= 2.50:
+                sc += 15
+                details.append("🎯 +15 Value Zone")
+            elif 1.50 <= q_o25 <= 1.79:
+                sc += 5
+                details.append("🎯 +5 Low Odd")
+            elif q_o25 == 0:
+                details.append("🧩 O2.5 N.D.")
+
+            # 2) S.I. & Fame
             h_si = get_spectacle_index(h_id)
             a_si = get_spectacle_index(a_id)
             h_fame = check_last_match_no_goal(h_id)
             a_fame = check_last_match_no_goal(a_id)
 
-            q1, qx, q2, q_o25 = safe_extract_odds(get_odds_fixture(m["fixture"]["id"]))
+            if 2.2 <= (h_si + a_si) / 2 < 3.8:
+                sc += 10
+                details.append("🔥 +10 SI Medio")
 
-            rating, drop, details, trap = score_match(h_si, a_si, q1, q2, q_o25, h_fame, a_fame)
+            if h_fame or a_fame:
+                sc += 15
+                details.append("⚽ +15 Sblocco Goal")
 
-            if trap and hide_traps: continue
-            if not trap and rating < min_rating: continue
+            if h_si >= 3.8 or a_si >= 3.8:
+                sc -= 20
+                details.append("⚠️ -20 Saturazione")
 
-            icon = "⚽" if (h_fame or a_fame) else "🔥" if 2.2 <= (h_si + a_si) / 2 < 3.8 else "↔️"
-            if h_si >= 3.8 or a_si >= 3.8: icon = "⚠️"
+            # 3) PRESSIONE OFFENSIVA (C) -> entrambe le squadre e media
+            # Applica solo se base >=55 (come tua idea)
+            if sc >= 55 and q_o25 >= 1.50:
+                h_sh, h_co, h_nsample = get_pressure_avg(h_id, n=5)
+                a_sh, a_co, a_nsample = get_pressure_avg(a_id, n=5)
+
+                # richiedi almeno 3 sample per affidabilità
+                if h_nsample < 3 or a_nsample < 3:
+                    cnt_pressure_na += 1
+                    details.append("📉 Pressure N/A (sample <3)")
+                else:
+                    avg_shots = round((h_sh + a_sh) / 2, 1)
+                    avg_corners = round((h_co + a_co) / 2, 1)
+
+                    # soglie come le tue (ma applicate alla media)
+                    if avg_shots > 12.5:
+                        sc += 10
+                        details.append(f"🏹 +10 Tiri AVG ({avg_shots})")
+                    if avg_corners > 5.5:
+                        sc += 10
+                        details.append(f"🚩 +10 Corner AVG ({avg_corners})")
+
+            sc = int(max(0, min(100, sc)))
+
+            if sc < min_rating:
+                cnt_scartati_rating += 1
+                continue
 
             results.append({
                 "Ora": m["fixture"]["date"][11:16],
                 "Lega": m["league"]["name"],
-                "Match": f"{icon} {h_n} - {a_n}",
+                "Match": f"{h_n} - {a_n}",
                 "S.I.": f"{h_si} | {a_si}",
-                "Drop": drop,
-                "O2.5": q_o25 if q_o25 > 0 else "",
-                "Rating": make_rating_cell(rating, details),
-                "Rating_Num": rating
+                "O2.5": f"{q_o25:.2f}" if q_o25 > 0 else "",
+                "Rating": make_rating_cell(sc, details),
+                "R_Num": sc
             })
 
-        # Pulizia status a fine processo
         status_text.empty()
         progress_bar.empty()
 
-        if not results:
-            st.info("Nessun match ha superato i filtri di Rating.")
-            st.stop()
+        if show_debug:
+            st.write({
+                "oggi": oggi,
+                "fixtures_api_totali": len(all_resp),
+                "fixtures_filtrate": len(fixtures),
+                "risultati_finali": len(results),
+                "scartati_trappola": cnt_trap,
+                "odds_non_disponibili": cnt_odds_nd,
+                "scartati_per_min_rating": cnt_scartati_rating,
+                "pressure_na_sample": cnt_pressure_na,
+                "min_rating": min_rating,
+            })
 
-        df = pd.DataFrame(results).sort_values("Rating_Num", ascending=False)
-        df = df.drop(columns=["Rating_Num"])
-
-        st.markdown(
-            """
-            <style>
-            table { width: 100%; border-collapse: collapse; background-color: #0e1117; color: white; }
-            th, td { padding: 12px; border: 1px solid #444; vertical-align: top; text-align: left; }
-            td { white-space: normal !important; }
-            th { background: #1a1c23; color: #ffffff; position: sticky; top: 0; }
-            tr:hover { background-color: #262730; }
-            </style>
-            """,
-            unsafe_allow_html=True
-        )
-
-        st.markdown(df.to_html(escape=False, index=False), unsafe_allow_html=True)
+        if results:
+            df = pd.DataFrame(results).sort_values("R_Num", ascending=False).drop(columns=["R_Num"])
+            st.markdown(
+                """
+                <style>
+                  table { width: 100%; border-collapse: collapse; background-color: #0e1117; color: white; }
+                  th, td { padding: 12px; border: 1px solid #444; vertical-align: top; }
+                  th { background: #1a1c23; position: sticky; top: 0; }
+                </style>
+                """,
+                unsafe_allow_html=True
+            )
+            st.markdown(df.to_html(escape=False, index=False), unsafe_allow_html=True)
+        else:
+            st.info("Nessun match Elite trovato (prova ad abbassare il Rating minimo o controlla Debug).")
 
     except Exception as e:
         st.error(f"Errore: {e}")
