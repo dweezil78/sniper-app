@@ -15,8 +15,8 @@ except Exception:
 # ============================
 # 1) CONFIG PAGINA E STILI
 # ============================
-st.set_page_config(page_title="ARAB SNIPER V14.6", layout="wide")
-st.title("🎯 ARAB SNIPER V14.6 - Elite Synthetix")
+st.set_page_config(page_title="ARAB SNIPER V14.7", layout="wide")
+st.title("🎯 ARAB SNIPER V14.7 - Elite Synthetix (Bug Fix)")
 
 def apply_custom_css():
     st.markdown("""
@@ -49,25 +49,20 @@ IDS = sorted(set([135, 136, 140, 141, 78, 79, 61, 62, 39, 40, 41, 42, 137, 138, 
 @st.cache_data(ttl=3600)
 def get_team_metrics(team_id: int):
     with requests.Session() as s:
-        # SI e Fame
-        fx_r = s.get(f"https://{HOST}/fixtures", headers=HEADERS, params={"team": team_id, "last": 5, "status": "FT"}).json()
-    
-    fx = fx_r.get("response", [])
+        r = s.get(f"https://{HOST}/fixtures", headers=HEADERS, params={"team": team_id, "last": 5, "status": "FT"}).json()
+    fx = r.get("response", [])
     if not fx: return 0.0, 0.0, 0.0, False
     
-    # SI (Media Gol)
     goals = [int(f["goals"]["home"]) + int(f["goals"]["away"]) for f in fx if f["goals"]["home"] is not None]
     avg_si = round(sum(goals)/len(goals), 1) if goals else 0.0
     
-    # Fame (Ultima a secco)
     last = fx[0]
     is_h = last["teams"]["home"]["id"] == team_id
     fame = int(last["goals"]["home"] if is_h else last["goals"]["away"]) == 0
     
-    # Stats (Tiri/Corner)
     shots, corners = [], []
     with requests.Session() as s2:
-        for f in fx[:3]: # Campione di 3 per velocità
+        for f in fx[:3]:
             st_r = s2.get(f"https://{HOST}/fixtures/statistics", headers=HEADERS, params={"fixture": f["fixture"]["id"], "team": team_id}).json()
             if st_r.get("response"):
                 smap = {x["type"]: x["value"] for x in st_r["response"][0]["statistics"]}
@@ -88,39 +83,33 @@ def get_download_link(html, filename):
     return f'<a href="data:text/html;base64,{b64}" download="{filename}" style="text-decoration:none;"><button style="padding:10px 20px; background-color:#1b4332; color:white; border:none; border-radius:5px; cursor:pointer; font-weight:bold;">💾 SCARICA ANALISI COMPLETA</button></a>'
 
 # ============================
-# 4) UNIFIED ENGINE V14.6
+# 4) UNIFIED ENGINE V14.7
 # ============================
 def unified_engine(m, q1, q2, q_o25):
     h_sh, h_co, h_si, h_fa = get_team_metrics(m["teams"]["home"]["id"])
     a_sh, a_co, a_si, a_fa = get_team_metrics(m["teams"]["away"]["id"])
     
-    # Stats Favorita
     is_h_fav = q1 < q2
     f_sh, f_co = (h_sh, h_co) if is_h_fav else (a_sh, a_co)
     avg_si = (h_si + a_si) / 2
 
-    # Motori
     sc_o, sc_g = 40, 40
     d_o, d_g = [], []
     
-    # 1. Bonus Favorita (Casa/Trasferta)
     if 1.60 <= q1 <= 1.85:
         sc_o += 10; sc_g += 10; d_o.append("Fav. Casa (+10)"); d_g.append("Fav. Casa (+10)")
     elif 1.60 <= q2 <= 1.85:
         sc_o += 15; sc_g += 15; d_o.append("Fav. Trasf. (+15)"); d_g.append("Fav. Trasf. (+15)")
 
-    # 2. Pressione (Uniformato)
     t_ok, c_ok = f_sh > 12.5, f_co > 5.5
     p_v = 15 if (t_ok and c_ok) else (8 if t_ok else (7 if c_ok else 0))
     if p_v > 0:
         lab = f"Press. {'Totale' if p_v==15 else ('Tiri' if p_v==8 else 'Corn')} (+{p_v})"
         sc_o += p_v; d_o.append(lab); sc_g += p_v; d_g.append(lab)
 
-    # 3. SI & Fame
     if 2.4 <= avg_si <= 3.4: sc_o += 15; d_o.append("SI OK (+15)")
     if h_fa or a_fa: sc_g += 5; d_g.append("Fame (+5)")
 
-    # 4. Sinergia
     diff = abs(sc_o - sc_g)
     lo, lg = "", ""
     if diff <= 10:
@@ -146,9 +135,9 @@ def render_rating_html(sc, det, label):
     return f"<div class='rating-box'>{sc}{label}<div class='details-text'>{details}</div></div>"
 
 # ============================
-# 6) MAIN EXECUTION
+# 6) MAIN EXECUTION (FIXED NEXT() ERROR)
 # ============================
-st.sidebar.header("⚙️ Settings V14.6")
+st.sidebar.header("⚙️ Settings V14.7")
 min_r = st.sidebar.slider("Rating Minimo", 0, 85, 60)
 
 if st.button("🚀 AVVIA ELITE SNIPER"):
@@ -158,7 +147,7 @@ if st.button("🚀 AVVIA ELITE SNIPER"):
     
     fixtures = [f for f in (data.get("response", []) or []) if f["fixture"]["status"]["short"] == "NS" and (f["league"]["id"] in IDS or f["league"]["country"] == "Italy")]
     
-    if not fixtures: st.info("Nessun match."); st.stop()
+    if not fixtures: st.info("Nessun match trovato."); st.stop()
 
     results = []
     progress = st.progress(0)
@@ -166,12 +155,20 @@ if st.button("🚀 AVVIA ELITE SNIPER"):
         progress.progress((i+1)/len(fixtures))
         q1, qx, q2, q_o25 = 0.0, 0.0, 0.0, 0.0
         odds_res = fetch_odds(m["fixture"]["id"])
+        
         if odds_res.get("response"):
-            bets = odds_res["response"][0].get("bookmakers", [{}])[0].get("bets", [])
-            o1x2 = next((b for b in bets if b["id"] == 1), None)
-            if o1x2: q1, q2 = float(o1x2["values"][0]["odd"]), float(o1x2["values"][2]["odd"])
-            o25 = next((b for b in bets if b["id"] == 5), None)
-            if o25: q_o25 = float(next(v["odd"] for v in o25["values"] if v["value"] == "Over 2.5"))
+            try:
+                bets = odds_res["response"][0].get("bookmakers", [{}])[0].get("bets", [])
+                o1x2 = next((b for b in bets if b["id"] == 1), None)
+                if o1x2:
+                    q1, q2 = float(o1x2["values"][0]["odd"]), float(o1x2["values"][2]["odd"])
+                
+                o25 = next((b for b in bets if b["id"] == 5), None)
+                if o25:
+                    # FIX: Uso un default nel next() per evitare StopIteration
+                    q_o25 = float(next((v["odd"] for v in o25["values"] if v["value"] == "Over 2.5"), 0))
+            except Exception:
+                pass # Salta l'assegnazione se le quote sono corrotte
 
         ro, do, rg, dg, lo, lg, stats = unified_engine(m, q1, q2, q_o25)
         
@@ -182,7 +179,7 @@ if st.button("🚀 AVVIA ELITE SNIPER"):
                 "Lega": m["league"]["name"],
                 "Over 2.5": render_rating_html(ro, do, lo),
                 "BTTS (GG)": render_rating_html(rg, dg, lg),
-                "RO_VAL": ro, "RG_VAL": rg # Di servizio
+                "RO_VAL": ro, "RG_VAL": rg
             })
 
     if results:
@@ -190,4 +187,6 @@ if st.button("🚀 AVVIA ELITE SNIPER"):
         styled_html = df.drop(columns=["RO_VAL", "RG_VAL"]).style.apply(apply_row_style, axis=1).to_html(escape=False, index=False)
         st.markdown(get_download_link(styled_html, f"Elite_Sniper_{oggi}.html"), unsafe_allow_html=True)
         st.markdown(styled_html, unsafe_allow_html=True)
+    else:
+        st.info("Nessun match con rating sufficiente.")
         
