@@ -3,7 +3,7 @@ import requests
 import pandas as pd
 from datetime import datetime
 import base64
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Tuple, Optional  # ✅ FIX: aggiunto Optional
 
 # ============================
 # TIMEZONE
@@ -69,17 +69,14 @@ EXCLUDE_NAME_TOKENS = [
 ]
 
 BANNED_COUNTRIES = set([
-    # Africa (ampio)
     "Algeria","Angola","Benin","Botswana","Burkina Faso","Burundi","Cameroon","Cape Verde","Central African Republic",
     "Chad","Comoros","Congo","DR Congo","Democratic Republic of the Congo","Djibouti","Egypt","Equatorial Guinea","Eritrea",
     "Eswatini","Ethiopia","Gabon","Gambia","Ghana","Guinea","Guinea-Bissau","Ivory Coast","Côte d'Ivoire","Kenya","Lesotho",
     "Liberia","Libya","Madagascar","Malawi","Mali","Mauritania","Mauritius","Morocco","Mozambique","Namibia","Niger","Nigeria",
     "Rwanda","São Tomé and Príncipe","Sao Tome and Principe","Senegal","Seychelles","Sierra Leone","Somalia","South Africa",
     "Sudan","Tanzania","Togo","Tunisia","Uganda","Zambia","Zimbabwe",
-    # Medio Oriente / arabi
     "Saudi Arabia","Qatar","United Arab Emirates","UAE","Kuwait","Oman","Bahrain","Yemen",
     "Jordan","Lebanon","Syria","Iraq","Palestine","Iran",
-    # Sud Asia
     "India","Pakistan","Bangladesh","Sri Lanka","Nepal","Bhutan","Afghanistan",
 ])
 
@@ -241,7 +238,7 @@ def get_download_link(html: str, filename: str) -> str:
     )
 
 # ============================
-# 7) SNAPSHOT LOGIC (in memoria)
+# 7) SNAPSHOT LOGIC
 # ============================
 def fav_side(q1: float, q2: float) -> str:
     if q1 <= 0 or q2 <= 0:
@@ -294,25 +291,20 @@ max_o25 = st.sidebar.slider("Max O2.5 (FT)", 1.01, 5.00, 2.35, 0.01)
 min_o15ht = st.sidebar.slider("Min O1.5 (HT)", 1.01, 6.00, 2.10, 0.01)
 max_o15ht = st.sidebar.slider("Max O1.5 (HT)", 1.01, 10.00, 3.60, 0.01)
 
-# Struttura 1X2
 max_fav_allowed = st.sidebar.slider("Anti-favorito: escludi se favorita <= ", 1.20, 2.20, 1.60, 0.01)
 min_draw_allowed = st.sidebar.slider("Anti-draw: escludi se pareggio <= ", 2.50, 4.50, 3.10, 0.01)
 
-# Gate inversione "quasi pari" su odds correnti
 use_inversion_gap_gate = st.sidebar.checkbox("Gate: inversione 1↔2 (quasi pari, odds correnti)", value=False)
 inv_gap_thr = st.sidebar.slider("Soglia |1-2| <= ", 0.05, 1.50, 0.35, 0.01)
 
-# Trap
 trap_fav_max = st.sidebar.slider("TRAP: favorita <= ", 1.30, 1.80, 1.55, 0.01)
 trap_o25_max = st.sidebar.slider("TRAP: O2.5 <= ", 1.30, 1.80, 1.55, 0.01)
 hide_traps = st.sidebar.checkbox("Nascondi TRAP", value=True)
 
-# Recenti HT
 min_ht_goal_rate = st.sidebar.slider("HT goal rate min (ultime 5) per team", 0.0, 1.0, 0.60, 0.05)
 
-# Snapshot gates
 st.sidebar.markdown("---")
-st.sidebar.subheader("🧷 Snapshot / Drop reale (da snapshot)")
+st.sidebar.subheader("🧷 Snapshot / Drop reale")
 require_snapshot_features = st.sidebar.checkbox("Mostra colonne INV/DROP reali", value=True)
 
 drop_min_delta = st.sidebar.slider("DROP reale: minimo crollo Δ", 0.01, 0.80, 0.15, 0.01)
@@ -373,6 +365,7 @@ if save_snap:
         pb = st.progress(0)
         stx = st.empty()
         snap: Dict[int, Dict[str, float]] = {}
+
         for i, m in enumerate(candidates):
             pb.progress((i + 1) / len(candidates))
             stx.text(f"Snapshot {i+1}/{len(candidates)}: {m['teams']['home']['name']} - {m['teams']['away']['name']}")
@@ -459,7 +452,6 @@ if st.button("🚀 AVVIA SCANSIONE"):
 
         fid = int(m["fixture"]["id"])
 
-        # odds correnti
         q1 = qx = q2 = o25 = o15_ht = 0.0
         try:
             odds_json = fetch_odds(fid)
@@ -469,7 +461,6 @@ if st.button("🚀 AVVIA SCANSIONE"):
         except Exception:
             cnt_odds_nd += 1
 
-        # TRAP
         trap_reasons: List[str] = []
         if (q1 > 0 and q1 <= trap_fav_max) or (q2 > 0 and q2 <= trap_fav_max):
             trap_reasons.append(f"Favoritissima (<= {trap_fav_max:.2f})")
@@ -480,7 +471,6 @@ if st.button("🚀 AVVIA SCANSIONE"):
             cnt_hidden_traps += 1
             continue
 
-        # inversione gap (corrente)
         inv_gap_ok = True
         inv_gap_text = "N.D."
         if q1 > 0 and q2 > 0:
@@ -494,7 +484,6 @@ if st.button("🚀 AVVIA SCANSIONE"):
             cnt_gate_filtered += 1
             continue
 
-        # struttura 1X2
         structure_ok = True
         struct_notes: List[str] = []
         if q1 > 0 and q2 > 0:
@@ -509,12 +498,10 @@ if st.button("🚀 AVVIA SCANSIONE"):
             structure_ok = False
             struct_notes.append("1X2 N.D.")
 
-        # HT rate
         h_prof = get_team_recent_profile(int(m["teams"]["home"]["id"]))
         a_prof = get_team_recent_profile(int(m["teams"]["away"]["id"]))
         ht_gate_ok = (h_prof["ht_goal_rate"] >= min_ht_goal_rate and a_prof["ht_goal_rate"] >= min_ht_goal_rate)
 
-        # snapshot compare + delta
         inv_real_ok = False
         inv_real_msg = "N/A"
         drop_real_ok = False
@@ -541,7 +528,6 @@ if st.button("🚀 AVVIA SCANSIONE"):
             else:
                 cnt_no_snapshot += 1
 
-        # gate reali
         if require_snapshot_features and gate_real_inversion and not inv_real_ok:
             cnt_gate_filtered += 1
             continue
@@ -549,7 +535,6 @@ if st.button("🚀 AVVIA SCANSIONE"):
             cnt_gate_filtered += 1
             continue
 
-        # CHECKLIST O2.5
         over25_ok = False
         over25_notes: List[str] = []
         if use_over25:
@@ -570,7 +555,6 @@ if st.button("🚀 AVVIA SCANSIONE"):
 
             over25_ok = (o25 > 0 and (min_o25 <= o25 <= max_o25) and structure_ok)
 
-        # CHECKLIST O1.5 HT
         o15ht_ok = False
         o15ht_notes: List[str] = []
         if use_o15ht:
@@ -593,7 +577,6 @@ if st.button("🚀 AVVIA SCANSIONE"):
 
             o15ht_ok = (o15_ht > 0 and (min_o15ht <= o15_ht <= max_o15ht) and ht_gate_ok and structure_ok)
 
-        # inclusione
         if mode == "Solo O2.5":
             show = over25_ok
         elif mode == "Solo O1.5HT":
