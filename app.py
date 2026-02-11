@@ -5,7 +5,7 @@ from datetime import datetime
 import base64
 from typing import Any, Dict, List, Tuple, Optional
 
-# Timezone robust
+# Timezone robust (gestione Streamlit Cloud)
 try:
     from zoneinfo import ZoneInfo
     ROME_TZ = ZoneInfo("Europe/Rome")
@@ -15,8 +15,8 @@ except Exception:
 # ============================
 # 1) CONFIG PAGINA E STILI
 # ============================
-st.set_page_config(page_title="ARAB SNIPER V14.7", layout="wide")
-st.title("🎯 ARAB SNIPER V14.7 - Elite Synthetix (Bug Fix)")
+st.set_page_config(page_title="ARAB SNIPER V 14.8", layout="wide")
+st.title("🎯 ARAB SNIPER V 14.8 - Elite Synthetix (Final Fix)")
 
 def apply_custom_css():
     st.markdown("""
@@ -83,7 +83,7 @@ def get_download_link(html, filename):
     return f'<a href="data:text/html;base64,{b64}" download="{filename}" style="text-decoration:none;"><button style="padding:10px 20px; background-color:#1b4332; color:white; border:none; border-radius:5px; cursor:pointer; font-weight:bold;">💾 SCARICA ANALISI COMPLETA</button></a>'
 
 # ============================
-# 4) UNIFIED ENGINE V14.7
+# 4) UNIFIED ENGINE V 14.8
 # ============================
 def unified_engine(m, q1, q2, q_o25):
     h_sh, h_co, h_si, h_fa = get_team_metrics(m["teams"]["home"]["id"])
@@ -96,11 +96,13 @@ def unified_engine(m, q1, q2, q_o25):
     sc_o, sc_g = 40, 40
     d_o, d_g = [], []
     
+    # Bonus Favorita
     if 1.60 <= q1 <= 1.85:
         sc_o += 10; sc_g += 10; d_o.append("Fav. Casa (+10)"); d_g.append("Fav. Casa (+10)")
     elif 1.60 <= q2 <= 1.85:
         sc_o += 15; sc_g += 15; d_o.append("Fav. Trasf. (+15)"); d_g.append("Fav. Trasf. (+15)")
 
+    # Pressione uniformata
     t_ok, c_ok = f_sh > 12.5, f_co > 5.5
     p_v = 15 if (t_ok and c_ok) else (8 if t_ok else (7 if c_ok else 0))
     if p_v > 0:
@@ -110,6 +112,7 @@ def unified_engine(m, q1, q2, q_o25):
     if 2.4 <= avg_si <= 3.4: sc_o += 15; d_o.append("SI OK (+15)")
     if h_fa or a_fa: sc_g += 5; d_g.append("Fame (+5)")
 
+    # Sinergia e Specializzazione
     diff = abs(sc_o - sc_g)
     lo, lg = "", ""
     if diff <= 10:
@@ -119,12 +122,13 @@ def unified_engine(m, q1, q2, q_o25):
     elif sc_g > sc_o + 20: lg = "<br><span class='tag' style='color:#ff80ab;'>🎯 SOLO GG</span>"
 
     if 0 < q_o25 < 1.50: sc_o = 0
-    return sc_o, d_o, sc_g, d_g, lo, lg, f"{f_sh} tiri | {f_co} corn"
+    return sc_o, d_o, sc_g, d_g, lo, lg, f"{round(f_sh,1)} tiri | {round(f_co,1)} corn"
 
 # ============================
 # 5) RENDERING & STYLE
 # ============================
 def apply_row_style(row):
+    # Logica per graduazione verde
     r_max = max(row['RO_VAL'], row['RG_VAL'])
     if r_max >= 85: return ['background-color: #1b4332; color: white;'] * len(row)
     if r_max >= 70: return ['background-color: #2d6a4f; color: #d8f3dc;'] * len(row)
@@ -135,9 +139,9 @@ def render_rating_html(sc, det, label):
     return f"<div class='rating-box'>{sc}{label}<div class='details-text'>{details}</div></div>"
 
 # ============================
-# 6) MAIN EXECUTION (FIXED NEXT() ERROR)
+# 6) MAIN EXECUTION
 # ============================
-st.sidebar.header("⚙️ Settings V14.7")
+st.sidebar.header("⚙️ Arab Sniper V 14.8 Settings")
 min_r = st.sidebar.slider("Rating Minimo", 0, 85, 60)
 
 if st.button("🚀 AVVIA ELITE SNIPER"):
@@ -147,7 +151,7 @@ if st.button("🚀 AVVIA ELITE SNIPER"):
     
     fixtures = [f for f in (data.get("response", []) or []) if f["fixture"]["status"]["short"] == "NS" and (f["league"]["id"] in IDS or f["league"]["country"] == "Italy")]
     
-    if not fixtures: st.info("Nessun match trovato."); st.stop()
+    if not fixtures: st.info("Nessun match trovato per oggi."); st.stop()
 
     results = []
     progress = st.progress(0)
@@ -165,10 +169,8 @@ if st.button("🚀 AVVIA ELITE SNIPER"):
                 
                 o25 = next((b for b in bets if b["id"] == 5), None)
                 if o25:
-                    # FIX: Uso un default nel next() per evitare StopIteration
                     q_o25 = float(next((v["odd"] for v in o25["values"] if v["value"] == "Over 2.5"), 0))
-            except Exception:
-                pass # Salta l'assegnazione se le quote sono corrotte
+            except Exception: pass
 
         ro, do, rg, dg, lo, lg, stats = unified_engine(m, q1, q2, q_o25)
         
@@ -179,14 +181,21 @@ if st.button("🚀 AVVIA ELITE SNIPER"):
                 "Lega": m["league"]["name"],
                 "Over 2.5": render_rating_html(ro, do, lo),
                 "BTTS (GG)": render_rating_html(rg, dg, lg),
-                "RO_VAL": ro, "RG_VAL": rg
+                "RO_VAL": ro, 
+                "RG_VAL": rg
             })
 
     if results:
         df = pd.DataFrame(results).sort_values("Ora")
-        styled_html = df.drop(columns=["RO_VAL", "RG_VAL"]).style.apply(apply_row_style, axis=1).to_html(escape=False, index=False)
-        st.markdown(get_download_link(styled_html, f"Elite_Sniper_{oggi}.html"), unsafe_allow_html=True)
+        
+        # Styler: applichiamo lo stile prima di nascondere le colonne tecniche
+        styler = df.style.apply(apply_row_style, axis=1)
+        
+        # Nascondiamo RO_VAL e RG_VAL che servono solo per il calcolo del colore
+        styled_html = styler.hide(subset=["RO_VAL", "RG_VAL"], axis=1).to_html(escape=False, index=False)
+        
+        st.markdown(get_download_link(styled_html, f"Arab_Sniper_V14.8_{oggi}.html"), unsafe_allow_html=True)
         st.markdown(styled_html, unsafe_allow_html=True)
     else:
-        st.info("Nessun match con rating sufficiente.")
-        
+        st.info("Nessun match con rating sufficiente trovato.")
+    
