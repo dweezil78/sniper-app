@@ -16,7 +16,7 @@ except Exception:
     ROME_TZ = None
 
 JSON_FILE = "arab_snapshot.json"
-st.set_page_config(page_title="ARAB SNIPER V15.5", layout="wide")
+st.set_page_config(page_title="ARAB SNIPER V15.7", layout="wide")
 
 if "odds_memory" not in st.session_state:
     st.session_state["odds_memory"] = {}
@@ -34,13 +34,14 @@ def apply_custom_css():
             .lega-cell { max-width: 120px; overflow: hidden; text-overflow: ellipsis; font-size: 0.75rem; color: inherit !important; text-align: left !important; }
             .drop-inline { color: #d68910; font-size: 0.72rem; font-weight: 800; margin-left: 5px; }
             .details-inline { font-size: 0.7rem; color: inherit !important; font-weight: 800; margin-left: 5px; opacity: 0.9; }
+            .diag-box { padding: 12px; background: #1a1c23; color: #00e5ff; border-radius: 8px; margin-bottom: 15px; font-family: monospace; font-size: 0.85rem; line-height: 1.4; border: 1px solid #00e5ff; }
         </style>
     """, unsafe_allow_html=True)
 
 apply_custom_css()
 
 # ============================
-# API HELPERS & ROBUST PARSING (Patch 3)
+# API HELPERS & ROBUST PARSING (Punto 3)
 # ============================
 API_KEY = st.secrets.get("API_SPORTS_KEY")
 HOST = "v3.football.api-sports.io"
@@ -53,12 +54,14 @@ def api_get(session, path, params):
     return r.json()
 
 def extract_bets_robust(resp_json):
-    """Scorre i bookmakers finché non trova un set di scommesse non vuoto"""
+    """Scorre i bookmaker finché non trova uno che contiene sia Esito Finale (1) che Over 2.5 (5)"""
     resp = resp_json.get("response", [])
     if not resp: return []
     for bm in resp[0].get("bookmakers", []):
-        b = bm.get("bets", [])
-        if b: return b
+        bets = bm.get("bets", [])
+        ids = [b.get("id") for b in bets]
+        if 1 in ids and 5 in ids: # Punto 3: Verifica mercati essenziali
+            return bets
     return []
 
 def is_allowed_league(league_name, league_country):
@@ -81,26 +84,31 @@ def load_snapshot():
     if st.session_state["odds_memory"] and st.session_state["snap_date_mem"]:
         return st.session_state["snap_date_mem"], st.session_state["odds_memory"]
     if os.path.exists(JSON_FILE):
-        with open(JSON_FILE, "r") as f:
-            data = json.load(f)
-            st.session_state["odds_memory"] = data.get("odds", {})
-            st.session_state["snap_date_mem"] = data.get("date")
-            return st.session_state["snap_date_mem"], st.session_state["odds_memory"]
+        try:
+            with open(JSON_FILE, "r") as f:
+                data = json.load(f)
+                st.session_state["odds_memory"] = data.get("odds", {})
+                st.session_state["snap_date_mem"] = data.get("date")
+                return st.session_state["snap_date_mem"], st.session_state["odds_memory"]
+        except: return None, {}
     return None, {}
 
 # ============================
-# LOGICA RATING (Patch 1 & 2)
+# LOGICA RATING (Punto 4: Inversione Leggibile)
 # ============================
-def calculate_rating(fid, q1, q2, o25, snap_data, max_q_fav, trap_fav, inv_margin):
+def calculate_rating(fid, q1, qx, q2, o25, snap_data, max_q_fav, trap_fav, inv_margin):
     sc = 40
     det = []
-    drop_msg = ""
+    msgs = []
     fid_s = str(fid)
     
-    # TRAP FAVORITO (Patch 2)
-    fav_now_price = min(q1, q2)
-    if fav_now_price <= trap_fav:
-        return 0, [], "🚫 TRAP FAV"
+    if q1 > 0 and q2 > 0:
+        fav_now_price = min(q1, q2)
+        if fav_now_price <= trap_fav:
+            return 0, [], "🚫 TRAP FAV", "trap_fav"
+    
+    if 0 < o25 < 1.55:
+        return 0, [], "🚫 TRAP O25", "trap_o25"
 
     if fid_s in snap_data:
         old = snap_data[fid_s]
@@ -115,23 +123,29 @@ def calculate_rating(fid, q1, q2, o25, snap_data, max_q_fav, trap_fav, inv_margi
             # DROP
             delta = old_fav_p - cur_fav_p
             if delta >= 0.15 and cur_fav_p <= max_q_fav:
-                sc += 40; det.append("Drop"); drop_msg = f"<span class='drop-inline'>📉 Δ{round(delta,2)}</span>"
+                sc += 40; det.append("Drop")
+                msgs.append(f"📉 Δ{round(delta,2)}")
             
-            # INVERSIONE CON SOGLIA SLIDER (Patch 1)
+            # INVERSIONE (Punto 4: Pulizia Casi)
             gap_now = abs(q1 - q2)
             if gap_old >= 0.10 and gap_now >= inv_margin:
+                inv_detected = False
                 if fav_at_snap == "1" and q2 <= (q1 - inv_margin):
-                    sc += 20; det.append("Inv"); drop_msg = f"<span class='drop-inline'>🔄 INV 1→2</span>"
+                    inv_detected = True
                 elif fav_at_snap == "2" and q1 <= (q2 - inv_margin):
-                    sc += 20; det.append("Inv"); drop_msg = f"<span class='drop-inline'>🔄 INV 2→1</span>"
+                    inv_detected = True
+                
+                if inv_detected:
+                    sc += 20; det.append("Inv")
+                    msgs.append("🔄 INV")
 
     if 1.70 <= o25 <= 2.15: sc += 20; det.append("Val")
-    if 0 < o25 < 1.55: sc = 0 # TRAP OVER 2.5
     
-    return min(100, sc), det, drop_msg
+    drop_msg = f"<span class='drop-inline'>{' + '.join(msgs)}</span>" if msgs else ""
+    return min(100, sc), det, drop_msg, "ok"
 
 # ============================
-# UI E CORE
+# UI E CORE EXECUTION
 # ============================
 st.sidebar.header("⚙️ Sniper Settings")
 min_rating = st.sidebar.slider("Rating Minimo", 0, 85, 60)
@@ -155,49 +169,60 @@ with c1:
                 pb.progress((i+1)/len(valid_fx))
                 try:
                     r_o = api_get(s, "odds", {"fixture": m["fixture"]["id"]})
-                    bets = extract_bets_robust(r_o) # Patch 3
+                    bets = extract_bets_robust(r_o)
                     if bets:
-                        q1 = q2 = o25 = 0.0
+                        q1 = qx = q2 = o25 = 0.0
                         for b in bets:
                             if b["id"] == 1:
-                                vals = b.get("values", [])
-                                if len(vals) >= 3: q1, q2 = float(vals[0]["odd"]), float(vals[2]["odd"])
+                                v = b.get("values", [])
+                                if len(v) >= 3: q1, qx, q2 = float(v[0]["odd"]), float(v[1]["odd"]), float(v[2]["odd"])
                             if b["id"] == 5:
                                 o25 = float(next((x["odd"] for x in b.get("values", []) if x["value"] == "Over 2.5"), 0))
-                        if q1 > 0: new_snap[m["fixture"]["id"]] = {"q1": q1, "q2": q2, "o25": o25}
+                        if q1 > 0: new_snap[m["fixture"]["id"]] = {"q1": q1, "qx": qx, "q2": q2, "o25": o25}
                 except: continue
             save_snapshot(new_snap, oggi)
             st.success(f"Snapshot OK: {len(new_snap)} match.")
 
 with c2:
-    st.write(f"Snapshot del: **{snap_date}**" if snap_date == oggi else f"⚠️ Snapshot obsoleto ({snap_date})")
+    st.write(f"Snapshot: **{snap_date}**" if snap_date == oggi else f"⚠️ Snapshot obsoleto ({snap_date})")
 
 ht_cache = {}
 
 if st.button("🚀 AVVIA SCANSIONE"):
+    # Punto 1, 2, 5: Diagnostica Integrale
+    diag = {"analyzed": 0, "total": 0, "trap_fav": 0, "trap_o25": 0, "no_odds": 0, "below_min": 0, "errors": 0}
     with requests.Session() as s:
         data = api_get(s, "fixtures", {"date": oggi, "timezone": "Europe/Rome"})
         fixtures = [f for f in data.get("response", []) if f["fixture"]["status"]["short"] == "NS" and is_allowed_league(f["league"]["name"], f["league"]["country"])]
         results = []
         pb = st.progress(0)
+        
         for i, m in enumerate(fixtures):
+            diag["analyzed"] += 1
             pb.progress((i+1)/len(fixtures))
             try:
                 r_o = api_get(s, "odds", {"fixture": m["fixture"]["id"]})
-                bets = extract_bets_robust(r_o) # Patch 3
+                bets = extract_bets_robust(r_o)
                 q1 = qx = q2 = o25 = 0.0
                 if bets:
                     for b in bets:
                         if b["id"] == 1:
-                            vals = b.get("values", [])
-                            if len(vals) >= 3: q1, qx, q2 = float(vals[0]["odd"]), float(vals[1]["odd"]), float(vals[2]["odd"])
+                            v = b.get("values", [])
+                            if len(v) >= 3: q1, qx, q2 = float(v[0]["odd"]), float(v[1]["odd"]), float(v[2]["odd"])
                         if b["id"] == 5:
                             o25 = float(next((x["odd"] for x in b.get("values", []) if x["value"] == "Over 2.5"), 0))
                 
-                if q1 <= 0: continue
+                if q1 <= 0: 
+                    diag["no_odds"] += 1
+                    continue
                 
-                rating, det_list, drop_label = calculate_rating(m["fixture"]["id"], q1, q2, o25, snap_odds, max_q_fav, trap_fav, inv_margin)
+                rating, det_list, drop_label, status = calculate_rating(m["fixture"]["id"], q1, qx, q2, o25, snap_odds, max_q_fav, trap_fav, inv_margin)
                 
+                if status != "ok":
+                    diag[status] += 1
+                    continue
+
+                # Calcolo HT Rate (con cache)
                 if rating >= (min_rating - 20) and rating > 0:
                     def get_cached_ht(tid):
                         if tid in ht_cache: return ht_cache[tid]
@@ -211,6 +236,7 @@ if st.button("🚀 AVVIA SCANSIONE"):
                         rating += 20; det_list.append("HT")
                 
                 if rating >= min_rating:
+                    diag["total"] += 1
                     results.append({
                         "Ora": m["fixture"]["date"][11:16],
                         "Lega": f"<div class='lega-cell'>{m['league']['name']}</div>",
@@ -221,7 +247,19 @@ if st.button("🚀 AVVIA SCANSIONE"):
                         "Info": f"<span class='details-inline'>[{'|'.join(det_list)}]</span>",
                         "R_VAL": rating
                     })
-            except: continue
+                else:
+                    diag["below_min"] += 1
+            except Exception as e:
+                diag["errors"] += 1
+                continue
+
+        # BOX DIAGNOSTICA DEFINITIVO
+        st.markdown(f"""
+        <div class='diag-box'>
+            📡 <b>SCAN REPORT:</b> Analizzati: {diag['analyzed']} | ✅ Mostrati: {diag['total']} | 📉 Sotto Soglia Rating: {diag['below_min']}<br>
+            🚫 <b>FILTRATI:</b> Trap Fav: {diag['trap_fav']} | Trap O25: {diag['trap_o25']} | ⚠️ No Odds: {diag['no_odds']} | ❌ Errori API: {diag['errors']}
+        </div>
+        """, unsafe_allow_html=True)
 
         if results:
             df = pd.DataFrame(results).sort_values("Ora")
