@@ -16,18 +16,24 @@ except Exception:
     ROME_TZ = None
 
 JSON_FILE = "arab_snapshot.json"
-st.set_page_config(page_title="ARAB SNIPER V15.1", layout="wide")
+st.set_page_config(page_title="ARAB SNIPER V15.2", layout="wide")
 
 def apply_custom_css():
     st.markdown("""
         <style>
             .main { background-color: #f0f2f6; }
-            table { width: 100%; border-collapse: collapse; color: #000000 !important; font-size: 0.85rem; }
-            th { background-color: #1a1c23; color: #00e5ff; padding: 8px; text-align: center; }
-            td { padding: 6px 10px; border: 1px solid #ccc; text-align: center; color: #000000 !important; font-weight: 600; white-space: nowrap; }
-            .match-cell { text-align: left !important; min-width: 250px; font-weight: 700; }
-            .drop-inline { color: #d68910; font-size: 0.75rem; font-weight: 800; margin-left: 10px; }
-            .details-inline { font-size: 0.7rem; color: #555; display: inline-block; margin-left: 5px; }
+            table { width: 100%; border-collapse: collapse; color: #000000 !important; font-size: 0.82rem; }
+            th { background-color: #1a1c23; color: #00e5ff; padding: 8px; text-align: center; border: 1px solid #444; }
+            td { padding: 5px 8px; border: 1px solid #ccc; text-align: center; color: #000000 !important; font-weight: 600; white-space: nowrap; }
+            
+            /* Larghezza ridotta per le squadre */
+            .match-cell { text-align: left !important; min-width: 180px; font-weight: 700; color: inherit !important; }
+            .lega-cell { max-width: 120px; overflow: hidden; text-overflow: ellipsis; font-size: 0.75rem; color: inherit !important; }
+            
+            .drop-inline { color: #d68910; font-size: 0.72rem; font-weight: 800; margin-left: 5px; }
+            
+            /* Fix colore scritte su righe colorate */
+            .details-inline { font-size: 0.7rem; color: inherit !important; font-weight: 800; margin-left: 5px; opacity: 0.9; }
         </style>
     """, unsafe_allow_html=True)
 
@@ -114,7 +120,7 @@ def calculate_rating(fid, q1, q2, o25, h_ht, a_ht, snap_data):
     if h_ht >= 0.6 and a_ht >= 0.6: sc += 20; det.append("HT")
     if 1.70 <= o25 <= 2.15: sc += 20; det.append("Val")
     if 0 < o25 < 1.55: sc = 0
-    return min(100, sc), "|".join(det), drop_msg
+    return min(100, sc), det, drop_msg
 
 # ============================
 # UI E SCANSIONE
@@ -153,13 +159,16 @@ if st.button("🚀 AVVIA SCANSIONE"):
         pb.progress((i+1)/len(fixtures))
         q1, qx, q2, o25 = fetch_odds(m["fixture"]["id"])
         if q1 <= 0: continue
-        rating, det_str, drop_label = calculate_rating(m["fixture"]["id"], q1, q2, o25, get_ht_rate(m["teams"]["home"]["id"]), get_ht_rate(m["teams"]["away"]["id"]), snap_odds)
+        rating, det_list, drop_label = calculate_rating(m["fixture"]["id"], q1, q2, o25, get_ht_rate(m["teams"]["home"]["id"]), get_ht_rate(m["teams"]["away"]["id"]), snap_odds)
         
         if rating >= min_rating:
+            # Formattazione info finale
+            det_str = "|".join(det_list)
             results.append({
                 "Ora": m["fixture"]["date"][11:16],
+                "Lega": f"<div class='lega-cell'>{m['league']['name']}</div>",
                 "Match": f"<div class='match-cell'>{m['teams']['home']['name']} - {m['teams']['away']['name']} {drop_label}</div>",
-                "1X2": f"{q1:.2f} | {qx:.2f} | {q2:.2f}",
+                "1X2": f"{q1:.2f}|{qx:.2f}|{q2:.2f}",
                 "O2.5": f"{o25:.2f}",
                 "Rating": f"<b>{rating}</b>",
                 "Info": f"<span class='details-inline'>[{det_str}]</span>",
@@ -169,6 +178,7 @@ if st.button("🚀 AVVIA SCANSIONE"):
     if results:
         df = pd.DataFrame(results).sort_values("R_VAL", ascending=False)
         def style_rows(row):
+            # Forza il testo bianco (!important) su tutte le celle se il rating è alto
             if row['R_VAL'] >= 85: return ['background-color: #1b4332; color: #ffffff !important;'] * len(row)
             if row['R_VAL'] >= 70: return ['background-color: #2d6a4f; color: #ffffff !important;'] * len(row)
             return [''] * len(row)
