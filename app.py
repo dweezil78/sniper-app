@@ -16,9 +16,8 @@ except Exception:
     ROME_TZ = None
 
 JSON_FILE = "arab_snapshot.json"
-st.set_page_config(page_title="ARAB SNIPER V15.4", layout="wide")
+st.set_page_config(page_title="ARAB SNIPER V15.5", layout="wide")
 
-# Punto 1: Persistenza Ibrida corretta
 if "odds_memory" not in st.session_state:
     st.session_state["odds_memory"] = {}
 if "snap_date_mem" not in st.session_state:
@@ -41,7 +40,7 @@ def apply_custom_css():
 apply_custom_css()
 
 # ============================
-# API HELPERS
+# API HELPERS & ROBUST PARSING (Patch 3)
 # ============================
 API_KEY = st.secrets.get("API_SPORTS_KEY")
 HOST = "v3.football.api-sports.io"
@@ -53,6 +52,15 @@ def api_get(session, path, params):
     r.raise_for_status() 
     return r.json()
 
+def extract_bets_robust(resp_json):
+    """Scorre i bookmakers finché non trova un set di scommesse non vuoto"""
+    resp = resp_json.get("response", [])
+    if not resp: return []
+    for bm in resp[0].get("bookmakers", []):
+        b = bm.get("bets", [])
+        if b: return b
+    return []
+
 def is_allowed_league(league_name, league_country):
     name = league_name.lower()
     banned = ["women", "u19", "u20", "u21", "u23", "primavera"]
@@ -61,7 +69,7 @@ def is_allowed_league(league_name, league_country):
     return True
 
 # ============================
-# PERSISTENZA (Fix Punto 1)
+# PERSISTENZA 
 # ============================
 def save_snapshot(data_dict, date_str):
     st.session_state["odds_memory"] = data_dict
@@ -70,10 +78,8 @@ def save_snapshot(data_dict, date_str):
         json.dump({"date": date_str, "odds": data_dict}, f)
 
 def load_snapshot():
-    # Carica da sessione se esiste
     if st.session_state["odds_memory"] and st.session_state["snap_date_mem"]:
         return st.session_state["snap_date_mem"], st.session_state["odds_memory"]
-    # Altrimenti da file
     if os.path.exists(JSON_FILE):
         with open(JSON_FILE, "r") as f:
             data = json.load(f)
@@ -83,14 +89,19 @@ def load_snapshot():
     return None, {}
 
 # ============================
-# LOGICA RATING (Fix Punto 3 & 4)
+# LOGICA RATING (Patch 1 & 2)
 # ============================
-def calculate_rating(fid, q1, q2, o25, snap_data, max_quota_fav):
+def calculate_rating(fid, q1, q2, o25, snap_data, max_q_fav, trap_fav, inv_margin):
     sc = 40
     det = []
     drop_msg = ""
     fid_s = str(fid)
     
+    # TRAP FAVORITO (Patch 2)
+    fav_now_price = min(q1, q2)
+    if fav_now_price <= trap_fav:
+        return 0, [], "🚫 TRAP FAV"
+
     if fid_s in snap_data:
         old = snap_data[fid_s]
         old_q1, old_q2 = old.get("q1", 0), old.get("q2", 0)
@@ -101,29 +112,32 @@ def calculate_rating(fid, q1, q2, o25, snap_data, max_quota_fav):
             old_fav_p = old_q1 if fav_at_snap == "1" else old_q2
             cur_fav_p = q1 if fav_at_snap == "1" else q2
             
-            # Punto 4: Drop reale + Controllo Quota Max
+            # DROP
             delta = old_fav_p - cur_fav_p
-            if delta >= 0.15 and cur_fav_p <= max_quota_fav:
+            if delta >= 0.15 and cur_fav_p <= max_q_fav:
                 sc += 40; det.append("Drop"); drop_msg = f"<span class='drop-inline'>📉 Δ{round(delta,2)}</span>"
             
-            # Punto 3: Inversione Robusta (Margine 0.10 sia prima che dopo)
+            # INVERSIONE CON SOGLIA SLIDER (Patch 1)
             gap_now = abs(q1 - q2)
-            if gap_old >= 0.10 and gap_now >= 0.10:
-                if fav_at_snap == "1" and q2 < q1:
-                    sc += 20; det.append("Inv"); drop_msg = "<span class='drop-inline'>🔄 INV 1→2</span>"
-                elif fav_at_snap == "2" and q1 < q2:
-                    sc += 20; det.append("Inv"); drop_msg = "<span class='drop-inline'>🔄 INV 2→1</span>"
+            if gap_old >= 0.10 and gap_now >= inv_margin:
+                if fav_at_snap == "1" and q2 <= (q1 - inv_margin):
+                    sc += 20; det.append("Inv"); drop_msg = f"<span class='drop-inline'>🔄 INV 1→2</span>"
+                elif fav_at_snap == "2" and q1 <= (q2 - inv_margin):
+                    sc += 20; det.append("Inv"); drop_msg = f"<span class='drop-inline'>🔄 INV 2→1</span>"
 
     if 1.70 <= o25 <= 2.15: sc += 20; det.append("Val")
-    if 0 < o25 < 1.55: sc = 0
+    if 0 < o25 < 1.55: sc = 0 # TRAP OVER 2.5
+    
     return min(100, sc), det, drop_msg
 
 # ============================
-# UI E CORE EXECUTION
+# UI E CORE
 # ============================
-st.sidebar.header("Settings")
+st.sidebar.header("⚙️ Sniper Settings")
 min_rating = st.sidebar.slider("Rating Minimo", 0, 85, 60)
 max_q_fav = st.sidebar.slider("Quota Max Favorito", 1.50, 3.00, 1.85)
+trap_fav = st.sidebar.slider("Trap favorito <=", 1.25, 1.70, 1.45, 0.01)
+inv_margin = st.sidebar.slider("Margine inversione", 0.05, 0.30, 0.10, 0.01)
 
 oggi = datetime.now(ROME_TZ).strftime("%Y-%m-%d") if ROME_TZ else datetime.now().strftime("%Y-%m-%d")
 snap_date, snap_odds = load_snapshot()
@@ -135,18 +149,14 @@ with c1:
             data = api_get(s, "fixtures", {"date": oggi, "timezone": "Europe/Rome"})
             all_fx = data.get("response", []) or []
             new_snap = {}
-            pb = st.progress(0)
-            
-            # Filtro Punto 2: Filtriamo subito le leghe e lo status NS
             valid_fx = [m for m in all_fx if m['fixture']['status']['short'] == 'NS' and is_allowed_league(m['league']['name'], m['league']['country'])]
-            
+            pb = st.progress(0)
             for i, m in enumerate(valid_fx):
                 pb.progress((i+1)/len(valid_fx))
                 try:
                     r_o = api_get(s, "odds", {"fixture": m["fixture"]["id"]})
-                    resp = r_o.get("response", [])
-                    if resp:
-                        bets = resp[0].get("bookmakers", [{}])[0].get("bets", [])
+                    bets = extract_bets_robust(r_o) # Patch 3
+                    if bets:
                         q1 = q2 = o25 = 0.0
                         for b in bets:
                             if b["id"] == 1:
@@ -157,29 +167,26 @@ with c1:
                         if q1 > 0: new_snap[m["fixture"]["id"]] = {"q1": q1, "q2": q2, "o25": o25}
                 except: continue
             save_snapshot(new_snap, oggi)
-            st.success(f"Snapshot OK: {len(new_snap)} match salvati.")
+            st.success(f"Snapshot OK: {len(new_snap)} match.")
 
 with c2:
-    st.write(f"Snapshot del: **{snap_date}**" if snap_date == oggi else f"⚠️ Snapshot obsoleto o mancante ({snap_date})")
+    st.write(f"Snapshot del: **{snap_date}**" if snap_date == oggi else f"⚠️ Snapshot obsoleto ({snap_date})")
 
-# Punto 5: Cache locale per HT rate durante la scansione
 ht_cache = {}
 
 if st.button("🚀 AVVIA SCANSIONE"):
     with requests.Session() as s:
         data = api_get(s, "fixtures", {"date": oggi, "timezone": "Europe/Rome"})
         fixtures = [f for f in data.get("response", []) if f["fixture"]["status"]["short"] == "NS" and is_allowed_league(f["league"]["name"], f["league"]["country"])]
-        
         results = []
         pb = st.progress(0)
         for i, m in enumerate(fixtures):
             pb.progress((i+1)/len(fixtures))
             try:
                 r_o = api_get(s, "odds", {"fixture": m["fixture"]["id"]})
+                bets = extract_bets_robust(r_o) # Patch 3
                 q1 = qx = q2 = o25 = 0.0
-                resp = r_o.get("response", [])
-                if resp:
-                    bets = resp[0].get("bookmakers", [{}])[0].get("bets", [])
+                if bets:
                     for b in bets:
                         if b["id"] == 1:
                             vals = b.get("values", [])
@@ -189,11 +196,9 @@ if st.button("🚀 AVVIA SCANSIONE"):
                 
                 if q1 <= 0: continue
                 
-                # Calcolo Rating iniziale
-                rating, det_list, drop_label = calculate_rating(m["fixture"]["id"], q1, q2, o25, snap_odds, max_q_fav)
+                rating, det_list, drop_label = calculate_rating(m["fixture"]["id"], q1, q2, o25, snap_odds, max_q_fav, trap_fav, inv_margin)
                 
-                # Punto 5: HT con Cache Locale
-                if rating >= (min_rating - 20):
+                if rating >= (min_rating - 20) and rating > 0:
                     def get_cached_ht(tid):
                         if tid in ht_cache: return ht_cache[tid]
                         rx = api_get(s, "fixtures", {"team": tid, "last": 5, "status": "FT"})
