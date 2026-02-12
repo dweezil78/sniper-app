@@ -28,7 +28,7 @@ def apply_custom_css():
             
             /* Larghezza ridotta per le squadre */
             .match-cell { text-align: left !important; min-width: 180px; font-weight: 700; color: inherit !important; }
-            .lega-cell { max-width: 120px; overflow: hidden; text-overflow: ellipsis; font-size: 0.75rem; color: inherit !important; }
+            .lega-cell { max-width: 120px; overflow: hidden; text-overflow: ellipsis; font-size: 0.75rem; color: inherit !important; text-align: left !important; }
             
             .drop-inline { color: #d68910; font-size: 0.72rem; font-weight: 800; margin-left: 5px; }
             
@@ -162,7 +162,6 @@ if st.button("🚀 AVVIA SCANSIONE"):
         rating, det_list, drop_label = calculate_rating(m["fixture"]["id"], q1, q2, o25, get_ht_rate(m["teams"]["home"]["id"]), get_ht_rate(m["teams"]["away"]["id"]), snap_odds)
         
         if rating >= min_rating:
-            # Formattazione info finale
             det_str = "|".join(det_list)
             results.append({
                 "Ora": m["fixture"]["date"][11:16],
@@ -176,9 +175,10 @@ if st.button("🚀 AVVIA SCANSIONE"):
             })
 
     if results:
-        df = pd.DataFrame(results).sort_values("R_VAL", ascending=False)
+        # ORDINAMENTO PER ORA (ASCENDENTE)
+        df = pd.DataFrame(results).sort_values("Ora", ascending=True)
+        
         def style_rows(row):
-            # Forza il testo bianco (!important) su tutte le celle se il rating è alto
             if row['R_VAL'] >= 85: return ['background-color: #1b4332; color: #ffffff !important;'] * len(row)
             if row['R_VAL'] >= 70: return ['background-color: #2d6a4f; color: #ffffff !important;'] * len(row)
             return [''] * len(row)
