@@ -18,12 +18,12 @@ except Exception:
 JSON_FILE = "arab_snapshot.json"
 LOG_CSV = "sniper_history_log.csv"
 
-st.set_page_config(page_title="ARAB SNIPER V15.12", layout="wide")
+st.set_page_config(page_title="ARAB SNIPER V15.14", layout="wide")
 
-if "odds_memory" not in st.session_state:
-    st.session_state["odds_memory"] = {}
-if "snap_date_mem" not in st.session_state:
-    st.session_state["snap_date_mem"] = None
+# Inizializzazione Session State per persistenza totale
+if "odds_memory" not in st.session_state: st.session_state["odds_memory"] = {}
+if "snap_date_mem" not in st.session_state: st.session_state["snap_date_mem"] = None
+if "scan_results" not in st.session_state: st.session_state["scan_results"] = None
 
 def apply_custom_css():
     st.markdown("""
@@ -43,7 +43,7 @@ def apply_custom_css():
 apply_custom_css()
 
 # ============================
-# API HELPERS & ROBUST HT PARSING (Fix Punto 2 & 3)
+# API HELPERS
 # ============================
 API_KEY = st.secrets.get("API_SPORTS_KEY")
 HOST = "v3.football.api-sports.io"
@@ -58,34 +58,21 @@ def api_get(session, path, params):
 def extract_markets_pro(resp_json):
     resp = resp_json.get("response", [])
     if not resp: return None
-    
     data = {"q1":0.0, "qx":0.0, "q2":0.0, "o25":0.0, "o05ht":0.0}
-    
     for bm in resp[0].get("bookmakers", []):
         bets = bm.get("bets", [])
         for b in bets:
             b_name = b.get("name", "").lower()
-            # 1X2
             if b["id"] == 1 and data["q1"] == 0:
                 v = b.get("values", [])
-                if len(v) >= 3:
-                    data["q1"], data["qx"], data["q2"] = float(v[0]["odd"]), float(v[1]["odd"]), float(v[2]["odd"])
-            # Over 2.5 FT
+                if len(v) >= 3: data["q1"], data["qx"], data["q2"] = float(v[0]["odd"]), float(v[1]["odd"]), float(v[2]["odd"])
             if b["id"] == 5 and data["o25"] == 0:
                 data["o25"] = float(next((x["odd"] for x in b.get("values", []) if x["value"] == "Over 2.5"), 0))
-            # Over 0.5 HT - Fix Punto 3: Parsing più robusto
-            if data["o05ht"] == 0:
-                if b["id"] == 13 or ("half" in b_name and "goals" in b_name):
-                    for val in b.get("values", []):
-                        v_label = val.get("value", "").lower()
-                        if "over 0.5" in v_label:
-                            data["o05ht"] = float(val["odd"])
-                            break
-        
-        # Fix Punto 2: Non uscire finché non abbiamo anche HT (se disponibile)
-        if data["q1"] > 0 and data["o25"] > 0 and data["o05ht"] > 0:
-            break
-            
+            if data["o05ht"] == 0 and (b["id"] == 13 or ("half" in b_name and "goals" in b_name)):
+                for val in b.get("values", []):
+                    if "over 0.5" in val.get("value", "").lower():
+                        data["o05ht"] = float(val["odd"]); break
+        if data["q1"] > 0 and data["o25"] > 0 and data["o05ht"] > 0: break
     return data
 
 def is_allowed_league(league_name, league_country):
@@ -96,7 +83,7 @@ def is_allowed_league(league_name, league_country):
     return True
 
 # ============================
-# PERSISTENZA & LOG (Fix Punto 1 & A)
+# PERSISTENZA Snapshot & Log
 # ============================
 def save_snapshot(data_dict, date_str):
     st.session_state["odds_memory"] = data_dict
@@ -105,10 +92,8 @@ def save_snapshot(data_dict, date_str):
         json.dump({"date": date_str, "odds": data_dict}, f)
 
 def load_snapshot():
-    # Carica da sessione se esiste
     if st.session_state["odds_memory"] and st.session_state["snap_date_mem"]:
         return st.session_state["snap_date_mem"], st.session_state["odds_memory"]
-    # Fix Punto 1: Se leggiamo da file, aggiorniamo la sessione
     if os.path.exists(JSON_FILE):
         try:
             with open(JSON_FILE, "r") as f:
@@ -125,71 +110,43 @@ def log_to_csv(results_list):
     for r in results_list:
         clean_r = r.copy()
         clean_r["Drop_Inv"] = r.get("Drop_Inv_Text", "STABILE")
-        # Fix Punto A: Uso di pop per evitare errori se la chiave manca
         clean_r.pop("Drop_Inv_Text", None)
         clean_list.append(clean_r)
-    
     new_df = pd.DataFrame(clean_list)
     new_df['Log_Date'] = datetime.now(ROME_TZ).strftime("%Y-%m-%d %H:%M")
     if os.path.exists(LOG_CSV):
         pd.concat([pd.read_csv(LOG_CSV), new_df], ignore_index=True).drop_duplicates(subset=['Ora', 'Match']).to_csv(LOG_CSV, index=False)
-    else:
-        new_df.to_csv(LOG_CSV, index=False)
+    else: new_df.to_csv(LOG_CSV, index=False)
 
 # ============================
-# LOGICA RATING
+# LOGICA RATING & STATS
 # ============================
 def calculate_rating(fid, q1, qx, q2, o25, o05ht, snap_data, max_q_fav, trap_fav, inv_margin):
-    sc = 40
-    det = []
-    msgs_html = []
-    msgs_text = []
+    sc, det, msgs_h, msgs_t = 40, [], [], []
     fid_s = str(fid)
-    
     if q1 > 0 and q2 > 0:
-        fav = min(q1, q2)
-        if fav <= trap_fav and o25 <= 1.65:
-            return 0, [], "", "", "trap_fav"
-    
+        if min(q1, q2) <= trap_fav and o25 <= 1.65: return 0, [], "", "", "trap_fav"
     if 0 < o25 < 1.55: return 0, [], "", "", "trap_o25"
-
     if fid_s in snap_data:
         old = snap_data[fid_s]
         old_q1, old_q2 = old.get("q1", 0), old.get("q2", 0)
-        
         if old_q1 > 0 and old_q2 > 0:
-            fav_at_snap = "1" if old_q1 < old_q2 else "2"
-            old_fav_p, cur_fav_p = (old_q1, q1) if fav_at_snap == "1" else (old_q2, q2)
-            
-            delta = old_fav_p - cur_fav_p
-            if delta >= 0.15 and cur_fav_p <= max_q_fav:
-                sc += 40; det.append("Drop")
-                msgs_html.append(f"📉 Δ{round(delta,2)}")
-                msgs_text.append(f"Drop Δ{round(delta,2)}")
-            
-            gap_now = abs(q1 - q2)
-            if abs(old_q1-old_q2) >= 0.10 and gap_now >= inv_margin:
-                if (fav_at_snap == "1" and q2 <= q1 - inv_margin) or (fav_at_snap == "2" and q1 <= q2 - inv_margin):
-                    bonus_inv = 20
-                    if qx < 3.20: bonus_inv += 5 
-                    sc += bonus_inv; det.append("Inv")
-                    msgs_html.append("🔄 INV")
-                    msgs_text.append("INV")
-
+            fav_snap = "1" if old_q1 < old_q2 else "2"
+            old_fav, cur_fav = (old_q1, q1) if fav_snap == "1" else (old_q2, q2)
+            delta = old_fav - cur_fav
+            if delta >= 0.15 and cur_fav <= max_q_fav:
+                sc += 40; det.append("Drop"); msgs_h.append(f"📉 Δ{round(delta,2)}"); msgs_t.append(f"Drop Δ{round(delta,2)}")
+            if abs(old_q1-old_q2) >= 0.10 and abs(q1-q2) >= inv_margin:
+                if (fav_snap == "1" and q2 <= q1-inv_margin) or (fav_snap == "2" and q1 <= q2-inv_margin):
+                    b_inv = 25 if qx < 3.20 else 20
+                    sc += b_inv; det.append("Inv"); msgs_h.append("🔄 INV"); msgs_t.append("INV")
     if 1.70 <= o25 <= 2.15: sc += 20; det.append("Val")
     if 1.30 <= o05ht <= 1.50: sc += 10; det.append("HT-Q")
-    
-    html_msg = f"<span class='drop-inline'>{' + '.join(msgs_html)}</span>" if msgs_html else ""
-    text_msg = " + ".join(msgs_text) if msgs_text else "STABILE"
-    
-    return min(100, sc), det, html_msg, text_msg, "ok"
+    h_msg = f"<span class='drop-inline'>{' + '.join(msgs_h)}</span>" if msgs_h else ""
+    t_msg = " + ".join(msgs_t) if msgs_t else "STABILE"
+    return min(100, sc), det, h_msg, t_msg, "ok"
 
-# ============================
-# STATS CACHE
-# ============================
-ht_cache = {}
-dry_cache = {}
-
+ht_cache, dry_cache = {}, {}
 def get_stats(session, tid, mode="ht"):
     cache = ht_cache if mode=="ht" else dry_cache
     if tid in cache: return cache[tid]
@@ -197,17 +154,14 @@ def get_stats(session, tid, mode="ht"):
         rx = api_get(session, "fixtures", {"team": tid, "last": 5 if mode=="ht" else 1, "status": "FT"})
         fx = rx.get("response", [])
         if not fx: return 0.0
-        if mode == "ht":
-            res = sum([1 for f in fx if (f.get("score",{}).get("halftime",{}).get("home") or 0) + (f.get("score",{}).get("halftime",{}).get("away") or 0) >= 1]) / len(fx)
-        else:
-            is_h = fx[0]["teams"]["home"]["id"] == tid
-            res = (int(fx[0]["goals"]["home"] if is_h else fx[0]["goals"]["away"] or 0) == 0)
+        if mode == "ht": res = sum([1 for f in fx if (f.get("score",{}).get("halftime",{}).get("home") or 0) + (f.get("score",{}).get("halftime",{}).get("away") or 0) >= 1]) / len(fx)
+        else: res = (int((fx[0]["goals"]["home"] if fx[0]["teams"]["home"]["id"] == tid else fx[0]["goals"]["away"]) or 0) == 0)
         cache[tid] = res
         return res
     except: return 0.0
 
 # ============================
-# CORE UI
+# UI E CORE
 # ============================
 st.sidebar.header("⚙️ Sniper Settings")
 min_rating = st.sidebar.slider("Rating Minimo", 0, 85, 60)
@@ -226,17 +180,19 @@ with c1:
         with requests.Session() as s:
             data = api_get(s, "fixtures", {"date": oggi, "timezone": "Europe/Rome"})
             valid_fx = [m for m in data.get("response", []) if m['fixture']['status']['short'] == 'NS' and is_allowed_league(m['league']['name'], m['league']['country'])]
-            new_snap = {}
-            pb = st.progress(0)
+            new_snap, pb = {}, st.progress(0)
             for i, m in enumerate(valid_fx):
                 pb.progress((i+1)/len(valid_fx))
                 try:
                     r_o = api_get(s, "odds", {"fixture": m["fixture"]["id"]})
-                    m_data = extract_markets_pro(r_o)
-                    if m_data and m_data["q1"] > 0: new_snap[m["fixture"]["id"]] = m_data
+                    mk = extract_markets_pro(r_o)
+                    if mk and mk["q1"] > 0: new_snap[m["fixture"]["id"]] = mk
                 except: continue
             save_snapshot(new_snap, oggi)
             st.success(f"Snapshot OK: {len(new_snap)} match.")
+
+with c2:
+    st.write(f"Snapshot: **{snap_date}**" if snap_date == oggi else f"⚠️ Snapshot obsoleto ({snap_date})")
 
 if st.button("🚀 AVVIA SCANSIONE"):
     diag = {"analyzed": 0, "total": 0, "trap_fav": 0, "trap_o25": 0, "no_odds": 0, "below_min": 0, "errors": 0}
@@ -251,64 +207,38 @@ if st.button("🚀 AVVIA SCANSIONE"):
             try:
                 r_o = api_get(s, "odds", {"fixture": m["fixture"]["id"]})
                 mk = extract_markets_pro(r_o)
-                if not mk or mk["q1"] <= 0:
-                    diag["no_odds"] += 1
-                    continue
-                
-                rating, det_list, drop_html, drop_text, status = calculate_rating(m["fixture"]["id"], mk["q1"], mk["qx"], mk["q2"], mk["o25"], mk["o05ht"], snap_odds, max_q_fav, trap_fav, inv_margin)
-                
-                if status != "ok":
-                    diag[status] += 1
-                    continue
-
-                if rating >= (min_rating - 10) and rating > 0:
+                if not mk or mk["q1"] <= 0: diag["no_odds"] += 1; continue
+                rating, det, d_html, d_text, status = calculate_rating(m["fixture"]["id"], mk["q1"], mk["qx"], mk["q2"], mk["o25"], mk["o05ht"], snap_odds, max_q_fav, trap_fav, inv_margin)
+                if status != "ok": diag[status] += 1; continue
+                if rating >= (min_rating - 15) and rating > 0:
                     h_id, a_id = m["teams"]["home"]["id"], m["teams"]["away"]["id"]
-                    if get_stats(s, h_id, "ht") >= 0.6 and get_stats(s, a_id, "ht") >= 0.6:
-                        rating += 20; det_list.append("HT")
-                    if use_sb_bonus and (get_stats(s, h_id, "dry") or get_stats(s, a_id, "dry")):
-                        rating = min(100, rating + 10); det_list.append("DRY")
-                
+                    if get_stats(s, h_id, "ht") >= 0.6 and get_stats(s, a_id, "ht") >= 0.6: rating += 20; det.append("HT")
+                    if use_sb_bonus and (get_stats(s, h_id, "dry") or get_stats(s, a_id, "dry")): rating = min(100, rating+10); det.append("DRY")
                 if rating >= min_rating:
                     diag["total"] += 1
-                    results.append({
-                        "Ora": m["fixture"]["date"][11:16],
-                        "Lega": m['league']['name'],
-                        "Match": f"{m['teams']['home']['name']} - {m['teams']['away']['name']}",
-                        "1X2": f"{mk['q1']:.2f}|{mk['qx']:.2f}|{mk['q2']:.2f}",
-                        "O2.5": f"{mk['o25']:.2f}",
-                        "O0.5HT": f"{mk['o05ht']:.2f}",
-                        "Rating": rating,
-                        "Info": f"[{'|'.join(det_list)}]",
-                        "Drop_Inv": drop_html,
-                        "Drop_Inv_Text": drop_text,
-                        "Fixture_ID": m["fixture"]["id"]
-                    })
+                    results.append({"Ora": m["fixture"]["date"][11:16], "Lega": m['league']['name'], "Match": f"{m['teams']['home']['name']} - {m['teams']['away']['name']}", "1X2": f"{mk['q1']:.2f}|{mk['qx']:.2f}|{mk['q2']:.2f}", "O2.5": f"{mk['o25']:.2f}", "O0.5HT": f"{mk['o05ht']:.2f}", "Rating": rating, "Info": f"[{'|'.join(det)}]", "Drop_Inv": d_html, "Drop_Inv_Text": d_text, "Fixture_ID": m["fixture"]["id"]})
                 else: diag["below_min"] += 1
             except: diag["errors"] += 1
+        st.session_state["scan_results"] = {"data": results, "diag": diag, "date": oggi}
+        log_to_csv(results)
 
-        st.markdown(f"<div class='diag-box'>📡 ANALIZZATI: {diag['analyzed']} | ✅ MOSTRATI: {diag['total']} | 📉 BELOW: {diag['below_min']} | 🚫 TRAPS: {diag['trap_fav'] + diag['trap_o25']} | ❌ ERRORS: {diag['errors']}</div>", unsafe_allow_html=True)
-
-        if results:
-            df_display = pd.DataFrame(results).sort_values("Ora")
-            log_to_csv(results)
-            
-            # Fix Punto B: Ripristino styling condizionale
-            df_styled = df_display.copy()
-            df_styled["Lega"] = df_styled["Lega"].apply(lambda x: f"<div class='lega-cell'>{x}</div>")
-            df_styled["Match"] = df_styled.apply(lambda r: f"<div class='match-cell'>{r['Match']} {r['Drop_Inv']}</div>", axis=1)
-            df_styled["Info"] = df_styled["Info"].apply(lambda x: f"<span class='details-inline'>{x}</span>")
-            df_styled["Rating_D"] = df_styled["Rating"].apply(lambda x: f"<b>{x}</b>")
-            
-            to_show = df_styled[["Ora", "Lega", "Match", "1X2", "O2.5", "O0.5HT", "Rating_D", "Info"]]
-            
-            def style_rows(row):
-                # Recuperiamo il rating originale tramite l'indice della riga
-                idx = row.name
-                r_val = df_display.loc[idx, "Rating"]
-                if r_val >= 85: return ['background-color: #1b4332; color: #ffffff !important;'] * len(row)
-                if r_val >= 70: return ['background-color: #2d6a4f; color: #ffffff !important;'] * len(row)
-                return [''] * len(row)
-
-            html_output = to_show.style.apply(style_rows, axis=1).to_html(escape=False, index=False)
-            st.write(html_output, unsafe_allow_html=True)
-            st.download_button("📥 DOWNLOAD REPORT", data=html_output, file_name=f"Sniper_{oggi}.html", mime="text/html")
+# RENDERING PERSISTENTE
+if st.session_state["scan_results"]:
+    res = st.session_state["scan_results"]
+    st.markdown(f"<div class='diag-box'>📡 ANALIZZATI: {res['diag']['analyzed']} | ✅ MOSTRATI: {res['diag']['total']} | 📉 BELOW: {res['diag']['below_min']} | 🚫 TRAPS: {res['diag']['trap_fav'] + res['diag']['trap_o25']} | ❌ ERRORS: {res['diag']['errors']}</div>", unsafe_allow_html=True)
+    if res["data"]:
+        df_d = pd.DataFrame(res["data"]).sort_values("Ora")
+        df_s = df_d.copy()
+        df_s["Lega"] = df_s["Lega"].apply(lambda x: f"<div class='lega-cell'>{x}</div>")
+        df_s["Match"] = df_s.apply(lambda r: f"<div class='match-cell'>{r['Match']} {r['Drop_Inv']}</div>", axis=1)
+        df_s["Info"] = df_s["Info"].apply(lambda x: f"<span class='details-inline'>{x}</span>")
+        df_s["Rating_D"] = df_s["Rating"].apply(lambda x: f"<b>{x}</b>")
+        to_show = df_s[["Ora", "Lega", "Match", "1X2", "O2.5", "O0.5HT", "Rating_D", "Info"]]
+        def style_rows(row):
+            r_val = df_d.loc[row.name, "Rating"]
+            if r_val >= 85: return ['background-color: #1b4332; color: #ffffff !important;'] * len(row)
+            if r_val >= 70: return ['background-color: #2d6a4f; color: #ffffff !important;'] * len(row)
+            return [''] * len(row)
+        html_out = to_show.style.apply(style_rows, axis=1).to_html(escape=False, index=False)
+        st.write(html_out, unsafe_allow_html=True)
+        st.download_button("📥 DOWNLOAD REPORT", data=html_out, file_name=f"Sniper_{res['date']}.html", mime="text/html")
