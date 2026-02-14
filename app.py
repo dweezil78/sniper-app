@@ -16,14 +16,15 @@ except Exception:
     ROME_TZ = None
 
 def now_rome():
+    """Helper unico per evitare mismatch tra UTC e Roma"""
     return datetime.now(ROME_TZ) if ROME_TZ else datetime.now()
 
 JSON_FILE = "arab_snapshot.json"
 LOG_CSV = "sniper_history_log.csv"
 
-st.set_page_config(page_title="ARAB SNIPER V15.20", layout="wide")
+st.set_page_config(page_title="ARAB SNIPER V15.21 - MASTER", layout="wide")
 
-# Setup Session State
+# Inizializzazione Session State per persistenza totale
 if "odds_memory" not in st.session_state: st.session_state["odds_memory"] = {}
 if "snap_date_mem" not in st.session_state: st.session_state["snap_date_mem"] = None
 if "snap_time_obj" not in st.session_state: st.session_state["snap_time_obj"] = None
@@ -73,7 +74,6 @@ def extract_markets_pro(resp_json):
                 if len(v) >= 3: data["q1"], data["qx"], data["q2"] = float(v[0]["odd"]), float(v[1]["odd"]), float(v[2]["odd"])
             if b["id"] == 5 and data["o25"] == 0:
                 data["o25"] = float(next((x["odd"] for x in b.get("values", []) if x["value"] == "Over 2.5"), 0))
-            # Miglioria B: Parsing HT ultra-tollerante
             if data["o05ht"] == 0 and ("1st" in b_name or "half" in b_name) and ("goals" in b_name or "over/under" in b_name):
                 for val in b.get("values", []):
                     v_label = val.get("value", "").lower().replace(" ","")
@@ -120,19 +120,48 @@ def calculate_rating(fid, q1, qx, q2, o25, o05ht, snap_data, max_q_fav, trap_fav
     t_msg = " + ".join(msgs_t) if msgs_t else "STABILE"
     return min(100, sc), det, h_msg, t_msg, "ok"
 
+ht_cache, dry_cache = {}, {}
+def get_stats(session, tid, mode="ht"):
+    cache = ht_cache if mode=="ht" else dry_cache
+    if tid in cache: return cache[tid]
+    try:
+        rx = api_get(session, "fixtures", {"team": tid, "last": 5 if mode=="ht" else 1, "status": "FT"})
+        fx = rx.get("response", [])
+        if not fx: return 0.0
+        if mode == "ht": res = sum([1 for f in fx if (f.get("score",{}).get("halftime",{}).get("home") or 0) + (f.get("score",{}).get("halftime",{}).get("away") or 0) >= 1]) / len(fx)
+        else: res = (int((fx[0]["goals"]["home"] if fx[0]["teams"]["home"]["id"] == tid else fx[0]["goals"]["away"]) or 0) == 0)
+        cache[tid] = res
+        return res
+    except: return 0.0
+
 # ============================
-# PERSISTENZA & UI SIDEBAR
+# PERSISTENZA & LOG
+# ============================
+def log_to_csv(results_list):
+    if not results_list: return
+    clean_list = []
+    for r in results_list:
+        clean_r = r.copy()
+        clean_r["Drop_Inv"] = r.get("Drop_Inv_Text", "STABILE")
+        clean_r.pop("Drop_Inv_Text", None)
+        clean_list.append(clean_r)
+    new_df = pd.DataFrame(clean_list)
+    new_df['Log_Date'] = now_rome().strftime("%Y-%m-%d %H:%M")
+    if os.path.exists(LOG_CSV):
+        pd.concat([pd.read_csv(LOG_CSV), new_df], ignore_index=True).drop_duplicates(subset=['Fixture_ID']).to_csv(LOG_CSV, index=False)
+    else: new_df.to_csv(LOG_CSV, index=False)
+
+# ============================
+# UI SIDEBAR
 # ============================
 oggi = now_rome().strftime("%Y-%m-%d")
 
-# Caricamento Paesi (Fix 2: Fallback su Fixtures se JSON incompleto)
+# Caricamento Paesi all'avvio
 if not st.session_state["found_countries"]:
     if os.path.exists(JSON_FILE):
         with open(JSON_FILE, "r") as f:
             _d = json.load(f)
             st.session_state["found_countries"] = sorted(list(set(v.get("country") for v in _d.get("odds", {}).values() if v.get("country"))))
-    
-    # Se ancora vuoto (JSON vecchio o assente), facciamo chiamata fixtures leggera
     if not st.session_state["found_countries"]:
         try:
             with requests.Session() as s:
@@ -149,6 +178,7 @@ st.sidebar.markdown("---")
 st.sidebar.subheader("🌍 Filtro Campionati")
 blocked_user = st.sidebar.multiselect("🚫 Blocca Paesi", st.session_state["found_countries"], key="blocked_user")
 forced_user = st.sidebar.multiselect("✅ Forza Paesi", st.session_state["found_countries"], key="forced_user")
+use_sb_bonus = st.sidebar.toggle("Bonus Sblocco HT (Ultima a secco)", value=True)
 
 # ============================
 # CORE EXECUTION
@@ -166,35 +196,28 @@ with c1:
             data = api_get(s, "fixtures", {"date": oggi, "timezone": "Europe/Rome"})
             all_raw = data.get("response", []) or []
             valid_fx = [m for m in all_raw if m['fixture']['status']['short'] == 'NS']
-            
-            if not valid_fx:
-                st.warning("Nessun match NS trovato oggi.")
-            else:
-                new_snap, pb = {}, st.progress(0)
-                for i, m in enumerate(valid_fx):
-                    pb.progress((i+1)/len(valid_fx))
-                    try:
-                        r_o = api_get(s, "odds", {"fixture": m["fixture"]["id"]})
-                        mk = extract_markets_pro(r_o)
-                        if mk and mk["q1"] > 0 and min(mk["q1"], mk["q2"]) <= 5.0:
-                            mk["country"] = m["league"]["country"]
-                            new_snap[m["fixture"]["id"]] = mk
-                    except: continue
-                
-                snap_time = now_rome()
-                st.session_state["odds_memory"], st.session_state["snap_date_mem"] = new_snap, oggi
-                st.session_state["snap_time_obj"] = snap_time
-                with open(JSON_FILE, "w") as f: 
-                    json.dump({"date": oggi, "timestamp": snap_time.isoformat(), "odds": new_snap}, f)
-                st.rerun()
+            if not valid_fx: st.warning("Nessun match NS trovato."); st.stop()
+            new_snap, pb = {}, st.progress(0)
+            for i, m in enumerate(valid_fx):
+                pb.progress((i+1)/len(valid_fx))
+                try:
+                    r_o = api_get(s, "odds", {"fixture": m["fixture"]["id"]})
+                    mk = extract_markets_pro(r_o)
+                    if mk and mk["q1"] > 0 and min(mk["q1"], mk["q2"]) <= 5.0:
+                        mk["country"] = m["league"]["country"]
+                        new_snap[m["fixture"]["id"]] = mk
+                except: continue
+            snap_time = now_rome()
+            st.session_state["odds_memory"], st.session_state["snap_date_mem"] = new_snap, oggi
+            st.session_state["snap_time_obj"] = snap_time
+            with open(JSON_FILE, "w") as f: json.dump({"date": oggi, "timestamp": snap_time.isoformat(), "odds": new_snap}, f)
+            st.rerun()
 
 with c2:
     if st.session_state['snap_date_mem'] == oggi and st.session_state["snap_time_obj"]:
         diff = now_rome() - st.session_state["snap_time_obj"]
         st.write(f"Snapshot delle: **{st.session_state['snap_time_obj'].strftime('%H:%M')}** ({int(diff.total_seconds()//60)} min fa)")
-        # Miglioria C: Warning se snapshot obsoleto o di ieri
-        if st.session_state['snap_date_mem'] != oggi: st.warning("⚠️ Lo snapshot in memoria non è di oggi!")
-    else: st.write(f"⚠️ Snapshot assente.")
+    else: st.write("⚠️ Snapshot assente o obsoleto.")
 
 if st.button("🚀 AVVIA SCANSIONE"):
     if st.session_state["snap_time_obj"]:
@@ -205,34 +228,32 @@ if st.button("🚀 AVVIA SCANSIONE"):
     with requests.Session() as s:
         all_raw = api_get(s, "fixtures", {"date": oggi, "timezone": "Europe/Rome"}).get("response", [])
         fixtures = [f for f in all_raw if f["fixture"]["status"]["short"] == "NS" and is_allowed_league(f["league"]["name"], f["league"]["country"], blocked_user, forced_user)]
-        
-        if not fixtures:
-            st.warning("Nessun match trovato per i filtri selezionati.")
-        else:
-            results, pb = [], st.progress(0)
-            for i, m in enumerate(fixtures):
-                diag["analyzed"] += 1
-                pb.progress((i+1)/len(fixtures))
-                try:
-                    r_o = api_get(s, "odds", {"fixture": m["fixture"]["id"]})
-                    mk = extract_markets_pro(r_o)
-                    if not mk or mk["q1"] <= 0: diag["no_odds"] += 1; continue
-                    
-                    rating, det, d_html, d_text, status = calculate_rating(m["fixture"]["id"], mk["q1"], mk["qx"], mk["q2"], mk["o25"], mk["o05ht"], st.session_state["odds_memory"], max_q_fav, trap_fav, inv_margin)
-                    
-                    # Fix 1: Incremento robusto diagnostica
-                    if status != "ok":
-                        diag[status] = diag.get(status, 0) + 1
-                        continue
-                    
-                    if rating >= min_rating:
-                        diag["total"] += 1
-                        results.append({"Ora": m["fixture"]["date"][11:16], "Lega": m['league']['name'], "Match": f"{m['teams']['home']['name']} - {m['teams']['away']['name']}", "1X2": f"{mk['q1']:.2f}|{mk['qx']:.2f}|{mk['q2']:.2f}", "O2.5": f"{mk['o25']:.2f}", "O0.5HT": f"{mk['o05ht']:.2f}" if mk['o05ht'] > 0 else "N/D", "Rating": rating, "Info": f"[{'|'.join(det)}]", "Drop_Inv": d_html, "Drop_Inv_Text": d_text, "Fixture_ID": m["fixture"]["id"]})
-                    else: diag["below_min"] += 1
-                except: diag["errors"] += 1
-            st.session_state["scan_results"] = {"data": results, "diag": diag, "date": oggi}
+        if not fixtures: st.warning("Nessun match trovato."); st.stop()
+        results, pb = [], st.progress(0)
+        for i, m in enumerate(fixtures):
+            diag["analyzed"] += 1
+            pb.progress((i+1)/len(fixtures))
+            try:
+                r_o = api_get(s, "odds", {"fixture": m["fixture"]["id"]})
+                mk = extract_markets_pro(r_o)
+                if not mk or mk["q1"] <= 0: diag["no_odds"] += 1; continue
+                rating, det, d_html, d_text, status = calculate_rating(m["fixture"]["id"], mk["q1"], mk["qx"], mk["q2"], mk["o25"], mk["o05ht"], st.session_state["odds_memory"], max_q_fav, trap_fav, inv_margin)
+                if status != "ok": diag[status] = diag.get(status, 0) + 1; continue
+                if rating >= (min_rating - 15) and rating > 0:
+                    h_id, a_id = m["teams"]["home"]["id"], m["teams"]["away"]["id"]
+                    if get_stats(s, h_id, "ht") >= 0.6 and get_stats(s, a_id, "ht") >= 0.6: rating += 20; det.append("HT")
+                    if use_sb_bonus and (get_stats(s, h_id, "dry") or get_stats(s, a_id, "dry")): rating = min(100, rating+10); det.append("DRY")
+                if rating >= min_rating:
+                    diag["total"] += 1
+                    results.append({"Ora": m["fixture"]["date"][11:16], "Lega": m['league']['name'], "Match": f"{m['teams']['home']['name']} - {m['teams']['away']['name']}", "1X2": f"{mk['q1']:.2f}|{mk['qx']:.2f}|{mk['q2']:.2f}", "O2.5": f"{mk['o25']:.2f}", "O0.5HT": f"{mk['o05ht']:.2f}" if mk['o05ht'] > 0 else "N/D", "Rating": rating, "Info": f"[{'|'.join(det)}]", "Drop_Inv": d_html, "Drop_Inv_Text": d_text, "Fixture_ID": m["fixture"]["id"]})
+                else: diag["below_min"] += 1
+            except: diag["errors"] += 1
+        st.session_state["scan_results"] = {"data": results, "diag": diag, "date": oggi}
+        log_to_csv(results)
 
+# ============================
 # RENDERING PERSISTENTE
+# ============================
 if st.session_state["scan_results"]:
     res = st.session_state["scan_results"]
     st.markdown(f"<div class='diag-box'>📡 ANALIZZATI: {res['diag']['analyzed']} | ✅ MOSTRATI: {res['diag']['total']} | 🚫 TRAPS: {res['diag'].get('trap_fav',0) + res['diag'].get('trap_o25',0)} | ❌ ERRORS: {res['diag']['errors']}</div>", unsafe_allow_html=True)
@@ -243,5 +264,18 @@ if st.session_state["scan_results"]:
         df_s["Match"] = df_s.apply(lambda r: f"<div class='match-cell'>{r['Match']} {r['Drop_Inv']}</div>", axis=1)
         df_s["Info"] = df_s["Info"].apply(lambda x: f"<span class='details-inline'>{x}</span>")
         df_s["Rating_D"] = df_s["Rating"].apply(lambda x: f"<b>{x}</b>")
-        html_out = df_s[["Ora", "Lega", "Match", "1X2", "O2.5", "O0.5HT", "Rating_D", "Info"]].to_html(escape=False, index=False)
+        to_show = df_s[["Ora", "Lega", "Match", "1X2", "O2.5", "O0.5HT", "Rating_D", "Info"]]
+        
+        def style_rows(row):
+            idx = row.name
+            r_val = df_d.loc[idx, "Rating"]
+            info_val = df_d.loc[idx, "Info"]
+            if r_val >= 85: return ['background-color: #1b4332; color: #ffffff !important;'] * len(row)
+            elif r_val >= 75 or (r_val >= 65 and "DRY" in info_val): return ['background-color: #2d6a4f; color: #ffffff !important;'] * len(row)
+            elif r_val >= 60: return ['background-color: #f8f9fa; color: #000000 !important;'] * len(row)
+            return [''] * len(row)
+
+        html_out = to_show.style.apply(style_rows, axis=1).to_html(escape=False, index=False)
         st.write(html_out, unsafe_allow_html=True)
+        st.markdown("---")
+        st.download_button("📥 SCARICA REPORT HTML", data=html_out, file_name=f"Sniper_{res['date']}.html", mime="text/html")
