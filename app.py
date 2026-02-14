@@ -7,7 +7,7 @@ import os
 from typing import Any, Dict, List, Tuple, Optional
 
 # ============================
-# CONFIGURAZIONE & SESSIONE
+# CONFIGURAZIONE & TIMEZONE
 # ============================
 try:
     from zoneinfo import ZoneInfo
@@ -15,15 +15,20 @@ try:
 except Exception:
     ROME_TZ = None
 
+def now_rome():
+    return datetime.now(ROME_TZ) if ROME_TZ else datetime.now()
+
 JSON_FILE = "arab_snapshot.json"
 LOG_CSV = "sniper_history_log.csv"
 
-st.set_page_config(page_title="ARAB SNIPER V15.14", layout="wide")
+st.set_page_config(page_title="ARAB SNIPER V15.20", layout="wide")
 
-# Inizializzazione Session State per persistenza totale
+# Setup Session State
 if "odds_memory" not in st.session_state: st.session_state["odds_memory"] = {}
 if "snap_date_mem" not in st.session_state: st.session_state["snap_date_mem"] = None
+if "snap_time_obj" not in st.session_state: st.session_state["snap_time_obj"] = None
 if "scan_results" not in st.session_state: st.session_state["scan_results"] = None
+if "found_countries" not in st.session_state: st.session_state["found_countries"] = []
 
 def apply_custom_css():
     st.markdown("""
@@ -35,7 +40,7 @@ def apply_custom_css():
             .match-cell { text-align: left !important; min-width: 180px; font-weight: 700; color: inherit !important; }
             .lega-cell { max-width: 120px; overflow: hidden; text-overflow: ellipsis; font-size: 0.75rem; color: inherit !important; text-align: left !important; }
             .drop-inline { color: #d68910; font-size: 0.72rem; font-weight: 800; margin-left: 5px; }
-            .details-inline { font-size: 0.7rem; color: inherit !important; font-weight: 800; margin-left: 5px; opacity: 0.9; }
+            .details-inline { font-size: 0.7rem; font-weight: 800; opacity: 0.9; margin-left: 5px; color: #333 !important; }
             .diag-box { padding: 12px; background: #1a1c23; color: #00e5ff; border-radius: 8px; margin-bottom: 15px; font-family: monospace; font-size: 0.85rem; border: 1px solid #00e5ff; }
         </style>
     """, unsafe_allow_html=True)
@@ -43,7 +48,7 @@ def apply_custom_css():
 apply_custom_css()
 
 # ============================
-# API HELPERS
+# API HELPERS & ROBUST PARSING
 # ============================
 API_KEY = st.secrets.get("API_SPORTS_KEY")
 HOST = "v3.football.api-sports.io"
@@ -68,59 +73,28 @@ def extract_markets_pro(resp_json):
                 if len(v) >= 3: data["q1"], data["qx"], data["q2"] = float(v[0]["odd"]), float(v[1]["odd"]), float(v[2]["odd"])
             if b["id"] == 5 and data["o25"] == 0:
                 data["o25"] = float(next((x["odd"] for x in b.get("values", []) if x["value"] == "Over 2.5"), 0))
-            if data["o05ht"] == 0 and (b["id"] == 13 or ("half" in b_name and "goals" in b_name)):
+            # Miglioria B: Parsing HT ultra-tollerante
+            if data["o05ht"] == 0 and ("1st" in b_name or "half" in b_name) and ("goals" in b_name or "over/under" in b_name):
                 for val in b.get("values", []):
-                    if "over 0.5" in val.get("value", "").lower():
+                    v_label = val.get("value", "").lower().replace(" ","")
+                    if ("over" in v_label and "0.5" in v_label) or ("o0.5" in v_label):
                         data["o05ht"] = float(val["odd"]); break
         if data["q1"] > 0 and data["o25"] > 0 and data["o05ht"] > 0: break
     return data
 
-def is_allowed_league(league_name, league_country):
-    name = league_name.lower()
-    banned = ["women", "u19", "u20", "u21", "u23", "primavera", "youth", "reserve"]
-    if any(x in name for x in banned): return False
-    if league_country in ["Algeria","Egypt","Morocco","Saudi Arabia","UAE","India"]: return False
-    return True
-
 # ============================
-# PERSISTENZA Snapshot & Log
+# LOGICA CORE
 # ============================
-def save_snapshot(data_dict, date_str):
-    st.session_state["odds_memory"] = data_dict
-    st.session_state["snap_date_mem"] = date_str
-    with open(JSON_FILE, "w") as f:
-        json.dump({"date": date_str, "odds": data_dict}, f)
+def is_allowed_league(league_name, league_country, blocked_user, forced_user):
+    name = (league_name or "").lower()
+    banned = ["women", "femminile", "u19", "u20", "u21", "u23", "primavera", "youth", "reserve", "friendly"]
+    if any(t in name for t in banned): return False
+    country = (league_country or "").strip()
+    if country in forced_user: return True
+    if country in blocked_user: return False
+    AREAS = {"Italy", "Spain", "France", "Germany", "England", "Portugal", "Netherlands", "Belgium", "Switzerland", "Austria", "Greece", "Turkey", "Scotland", "Denmark", "Norway", "Sweden", "Poland", "Czech Republic", "Slovakia", "Hungary", "Romania", "Croatia", "Serbia", "Brazil", "Argentina", "Uruguay", "Colombia", "Chile", "USA", "United States", "Mexico", "Canada", "Japan", "South Korea", "Korea Republic", "Australia", "New Zealand"}
+    return country in AREAS
 
-def load_snapshot():
-    if st.session_state["odds_memory"] and st.session_state["snap_date_mem"]:
-        return st.session_state["snap_date_mem"], st.session_state["odds_memory"]
-    if os.path.exists(JSON_FILE):
-        try:
-            with open(JSON_FILE, "r") as f:
-                data = json.load(f)
-                st.session_state["odds_memory"] = data.get("odds", {})
-                st.session_state["snap_date_mem"] = data.get("date")
-                return st.session_state["snap_date_mem"], st.session_state["odds_memory"]
-        except: return None, {}
-    return None, {}
-
-def log_to_csv(results_list):
-    if not results_list: return
-    clean_list = []
-    for r in results_list:
-        clean_r = r.copy()
-        clean_r["Drop_Inv"] = r.get("Drop_Inv_Text", "STABILE")
-        clean_r.pop("Drop_Inv_Text", None)
-        clean_list.append(clean_r)
-    new_df = pd.DataFrame(clean_list)
-    new_df['Log_Date'] = datetime.now(ROME_TZ).strftime("%Y-%m-%d %H:%M")
-    if os.path.exists(LOG_CSV):
-        pd.concat([pd.read_csv(LOG_CSV), new_df], ignore_index=True).drop_duplicates(subset=['Ora', 'Match']).to_csv(LOG_CSV, index=False)
-    else: new_df.to_csv(LOG_CSV, index=False)
-
-# ============================
-# LOGICA RATING & STATS
-# ============================
 def calculate_rating(fid, q1, qx, q2, o25, o05ht, snap_data, max_q_fav, trap_fav, inv_margin):
     sc, det, msgs_h, msgs_t = 40, [], [], []
     fid_s = str(fid)
@@ -146,86 +120,122 @@ def calculate_rating(fid, q1, qx, q2, o25, o05ht, snap_data, max_q_fav, trap_fav
     t_msg = " + ".join(msgs_t) if msgs_t else "STABILE"
     return min(100, sc), det, h_msg, t_msg, "ok"
 
-ht_cache, dry_cache = {}, {}
-def get_stats(session, tid, mode="ht"):
-    cache = ht_cache if mode=="ht" else dry_cache
-    if tid in cache: return cache[tid]
-    try:
-        rx = api_get(session, "fixtures", {"team": tid, "last": 5 if mode=="ht" else 1, "status": "FT"})
-        fx = rx.get("response", [])
-        if not fx: return 0.0
-        if mode == "ht": res = sum([1 for f in fx if (f.get("score",{}).get("halftime",{}).get("home") or 0) + (f.get("score",{}).get("halftime",{}).get("away") or 0) >= 1]) / len(fx)
-        else: res = (int((fx[0]["goals"]["home"] if fx[0]["teams"]["home"]["id"] == tid else fx[0]["goals"]["away"]) or 0) == 0)
-        cache[tid] = res
-        return res
-    except: return 0.0
+# ============================
+# PERSISTENZA & UI SIDEBAR
+# ============================
+oggi = now_rome().strftime("%Y-%m-%d")
 
-# ============================
-# UI E CORE
-# ============================
+# Caricamento Paesi (Fix 2: Fallback su Fixtures se JSON incompleto)
+if not st.session_state["found_countries"]:
+    if os.path.exists(JSON_FILE):
+        with open(JSON_FILE, "r") as f:
+            _d = json.load(f)
+            st.session_state["found_countries"] = sorted(list(set(v.get("country") for v in _d.get("odds", {}).values() if v.get("country"))))
+    
+    # Se ancora vuoto (JSON vecchio o assente), facciamo chiamata fixtures leggera
+    if not st.session_state["found_countries"]:
+        try:
+            with requests.Session() as s:
+                raw = api_get(s, "fixtures", {"date": oggi, "timezone": "Europe/Rome"}).get("response", [])
+                st.session_state["found_countries"] = sorted(list(set(f["league"]["country"] for f in raw)))
+        except: pass
+
 st.sidebar.header("⚙️ Sniper Settings")
 min_rating = st.sidebar.slider("Rating Minimo", 0, 85, 60)
 max_q_fav = st.sidebar.slider("Quota Max Favorito", 1.50, 3.00, 1.85)
 trap_fav = st.sidebar.slider("Trap favorito <=", 1.25, 1.70, 1.45, 0.01)
 inv_margin = st.sidebar.slider("Margine inversione", 0.05, 0.30, 0.10, 0.01)
-st.sidebar.subheader("🔥 Bonus Strategici")
-use_sb_bonus = st.sidebar.toggle("Bonus Sblocco HT (Ultima a secco)", value=True)
+st.sidebar.markdown("---")
+st.sidebar.subheader("🌍 Filtro Campionati")
+blocked_user = st.sidebar.multiselect("🚫 Blocca Paesi", st.session_state["found_countries"], key="blocked_user")
+forced_user = st.sidebar.multiselect("✅ Forza Paesi", st.session_state["found_countries"], key="forced_user")
 
-oggi = datetime.now(ROME_TZ).strftime("%Y-%m-%d") if ROME_TZ else datetime.now().strftime("%Y-%m-%d")
-snap_date, snap_odds = load_snapshot()
+# ============================
+# CORE EXECUTION
+# ============================
+if os.path.exists(JSON_FILE) and not st.session_state["odds_memory"]:
+    with open(JSON_FILE, "r") as f:
+        _d = json.load(f)
+        st.session_state["odds_memory"], st.session_state["snap_date_mem"] = _d.get("odds", {}), _d.get("date")
+        st.session_state["snap_time_obj"] = datetime.fromisoformat(_d.get("timestamp")) if _d.get("timestamp") else None
 
 c1, c2 = st.columns([1, 2])
 with c1:
     if st.button("📌 SALVA SNAPSHOT"):
         with requests.Session() as s:
             data = api_get(s, "fixtures", {"date": oggi, "timezone": "Europe/Rome"})
-            valid_fx = [m for m in data.get("response", []) if m['fixture']['status']['short'] == 'NS' and is_allowed_league(m['league']['name'], m['league']['country'])]
-            new_snap, pb = {}, st.progress(0)
-            for i, m in enumerate(valid_fx):
-                pb.progress((i+1)/len(valid_fx))
+            all_raw = data.get("response", []) or []
+            valid_fx = [m for m in all_raw if m['fixture']['status']['short'] == 'NS']
+            
+            if not valid_fx:
+                st.warning("Nessun match NS trovato oggi.")
+            else:
+                new_snap, pb = {}, st.progress(0)
+                for i, m in enumerate(valid_fx):
+                    pb.progress((i+1)/len(valid_fx))
+                    try:
+                        r_o = api_get(s, "odds", {"fixture": m["fixture"]["id"]})
+                        mk = extract_markets_pro(r_o)
+                        if mk and mk["q1"] > 0 and min(mk["q1"], mk["q2"]) <= 5.0:
+                            mk["country"] = m["league"]["country"]
+                            new_snap[m["fixture"]["id"]] = mk
+                    except: continue
+                
+                snap_time = now_rome()
+                st.session_state["odds_memory"], st.session_state["snap_date_mem"] = new_snap, oggi
+                st.session_state["snap_time_obj"] = snap_time
+                with open(JSON_FILE, "w") as f: 
+                    json.dump({"date": oggi, "timestamp": snap_time.isoformat(), "odds": new_snap}, f)
+                st.rerun()
+
+with c2:
+    if st.session_state['snap_date_mem'] == oggi and st.session_state["snap_time_obj"]:
+        diff = now_rome() - st.session_state["snap_time_obj"]
+        st.write(f"Snapshot delle: **{st.session_state['snap_time_obj'].strftime('%H:%M')}** ({int(diff.total_seconds()//60)} min fa)")
+        # Miglioria C: Warning se snapshot obsoleto o di ieri
+        if st.session_state['snap_date_mem'] != oggi: st.warning("⚠️ Lo snapshot in memoria non è di oggi!")
+    else: st.write(f"⚠️ Snapshot assente.")
+
+if st.button("🚀 AVVIA SCANSIONE"):
+    if st.session_state["snap_time_obj"]:
+        age_min = (now_rome() - st.session_state["snap_time_obj"]).total_seconds() / 60
+        if age_min < 15: st.warning(f"⚠️ Snapshot molto recente ({int(age_min)} min). Attendere movimenti di quota.")
+    
+    diag = {"analyzed": 0, "total": 0, "trap_fav": 0, "trap_o25": 0, "no_odds": 0, "below_min": 0, "errors": 0}
+    with requests.Session() as s:
+        all_raw = api_get(s, "fixtures", {"date": oggi, "timezone": "Europe/Rome"}).get("response", [])
+        fixtures = [f for f in all_raw if f["fixture"]["status"]["short"] == "NS" and is_allowed_league(f["league"]["name"], f["league"]["country"], blocked_user, forced_user)]
+        
+        if not fixtures:
+            st.warning("Nessun match trovato per i filtri selezionati.")
+        else:
+            results, pb = [], st.progress(0)
+            for i, m in enumerate(fixtures):
+                diag["analyzed"] += 1
+                pb.progress((i+1)/len(fixtures))
                 try:
                     r_o = api_get(s, "odds", {"fixture": m["fixture"]["id"]})
                     mk = extract_markets_pro(r_o)
-                    if mk and mk["q1"] > 0: new_snap[m["fixture"]["id"]] = mk
-                except: continue
-            save_snapshot(new_snap, oggi)
-            st.success(f"Snapshot OK: {len(new_snap)} match.")
-
-with c2:
-    st.write(f"Snapshot: **{snap_date}**" if snap_date == oggi else f"⚠️ Snapshot obsoleto ({snap_date})")
-
-if st.button("🚀 AVVIA SCANSIONE"):
-    diag = {"analyzed": 0, "total": 0, "trap_fav": 0, "trap_o25": 0, "no_odds": 0, "below_min": 0, "errors": 0}
-    with requests.Session() as s:
-        data = api_get(s, "fixtures", {"date": oggi, "timezone": "Europe/Rome"})
-        fixtures = [f for f in data.get("response", []) if f["fixture"]["status"]["short"] == "NS" and is_allowed_league(f["league"]["name"], f["league"]["country"])]
-        results = []
-        pb = st.progress(0)
-        for i, m in enumerate(fixtures):
-            diag["analyzed"] += 1
-            pb.progress((i+1)/len(fixtures))
-            try:
-                r_o = api_get(s, "odds", {"fixture": m["fixture"]["id"]})
-                mk = extract_markets_pro(r_o)
-                if not mk or mk["q1"] <= 0: diag["no_odds"] += 1; continue
-                rating, det, d_html, d_text, status = calculate_rating(m["fixture"]["id"], mk["q1"], mk["qx"], mk["q2"], mk["o25"], mk["o05ht"], snap_odds, max_q_fav, trap_fav, inv_margin)
-                if status != "ok": diag[status] += 1; continue
-                if rating >= (min_rating - 15) and rating > 0:
-                    h_id, a_id = m["teams"]["home"]["id"], m["teams"]["away"]["id"]
-                    if get_stats(s, h_id, "ht") >= 0.6 and get_stats(s, a_id, "ht") >= 0.6: rating += 20; det.append("HT")
-                    if use_sb_bonus and (get_stats(s, h_id, "dry") or get_stats(s, a_id, "dry")): rating = min(100, rating+10); det.append("DRY")
-                if rating >= min_rating:
-                    diag["total"] += 1
-                    results.append({"Ora": m["fixture"]["date"][11:16], "Lega": m['league']['name'], "Match": f"{m['teams']['home']['name']} - {m['teams']['away']['name']}", "1X2": f"{mk['q1']:.2f}|{mk['qx']:.2f}|{mk['q2']:.2f}", "O2.5": f"{mk['o25']:.2f}", "O0.5HT": f"{mk['o05ht']:.2f}", "Rating": rating, "Info": f"[{'|'.join(det)}]", "Drop_Inv": d_html, "Drop_Inv_Text": d_text, "Fixture_ID": m["fixture"]["id"]})
-                else: diag["below_min"] += 1
-            except: diag["errors"] += 1
-        st.session_state["scan_results"] = {"data": results, "diag": diag, "date": oggi}
-        log_to_csv(results)
+                    if not mk or mk["q1"] <= 0: diag["no_odds"] += 1; continue
+                    
+                    rating, det, d_html, d_text, status = calculate_rating(m["fixture"]["id"], mk["q1"], mk["qx"], mk["q2"], mk["o25"], mk["o05ht"], st.session_state["odds_memory"], max_q_fav, trap_fav, inv_margin)
+                    
+                    # Fix 1: Incremento robusto diagnostica
+                    if status != "ok":
+                        diag[status] = diag.get(status, 0) + 1
+                        continue
+                    
+                    if rating >= min_rating:
+                        diag["total"] += 1
+                        results.append({"Ora": m["fixture"]["date"][11:16], "Lega": m['league']['name'], "Match": f"{m['teams']['home']['name']} - {m['teams']['away']['name']}", "1X2": f"{mk['q1']:.2f}|{mk['qx']:.2f}|{mk['q2']:.2f}", "O2.5": f"{mk['o25']:.2f}", "O0.5HT": f"{mk['o05ht']:.2f}" if mk['o05ht'] > 0 else "N/D", "Rating": rating, "Info": f"[{'|'.join(det)}]", "Drop_Inv": d_html, "Drop_Inv_Text": d_text, "Fixture_ID": m["fixture"]["id"]})
+                    else: diag["below_min"] += 1
+                except: diag["errors"] += 1
+            st.session_state["scan_results"] = {"data": results, "diag": diag, "date": oggi}
 
 # RENDERING PERSISTENTE
 if st.session_state["scan_results"]:
     res = st.session_state["scan_results"]
-    st.markdown(f"<div class='diag-box'>📡 ANALIZZATI: {res['diag']['analyzed']} | ✅ MOSTRATI: {res['diag']['total']} | 📉 BELOW: {res['diag']['below_min']} | 🚫 TRAPS: {res['diag']['trap_fav'] + res['diag']['trap_o25']} | ❌ ERRORS: {res['diag']['errors']}</div>", unsafe_allow_html=True)
+    st.markdown(f"<div class='diag-box'>📡 ANALIZZATI: {res['diag']['analyzed']} | ✅ MOSTRATI: {res['diag']['total']} | 🚫 TRAPS: {res['diag'].get('trap_fav',0) + res['diag'].get('trap_o25',0)} | ❌ ERRORS: {res['diag']['errors']}</div>", unsafe_allow_html=True)
     if res["data"]:
         df_d = pd.DataFrame(res["data"]).sort_values("Ora")
         df_s = df_d.copy()
@@ -233,12 +243,5 @@ if st.session_state["scan_results"]:
         df_s["Match"] = df_s.apply(lambda r: f"<div class='match-cell'>{r['Match']} {r['Drop_Inv']}</div>", axis=1)
         df_s["Info"] = df_s["Info"].apply(lambda x: f"<span class='details-inline'>{x}</span>")
         df_s["Rating_D"] = df_s["Rating"].apply(lambda x: f"<b>{x}</b>")
-        to_show = df_s[["Ora", "Lega", "Match", "1X2", "O2.5", "O0.5HT", "Rating_D", "Info"]]
-        def style_rows(row):
-            r_val = df_d.loc[row.name, "Rating"]
-            if r_val >= 85: return ['background-color: #1b4332; color: #ffffff !important;'] * len(row)
-            if r_val >= 70: return ['background-color: #2d6a4f; color: #ffffff !important;'] * len(row)
-            return [''] * len(row)
-        html_out = to_show.style.apply(style_rows, axis=1).to_html(escape=False, index=False)
+        html_out = df_s[["Ora", "Lega", "Match", "1X2", "O2.5", "O0.5HT", "Rating_D", "Info"]].to_html(escape=False, index=False)
         st.write(html_out, unsafe_allow_html=True)
-        st.download_button("📥 DOWNLOAD REPORT", data=html_out, file_name=f"Sniper_{res['date']}.html", mime="text/html")
