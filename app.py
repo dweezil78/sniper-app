@@ -16,15 +16,13 @@ except Exception:
     ROME_TZ = None
 
 def now_rome():
-    """Helper unico per evitare mismatch tra UTC e Roma"""
     return datetime.now(ROME_TZ) if ROME_TZ else datetime.now()
 
 JSON_FILE = "arab_snapshot.json"
 LOG_CSV = "sniper_history_log.csv"
 
-st.set_page_config(page_title="ARAB SNIPER V15.21 - MASTER", layout="wide")
+st.set_page_config(page_title="ARAB SNIPER V15.22 - HIGH CONTRAST", layout="wide")
 
-# Inizializzazione Session State per persistenza totale
 if "odds_memory" not in st.session_state: st.session_state["odds_memory"] = {}
 if "snap_date_mem" not in st.session_state: st.session_state["snap_date_mem"] = None
 if "snap_time_obj" not in st.session_state: st.session_state["snap_time_obj"] = None
@@ -35,21 +33,24 @@ def apply_custom_css():
     st.markdown("""
         <style>
             .main { background-color: #f0f2f6; }
-            table { width: 100%; border-collapse: collapse; color: #000000 !important; font-size: 0.82rem; }
+            table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
             th { background-color: #1a1c23; color: #00e5ff; padding: 8px; text-align: center; border: 1px solid #444; }
-            td { padding: 5px 8px; border: 1px solid #ccc; text-align: center; color: #000000 !important; font-weight: 600; white-space: nowrap; }
+            td { padding: 5px 8px; border: 1px solid #ccc; text-align: center; font-weight: 600; white-space: nowrap; }
+            /* Forza il colore del testo per le celle all'interno delle righe colorate */
             .match-cell { text-align: left !important; min-width: 180px; font-weight: 700; color: inherit !important; }
             .lega-cell { max-width: 120px; overflow: hidden; text-overflow: ellipsis; font-size: 0.75rem; color: inherit !important; text-align: left !important; }
-            .drop-inline { color: #d68910; font-size: 0.72rem; font-weight: 800; margin-left: 5px; }
-            .details-inline { font-size: 0.7rem; font-weight: 800; opacity: 0.9; margin-left: 5px; color: #333 !important; }
+            .drop-inline { color: #ffcc00; font-size: 0.72rem; font-weight: 800; margin-left: 5px; }
+            .details-inline { font-size: 0.7rem; font-weight: 800; opacity: 0.9; margin-left: 5px; color: inherit !important; }
             .diag-box { padding: 12px; background: #1a1c23; color: #00e5ff; border-radius: 8px; margin-bottom: 15px; font-family: monospace; font-size: 0.85rem; border: 1px solid #00e5ff; }
+            /* Fix globale per tag b nelle tabelle */
+            table b { color: inherit !important; }
         </style>
     """, unsafe_allow_html=True)
 
 apply_custom_css()
 
 # ============================
-# API HELPERS & ROBUST PARSING
+# API HELPERS & PARSING
 # ============================
 API_KEY = st.secrets.get("API_SPORTS_KEY")
 HOST = "v3.football.api-sports.io"
@@ -156,7 +157,6 @@ def log_to_csv(results_list):
 # ============================
 oggi = now_rome().strftime("%Y-%m-%d")
 
-# Caricamento Paesi all'avvio
 if not st.session_state["found_countries"]:
     if os.path.exists(JSON_FILE):
         with open(JSON_FILE, "r") as f:
@@ -270,9 +270,13 @@ if st.session_state["scan_results"]:
             idx = row.name
             r_val = df_d.loc[idx, "Rating"]
             info_val = df_d.loc[idx, "Info"]
-            if r_val >= 85: return ['background-color: #1b4332; color: #ffffff !important;'] * len(row)
-            elif r_val >= 75 or (r_val >= 65 and "DRY" in info_val): return ['background-color: #2d6a4f; color: #ffffff !important;'] * len(row)
-            elif r_val >= 60: return ['background-color: #f8f9fa; color: #000000 !important;'] * len(row)
+            # Fix contrasto: Colore testo bianco per sfondi scuri
+            if r_val >= 85: 
+                return ['background-color: #1b4332; color: #ffffff !important; font-weight: bold;'] * len(row)
+            elif r_val >= 75 or (r_val >= 65 and "DRY" in info_val): 
+                return ['background-color: #2d6a4f; color: #ffffff !important; font-weight: bold;'] * len(row)
+            elif r_val >= 60: 
+                return ['background-color: #f8f9fa; color: #000000 !important;'] * len(row)
             return [''] * len(row)
 
         html_out = to_show.style.apply(style_rows, axis=1).to_html(escape=False, index=False)
