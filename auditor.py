@@ -1,3 +1,5 @@
+# Mostra i file presenti nella cartella per debug
+st.write("File rilevati nel server:", os.listdir("."))
 import streamlit as st
 import pandas as pd
 import requests
