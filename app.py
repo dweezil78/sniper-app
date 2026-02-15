@@ -21,7 +21,7 @@ def now_rome():
 JSON_FILE = "arab_snapshot.json"
 LOG_CSV = "sniper_history_log.csv"
 
-st.set_page_config(page_title="ARAB SNIPER V15.22 - HIGH CONTRAST", layout="wide")
+st.set_page_config(page_title="ARAB SNIPER V15.25 - MASTER", layout="wide")
 
 if "odds_memory" not in st.session_state: st.session_state["odds_memory"] = {}
 if "snap_date_mem" not in st.session_state: st.session_state["snap_date_mem"] = None
@@ -36,13 +36,11 @@ def apply_custom_css():
             table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
             th { background-color: #1a1c23; color: #00e5ff; padding: 8px; text-align: center; border: 1px solid #444; }
             td { padding: 5px 8px; border: 1px solid #ccc; text-align: center; font-weight: 600; white-space: nowrap; }
-            /* Forza il colore del testo per le celle all'interno delle righe colorate */
             .match-cell { text-align: left !important; min-width: 180px; font-weight: 700; color: inherit !important; }
             .lega-cell { max-width: 120px; overflow: hidden; text-overflow: ellipsis; font-size: 0.75rem; color: inherit !important; text-align: left !important; }
             .drop-inline { color: #ffcc00; font-size: 0.72rem; font-weight: 800; margin-left: 5px; }
             .details-inline { font-size: 0.7rem; font-weight: 800; opacity: 0.9; margin-left: 5px; color: inherit !important; }
             .diag-box { padding: 12px; background: #1a1c23; color: #00e5ff; border-radius: 8px; margin-bottom: 15px; font-family: monospace; font-size: 0.85rem; border: 1px solid #00e5ff; }
-            /* Fix globale per tag b nelle tabelle */
             table b { color: inherit !important; }
         </style>
     """, unsafe_allow_html=True)
@@ -135,9 +133,6 @@ def get_stats(session, tid, mode="ht"):
         return res
     except: return 0.0
 
-# ============================
-# PERSISTENZA & LOG
-# ============================
 def log_to_csv(results_list):
     if not results_list: return
     clean_list = []
@@ -148,9 +143,15 @@ def log_to_csv(results_list):
         clean_list.append(clean_r)
     new_df = pd.DataFrame(clean_list)
     new_df['Log_Date'] = now_rome().strftime("%Y-%m-%d %H:%M")
+    
+    # --- Fix 2: Coerenza Fixture_ID per evitare sdoppiamenti ---
+    new_df["Fixture_ID"] = new_df["Fixture_ID"].astype(str)
+    
     if os.path.exists(LOG_CSV):
-        pd.concat([pd.read_csv(LOG_CSV), new_df], ignore_index=True).drop_duplicates(subset=['Fixture_ID']).to_csv(LOG_CSV, index=False)
-    else: new_df.to_csv(LOG_CSV, index=False)
+        old_df = pd.read_csv(LOG_CSV, dtype={"Fixture_ID": str})
+        pd.concat([old_df, new_df], ignore_index=True).drop_duplicates(subset=['Fixture_ID']).to_csv(LOG_CSV, index=False)
+    else: 
+        new_df.to_csv(LOG_CSV, index=False)
 
 # ============================
 # UI SIDEBAR
@@ -270,7 +271,6 @@ if st.session_state["scan_results"]:
             idx = row.name
             r_val = df_d.loc[idx, "Rating"]
             info_val = df_d.loc[idx, "Info"]
-            # Fix contrasto: Colore testo bianco per sfondi scuri
             if r_val >= 85: 
                 return ['background-color: #1b4332; color: #ffffff !important; font-weight: bold;'] * len(row)
             elif r_val >= 75 or (r_val >= 65 and "DRY" in info_val): 
@@ -282,4 +282,23 @@ if st.session_state["scan_results"]:
         html_out = to_show.style.apply(style_rows, axis=1).to_html(escape=False, index=False)
         st.write(html_out, unsafe_allow_html=True)
         st.markdown("---")
-        st.download_button("📥 SCARICA REPORT HTML", data=html_out, file_name=f"Sniper_{res['date']}.html", mime="text/html")
+        
+        dl1, dl2, dl3 = st.columns(3)
+        with dl1:
+            st.download_button("📥 REPORT HTML", data=html_out, file_name=f"Sniper_{res['date']}.html", mime="text/html")
+        
+        with dl2:
+            session_csv = df_d.to_csv(index=False).encode('utf-8')
+            st.download_button("💾 CSV SESSIONE OGGI", data=session_csv, file_name=f"session_results_{res['date']}.csv", mime="text/csv")
+            
+        with dl3:
+            # --- Fix 3: Download DATABASE completo tramite bytes per robustezza ---
+            if os.path.exists(LOG_CSV):
+                with open(LOG_CSV, "rb") as f:
+                    st.download_button(
+                        label="🗂️ DATABASE STORICO (All)",
+                        data=f.read(),
+                        file_name="sniper_full_history.csv",
+                        mime="text/csv",
+                        help="Scarica l'intero archivio salvato su server."
+                    )
