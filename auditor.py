@@ -3,7 +3,7 @@ import pandas as pd
 import requests
 from datetime import datetime
 
-# Configurazione API (Assicurati che la chiave sia nei Secrets di Streamlit)
+# Configurazione API
 API_KEY = st.secrets.get("API_SPORTS_KEY")
 HEADERS = {"x-apisports-key": API_KEY}
 
@@ -26,11 +26,10 @@ if uploaded_file is not None:
         date_disponibili = sorted(df_log['Log_Date'].str[:10].unique(), reverse=True)
         date_scelte = st.multiselect("📅 Seleziona le date da analizzare", date_disponibili, default=date_disponibili[:1])
     else:
-        st.warning("⚠️ Colonna 'Log_Date' non trovata. Verranno analizzati tutti i match nel file.")
+        st.warning("⚠️ Colonna 'Log_Date' non trovata. Verranno analizzati tutti i match.")
         date_scelte = []
 
     if st.button("🧐 AVVIA VERIFICA REALE"):
-        # Filtriamo i match in base alle date scelte
         if date_scelte:
             work_df = df_log[df_log['Log_Date'].str[:10].isin(date_scelte)]
         else:
@@ -45,13 +44,11 @@ if uploaded_file is not None:
             
             with requests.Session() as s:
                 for i, row in enumerate(work_df.itertuples()):
-                    # Update Progress
                     prog = (i + 1) / len(work_df)
                     progress_bar.progress(prog)
-                    status_text.text(f"Analisi match {i+1} di {len(work_df)}: {row.Match}")
+                    status_text.text(f"Analisi {i+1}/{len(work_df)}: {row.Match}")
                     
                     try:
-                        # Chiamata API per il risultato della fixture
                         url = f"https://v3.football.api-sports.io/fixtures?id={row.Fixture_ID}"
                         resp = s.get(url, headers=HEADERS, timeout=10).json()
                         
@@ -59,17 +56,15 @@ if uploaded_file is not None:
                             data = resp["response"][0]
                             status_short = data["fixture"]["status"]["short"]
                             
-                            # Verifichiamo solo match terminati (FT) o in corso ma con dati score
+                            # Verifichiamo match terminati o in corso con dati gol
                             if status_short in ["FT", "AET", "PEN", "1H", "HT", "2H"]:
                                 score = data.get("score", {})
                                 goals = data.get("goals", {})
                                 
-                                # Gol Primo Tempo
                                 ht_h = score.get("halftime", {}).get("home", 0) or 0
                                 ht_a = score.get("halftime", {}).get("away", 0) or 0
                                 tot_ht = ht_h + ht_a
                                 
-                                # Gol Finali
                                 ft_h = goals.get("home", 0) or 0
                                 ft_a = goals.get("away", 0) or 0
                                 tot_ft = ft_h + ft_a
@@ -84,23 +79,21 @@ if uploaded_file is not None:
                                     "O2.5 FT": "✅ WIN" if tot_ft >= 3 else "❌ LOSS",
                                     "Rating": row.Rating
                                 })
-                    except Exception as e:
+                    except:
                         continue
 
             if results:
                 res_df = pd.DataFrame(results)
-                
-                # --- VISUALIZZAZIONE RISULTATI ---
                 st.subheader("📝 Dettaglio Esiti Reali")
                 
-                # Funzione per colorare le celle degli esiti
                 def color_result(val):
-                    color = '#2ecc71' if '✅' in str(val) else '#e74c3c'
-                    return f'color: {color}; font-weight: bold'
+                    if '✅' in str(val): return 'color: #2ecc71; font-weight: bold'
+                    if '❌' in str(val): return 'color: #e74c3c; font-weight: bold'
+                    return ''
 
                 st.dataframe(res_df.style.applymap(color_result, subset=['O0.5 HT', 'O2.5 FT']), use_container_width=True)
 
-                # --- STATISTICHE AGGREGATE PER TAG ---
+                # --- STATISTICHE AGGREGATE ---
                 st.markdown("---")
                 st.subheader("📈 Analisi Performance per Strategia")
                 
@@ -115,12 +108,21 @@ if uploaded_file is not None:
                         
                         summary.append({
                             "Strategia": tag,
-                            "Match Totali": total,
-                            "Win Over 0.5 HT": f"{win_ht} / {total}",
-                            "Win Rate HT": f"{wr_ht:.1f}%",
-                            "Win Rate Over 2.5 FT": f"{wr_ft:.1f}%"
+                            "Match": total,
+                            "Win O0.5 HT": f"{win_ht}/{total}",
+                            "WR HT": f"{wr_ht:.1f}%",
+                            "WR O2.5 FT": f"{wr_ft:.1f}%"
                         })
                 
                 if summary:
-                    st.table(pd.DataFrame(
-                        
+                    # Parentesi corrette qui
+                    st.table(pd.DataFrame(summary))
+                
+                final_csv = res_df.to_csv(index=False).encode('utf-8')
+                st.download_button("📥 Scarica Report Revisionato", final_csv, "audit_finale.csv", "text/csv")
+            else:
+                st.info("Nessun dato disponibile per i match selezionati.")
+
+else:
+    st.info("👋 In attesa del file CSV...")
+                    
