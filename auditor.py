@@ -21,9 +21,9 @@ if uploaded_file is not None:
         
         def get_fav_odd(row):
             try:
-                # Spacca la stringa "1.60|3.40|4.50"
+                # Spacca la stringa "1.60|3.40|4.50" salvata dallo Sniper
                 odds = [float(x) for x in str(row['1X2']).split('|')]
-                return min(odds[0], odds[2]) # Prende la minima tra 1 e 2
+                return min(odds[0], odds[2]) # Identifica la quota del favorito (1 o 2)
             except: return 0.0
 
         df_log['Quota_Fav'] = df_log.apply(get_fav_odd, axis=1)
@@ -78,7 +78,7 @@ if uploaded_file is not None:
                 st.subheader(f"📝 Esiti nel range 1.45 - 1.89 ({len(res_df)} match)")
                 st.dataframe(res_df, use_container_width=True)
                 
-                # Statistiche per Strategia
+                # --- STATISTICHE PER STRATEGIA ---
                 st.markdown("---")
                 st.subheader("📈 Performance Strategie nel Range")
                 summary = []
@@ -94,7 +94,9 @@ if uploaded_file is not None:
                             "WR HT %": f"{(w_ht/n*100):.1f}%",
                             "WR FT %": f"{(w_ft/n*100):.1f}%"
                         })
-                st.table(pd.DataFrame(summary))
+                
+                if summary:
+                    st.table(pd.DataFrame(summary))
             else:
                 st.warning("Nessun dato trovato per i criteri selezionati.")
 
