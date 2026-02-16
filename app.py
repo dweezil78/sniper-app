@@ -5,12 +5,12 @@ from datetime import datetime
 import json
 import os
 from pathlib import Path
+import base64
 from typing import Any, Dict, List, Tuple, Optional
 
 # ============================
 # CONFIGURAZIONE PATH ASSOLUTI
 # ============================
-# Garantisce che Sniper e Auditor leggano/scrivano nello stesso identico file
 BASE_DIR = Path(__file__).resolve().parent
 JSON_FILE = str(BASE_DIR / "arab_snapshot.json")
 LOG_CSV  = str(BASE_DIR / "sniper_history_log.csv")
@@ -27,9 +27,8 @@ except Exception:
 def now_rome():
     return datetime.now(ROME_TZ) if ROME_TZ else datetime.now()
 
-st.set_page_config(page_title="ARAB SNIPER V15.30 - GOLD MASTER", layout="wide")
+st.set_page_config(page_title="ARAB SNIPER V15.32 - GOLD MASTER", layout="wide")
 
-# Inizializzazione Session State
 if "odds_memory" not in st.session_state: st.session_state["odds_memory"] = {}
 if "snap_date_mem" not in st.session_state: st.session_state["snap_date_mem"] = None
 if "snap_time_obj" not in st.session_state: st.session_state["snap_time_obj"] = None
@@ -37,7 +36,7 @@ if "scan_results" not in st.session_state: st.session_state["scan_results"] = No
 if "found_countries" not in st.session_state: st.session_state["found_countries"] = []
 
 # ============================
-# PRELOAD SNAPSHOT (Fondamentale per la Sidebar)
+# PRELOAD SNAPSHOT (Fix Selezione Paesi)
 # ============================
 if os.path.exists(JSON_FILE) and not st.session_state["odds_memory"]:
     try:
@@ -47,7 +46,6 @@ if os.path.exists(JSON_FILE) and not st.session_state["odds_memory"]:
             st.session_state["snap_date_mem"] = _d.get("date")
             ts = _d.get("timestamp")
             st.session_state["snap_time_obj"] = datetime.fromisoformat(ts) if ts else None
-            # Popola i paesi per i filtri Blocca/Forza subito al caricamento
             st.session_state["found_countries"] = sorted(
                 {v.get("country") for v in st.session_state["odds_memory"].values() if v.get("country")}
             )
@@ -123,7 +121,6 @@ def calculate_rating(fid, q1, qx, q2, o25, o05ht, snap_data, max_q_gold, trap_li
     is_gold, into_trap = False, False
     current_fav = min(q1, q2) if q1 > 0 and q2 > 0 else 0
     
-    # Range Gold: tra trap_limit (1.40) e Sweet Spot Max
     if trap_limit <= current_fav <= max_q_gold:
         is_gold = True
 
@@ -164,7 +161,7 @@ def get_stats(session, tid, mode="ht"):
     cache = ht_cache if mode=="ht" else dry_cache
     if tid in cache: return cache[tid]
     try:
-        rx = api_get(session, "fixtures", {"team": tid, "last": 5 if mode=="ht" else 1, "status": "FT"})
+        rx = api_get(session, "fixtures", {"team": tid, "last": 5, "status": "FT"})
         fx = rx.get("response", [])
         if not fx: return 0.0
         if mode == "ht": res = sum([1 for f in fx if (f.get("score",{}).get("halftime",{}).get("home") or 0) + (f.get("score",{}).get("halftime",{}).get("away") or 0) >= 1]) / len(fx)
@@ -201,6 +198,7 @@ max_q_gold = st.sidebar.slider("Sweet Spot Max", 1.70, 2.10, 1.95)
 only_gold = st.sidebar.toggle("Solo Sweet Spot (1.40 - Max)", value=False)
 inv_margin = st.sidebar.slider("Margine inversione", 0.05, 0.30, 0.10, 0.01)
 st.sidebar.markdown("---")
+
 blocked_user = st.sidebar.multiselect("🚫 Blocca Paesi", st.session_state.get("found_countries", []), key="blocked_user")
 forced_user = st.sidebar.multiselect("✅ Forza Paesi", st.session_state.get("found_countries", []), key="forced_user")
 use_sb_bonus = st.sidebar.toggle("Bonus Sblocco HT (DRY)", value=True)
@@ -275,25 +273,14 @@ if st.button("🚀 AVVIA SCANSIONE GOLD"):
                     match_name = f"{m['teams']['home']['name']} - {m['teams']['away']['name']}"
                     if into_trap: match_name = f"{match_name} *"
                     
-                    results.append({
-                        "Ora": m["fixture"]["date"][11:16], 
-                        "Lega": m['league']['name'], 
-                        "Match": match_name, 
-                        "1X2": f"{mk['q1']:.2f}|{mk['qx']:.2f}|{mk['q2']:.2f}", 
-                        "O2.5": f"{mk['o25']:.2f}", 
-                        "O0.5HT": f"{mk['o05ht']:.2f}" if mk.get("o05ht", 0) > 0 else "N/D", 
-                        "Rating": rating, 
-                        "Info": f"[{'|'.join(det)}]", 
-                        "Advice": advice, 
-                        "Is_Gold": is_gold, 
-                        "Drop_Inv": d_html, 
-                        "Drop_Inv_Text": d_text, 
-                        "Fixture_ID": m["fixture"]["id"]
-                    })
+                    results.append({"Ora": m["fixture"]["date"][11:16], "Lega": m['league']['name'], "Match": match_name, "1X2": f"{mk['q1']:.2f}|{mk['qx']:.2f}|{mk['q2']:.2f}", "O2.5": f"{mk['o25']:.2f}", "O0.5HT": f"{mk['o05ht']:.2f}" if mk.get("o05ht", 0) > 0 else "N/D", "Rating": rating, "Info": f"[{'|'.join(det)}]", "Advice": advice, "Is_Gold": is_gold, "Drop_Inv": d_html, "Drop_Inv_Text": d_text, "Fixture_ID": m["fixture"]["id"]})
             except: diag["errors"] += 1
         st.session_state["scan_results"] = {"data": results, "diag": diag, "date": oggi}
         log_to_csv(results)
 
+# ============================
+# RENDERING & EXPORT
+# ============================
 if st.session_state["scan_results"]:
     res = st.session_state["scan_results"]
     st.markdown(f"<div class='diag-box'>📡 ANALIZZATI: {res['diag']['analyzed']} | ✅ MOSTRATI: {res['diag']['total']}</div>", unsafe_allow_html=True)
@@ -305,22 +292,34 @@ if st.session_state["scan_results"]:
         df_s["Rating"] = df_s["Rating"].apply(lambda x: f"<b>{x}</b>")
         to_show = df_s[["Ora", "Lega", "Match", "1X2", "O2.5", "O0.5HT", "Rating", "Info"]]
         
+        # FIX COLORAZIONE: Ogni Gold (Sweet Spot) diventa verde
         def style_rows(row):
             idx = row.name
             r_val = df_d.loc[idx, "Rating"]
             info_val = df_d.loc[idx, "Info"]
-            if r_val >= 85: return ['background-color: #1b4332; color: #ffffff !important; font-weight: bold;'] * len(row)
-            elif r_val >= 75 or (r_val >= 65 and "DRY" in info_val): return ['background-color: #2d6a4f; color: #ffffff !important; font-weight: bold;'] * len(row)
+            is_gold = df_d.loc[idx, "Is_Gold"]
+            
+            if r_val >= 85: 
+                return ['background-color: #1b4332; color: #ffffff !important; font-weight: bold;'] * len(row)
+            elif is_gold or r_val >= 75 or (r_val >= 65 and "DRY" in info_val): 
+                return ['background-color: #2d6a4f; color: #ffffff !important; font-weight: bold;'] * len(row)
             return [''] * len(row)
 
         st.write(to_show.style.apply(style_rows, axis=1).to_html(escape=False, index=False), unsafe_allow_html=True)
         
+        def get_html_download_link(df):
+            html = df.to_html(escape=False, index=False)
+            html_styled = f"<html><head><style>table{{border-collapse:collapse;width:100%;font-family:Arial;}} th,td{{border:1px solid #ddd;padding:8px;text-align:center;}} th{{background-color:#f2f2f2;}}</style></head><body>{html}</body></html>"
+            b64 = base64.b64encode(html_styled.encode()).decode()
+            return f'<a href="data:text/html;base64,{b64}" download="report_gold_{oggi}.html" style="text-decoration:none;"><button style="background-color:#00e5ff; border:none; color:black; padding:10px 20px; text-align:center; display:inline-block; font-size:16px; margin:4px 2px; cursor:pointer; border-radius:8px; font-weight:bold;">🌐 SCARICA REPORT HTML</button></a>'
+
         st.markdown("---")
-        col_dl1, col_dl2 = st.columns(2)
+        col_dl1, col_dl2, col_dl3 = st.columns(3)
         with col_dl1:
-            session_csv = df_d.drop(columns=['Advice', 'Is_Gold', 'Drop_Inv']).to_csv(index=False).encode('utf-8')
-            st.download_button("💾 CSV SESSIONE OGGI", data=session_csv, file_name=f"session_{oggi}.csv", mime="text/csv")
+            st.download_button("💾 CSV SESSIONE OGGI", data=df_d.drop(columns=['Advice','Is_Gold','Drop_Inv']).to_csv(index=False).encode('utf-8'), file_name=f"session_{oggi}.csv")
         with col_dl2:
+            st.markdown(get_html_download_link(df_d), unsafe_allow_html=True)
+        with col_dl3:
             if os.path.exists(LOG_CSV):
                 with open(LOG_CSV, "rb") as f:
-                    st.download_button("🗂️ DATABASE STORICO", data=f.read(), file_name="sniper_history_log.csv", mime="text/csv")
+                    st.download_button("🗂️ DATABASE STORICO", data=f.read(), file_name="sniper_history_log.csv")
