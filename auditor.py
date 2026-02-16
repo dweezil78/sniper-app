@@ -1,59 +1,99 @@
 import streamlit as st
 import pandas as pd
 import requests
+import os
+from pathlib import Path
 from datetime import datetime
-import time
 
-# Configurazione API
+# ============================
+# CONFIGURAZIONE PATH ASSOLUTI
+# ============================
+# IDENTICO allo Sniper per garantire la sincronizzazione totale
+BASE_DIR = Path(__file__).resolve().parent
+LOG_CSV = str(BASE_DIR / "sniper_history_log.csv")
+
+st.set_page_config(page_title="ARAB AUDITOR V2.2 - GOLD SYNC", layout="wide")
+
+# UI SIDEBAR CON DEBUG PERCORSI
+st.sidebar.header("⚙️ Auditor Settings")
+st.sidebar.caption(f"📁 BASE_DIR: {BASE_DIR}")
+st.sidebar.caption(f"📝 LOG_CSV: {LOG_CSV}")
+
+# Configurazione API (dallo stesso Secret dello Sniper)
 API_KEY = st.secrets.get("API_SPORTS_KEY")
 HEADERS = {"x-apisports-key": API_KEY}
 
-st.set_page_config(page_title="ARAB AUDITOR V2.1", layout="wide")
-st.title("📊 Arab Auditor - Sweet Spot Analysis")
-st.markdown("Verifica delle performance nella fascia di quota favorita: **1.45 - 1.89**")
+st.title("📊 Arab Auditor - Analisi Sweet Spot")
+st.markdown(f"Revisione dei risultati reali basata sul database: `{os.path.basename(LOG_CSV)}`")
 
-uploaded_file = st.file_uploader("📂 Carica il file CSV dello Sniper", type=None)
+# ============================
+# LOGICA DI CARICAMENTO
+# ============================
+if not os.path.exists(LOG_CSV):
+    st.error(f"⚠️ Database non trovato!")
+    st.info(f"Il file {LOG_CSV} non esiste ancora. Esegui prima una scansione con Arab Sniper per generare i dati.")
+    st.stop()
 
-if uploaded_file is not None:
-    try:
-        # Caricamento e parsing quote
-        df_log = pd.read_csv(uploaded_file, dtype={"Fixture_ID": str})
-        
-        def get_fav_odd(row):
-            try:
-                # Spacca la stringa "1.60|3.40|4.50" salvata dallo Sniper
-                odds = [float(x) for x in str(row['1X2']).split('|')]
-                return min(odds[0], odds[2]) # Identifica la quota del favorito (1 o 2)
-            except: return 0.0
+try:
+    # Caricamento database con Fixture_ID come stringa per evitare decimali
+    df_log = pd.read_csv(LOG_CSV, dtype={"Fixture_ID": str})
+    
+    # Pulizia dati: rimuoviamo eventuali righe corrotte
+    df_log = df_log.dropna(subset=['Fixture_ID', 'Match'])
+    
+    st.success(f"✅ Database sincronizzato: {len(df_log)} match totali rilevati.")
 
-        df_log['Quota_Fav'] = df_log.apply(get_fav_odd, axis=1)
-        
-        # Filtro automatico nel range richiesto
-        df_filtered = df_log[(df_log['Quota_Fav'] >= 1.45) & (df_log['Quota_Fav'] <= 1.89)]
-        
-        st.success(f"✅ Database caricato: {len(df_log)} match totali.")
-        st.info(f"🎯 Match nel range 1.45 - 1.89: **{len(df_filtered)}**")
+    # --- FILTRO RANGE QUOTA ---
+    # Estrarre la quota del favorito dal formato "1.60|3.40|4.50"
+    def get_fav_odd(val):
+        try:
+            odds = [float(x) for x in str(val).split('|')]
+            return min(odds[0], odds[2])
+        except: return 0.0
 
-        if st.button("🧐 AVVIA VERIFICA SWEET SPOT"):
+    df_log['Quota_Fav'] = df_log['1X2'].apply(get_fav_odd)
+
+    st.sidebar.subheader("🎯 Filtri Analisi")
+    q_min = st.sidebar.number_input("Quota Minima", value=1.40, step=0.05)
+    q_max = st.sidebar.number_input("Quota Massima", value=1.95, step=0.05)
+    
+    # Selezione Date
+    if 'Log_Date' in df_log.columns:
+        date_raw = df_log['Log_Date'].str[:10].unique()
+        date_disponibili = sorted(date_raw, reverse=True)
+        date_scelte = st.multiselect("📅 Seleziona date da revisionare", date_disponibili, default=date_disponibili[:1])
+    else:
+        date_scelte = []
+
+    # --- ESECUZIONE AUDIT ---
+    if st.button("🧐 AVVIA REVISIONE REALE"):
+        # Applichiamo i filtri definiti
+        work_df = df_log[(df_log['Quota_Fav'] >= q_min) & (df_log['Quota_Fav'] <= q_max)]
+        if date_scelte:
+            work_df = work_df[work_df['Log_Date'].str[:10].isin(date_scelte)]
+
+        if work_df.empty:
+            st.warning("Nessun match trovato per i criteri di quota/data selezionati.")
+        else:
             results = []
             progress_bar = st.progress(0)
             status_text = st.empty()
             
             with requests.Session() as s:
-                total_match = len(df_filtered)
-                for i, row in enumerate(df_filtered.itertuples()):
-                    progress_bar.progress((i + 1) / total_match)
+                total = len(work_df)
+                for i, row in enumerate(work_df.itertuples()):
+                    progress_bar.progress((i + 1) / total)
                     f_id = str(row.Fixture_ID).split('.')[0].strip()
-                    status_text.text(f"Verifica {i+1}/{total_match}: {row.Match} (Q: {row.Quota_Fav:.2f})")
+                    status_text.text(f"Recupero esito {i+1}/{total}: {row.Match}")
                     
                     try:
                         url = f"https://v3.football.api-sports.io/fixtures?id={f_id}"
                         resp = s.get(url, headers=HEADERS, timeout=12).json()
                         
-                        if resp.get("response") and len(resp["response"]) > 0:
-                            f_data = resp["response"][0]
-                            goals = f_data.get("goals", {})
-                            score = f_data.get("score", {})
+                        if resp.get("response"):
+                            data = resp["response"][0]
+                            score = data.get("score", {})
+                            goals = data.get("goals", {})
                             
                             ht_h = (score.get("halftime", {}) or {}).get("home", 0) or 0
                             ht_a = (score.get("halftime", {}) or {}).get("away", 0) or 0
@@ -61,13 +101,15 @@ if uploaded_file is not None:
                             ft_a = goals.get("away", 0) or 0
                             
                             results.append({
+                                "Data": row.Log_Date,
                                 "Match": row.Match,
-                                "Quota_Fav": row.Quota_Fav,
-                                "Tag": getattr(row, "Info", "N/A"),
+                                "Quota": row.Quota_Fav,
+                                "Tag": getattr(row, "Info", ""),
                                 "HT": f"{ht_h}-{ht_a}",
                                 "FT": f"{ft_h}-{ft_a}",
                                 "O0.5 HT": "✅ WIN" if (ht_h + ht_a) >= 1 else "❌ LOSS",
-                                "O2.5 FT": "✅ WIN" if (ft_h + ft_a) >= 3 else "❌ LOSS"
+                                "O2.5 FT": "✅ WIN" if (ft_h + ft_a) >= 3 else "❌ LOSS",
+                                "Rating": row.Rating
                             })
                     except: continue
 
@@ -75,12 +117,19 @@ if uploaded_file is not None:
             
             if results:
                 res_df = pd.DataFrame(results)
-                st.subheader(f"📝 Esiti nel range 1.45 - 1.89 ({len(res_df)} match)")
-                st.dataframe(res_df, use_container_width=True)
+                st.subheader("📝 Dettaglio Esiti")
                 
-                # --- STATISTICHE PER STRATEGIA ---
+                # Colorazione tabellare
+                def style_results(val):
+                    if '✅' in str(val): return 'color: #2ecc71; font-weight: bold'
+                    if '❌' in str(val): return 'color: #e74c3c; font-weight: bold'
+                    return ''
+
+                st.dataframe(res_df.style.applymap(style_results, subset=['O0.5 HT', 'O2.5 FT']), use_container_width=True)
+
+                # --- STATISTICHE AGGREGATE ---
                 st.markdown("---")
-                st.subheader("📈 Performance Strategie nel Range")
+                st.subheader("📈 Performance per Strategia")
                 summary = []
                 for tag in ["DRY", "HT", "Drop", "Inv"]:
                     tag_df = res_df[res_df['Tag'].str.contains(tag, na=False)]
@@ -97,8 +146,9 @@ if uploaded_file is not None:
                 
                 if summary:
                     st.table(pd.DataFrame(summary))
-            else:
-                st.warning("Nessun dato trovato per i criteri selezionati.")
+                
+                # Export
+                st.download_button("📥 Scarica Report Revisionato", res_df.to_csv(index=False).encode('utf-8'), f"audit_{datetime.now().strftime('%d_%m')}.csv", "text/csv")
 
-    except Exception as e:
-        st.error(f"Errore: {e}")
+except Exception as e:
+    st.error(f"Errore durante l'analisi: {e}")
