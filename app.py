@@ -25,7 +25,7 @@ except Exception:
 def now_rome():
     return datetime.now(ROME_TZ) if ROME_TZ else datetime.now()
 
-st.set_page_config(page_title="ARAB SNIPER V15.41 - TRUE IRONCLAD", layout="wide")
+st.set_page_config(page_title="ARAB SNIPER V15.42 - IRONCLAD MASTER", layout="wide")
 
 if "odds_memory" not in st.session_state: st.session_state["odds_memory"] = {}
 if "snap_time_obj" not in st.session_state: st.session_state["snap_time_obj"] = None
@@ -56,7 +56,7 @@ if st.session_state["snap_time_obj"]:
     snap_status_type = "success"
 
 # ============================
-# STILE CSS & RATING ENGINE
+# CSS & STILE
 # ============================
 def apply_custom_css():
     st.markdown("""
@@ -71,11 +71,15 @@ def apply_custom_css():
         </style>
     """, unsafe_allow_html=True)
 
+# ============================
+# MOTORE DI RATING
+# ============================
 def calculate_rating(fid, q1, qx, q2, o25, o05ht, snap_data, max_q_gold, trap_limit, inv_margin):
     sc, det = 40, []
     is_gold, into_trap = False, False
     current_fav = min(q1, q2) if q1 > 0 and q2 > 0 else 0
     if trap_limit <= current_fav <= max_q_gold: is_gold = True
+    
     fid_s = str(fid)
     if 0 < current_fav < trap_limit:
         if fid_s in snap_data:
@@ -83,7 +87,9 @@ def calculate_rating(fid, q1, qx, q2, o25, o05ht, snap_data, max_q_gold, trap_li
             if old_q >= trap_limit and (old_q - current_fav) >= 0.10: into_trap = True
             else: return 0, [], "trap_fav", False, False
         else: return 0, [], "trap_fav", False, False
+        
     if 0 < o25 < 1.55: return 0, [], "trap_o25", False, False
+    
     if fid_s in snap_data:
         old = snap_data[fid_s]
         old_q1, old_q2 = old.get("q1", 0), old.get("q2", 0)
@@ -95,12 +101,13 @@ def calculate_rating(fid, q1, qx, q2, o25, o05ht, snap_data, max_q_gold, trap_li
             if abs(q1-q2) >= inv_margin:
                 if (fav_snap == "1" and q2 <= q1-inv_margin) or (fav_snap == "2" and q1 <= q2-inv_margin):
                     sc += 25; det.append("Inv")
+                    
     if 1.70 <= o25 <= 2.15: sc += 20; det.append("Val")
     if 1.30 <= o05ht <= 1.50: sc += 10; det.append("HT-Q")
     return min(100, sc), det, "ok", is_gold, into_trap
 
 # ============================
-# API & PARSING (FIX 1, 3, A)
+# API & PARSING
 # ============================
 API_KEY = st.secrets.get("API_SPORTS_KEY")
 HEADERS = {"x-apisports-key": API_KEY}
@@ -109,7 +116,7 @@ def api_get(session, path, params):
     r = session.get(f"https://v3.football.api-sports.io/{path}", headers=HEADERS, params=params, timeout=25)
     r.raise_for_status()
     js = r.json()
-    if js.get("errors"): # FIX A: Rilevamento errori API
+    if js.get("errors"):
         raise RuntimeError(f"API Errors: {js['errors']}")
     return js
 
@@ -119,7 +126,7 @@ def extract_markets_pro(resp_json):
     data = {"q1":0.0, "qx":0.0, "q2":0.0, "o25":0.0, "o05ht":0.0}
     for bm in resp[0].get("bookmakers", []):
         for b in bm.get("bets", []):
-            bid = b.get("id") # FIX 3: get safe
+            bid = b.get("id")
             name = (b.get("name") or "").lower()
             if bid == 1 and data["q1"] == 0:
                 v = b.get("values", [])
@@ -162,7 +169,7 @@ blocked_user = st.sidebar.multiselect("🚫 Blocca Paesi", st.session_state.get(
 forced_user = st.sidebar.multiselect("✅ Forza Paesi", st.session_state.get("found_countries", []), key="forced_user")
 
 # ============================
-# LOGICA SNAPSHOT & SCANSIONE
+# AZIONI SNAPSHOT & SCAN
 # ============================
 oggi = now_rome().strftime("%Y-%m-%d")
 
@@ -194,8 +201,8 @@ if st.button("🚀 AVVIA SCANSIONE MATCH"):
             all_raw = api_get(s, "fixtures", {"date": oggi, "timezone": "Europe/Rome"}).get("response", [])
             fixtures = [f for f in all_raw if f["fixture"]["status"]["short"] == "NS" and is_allowed_league(f["league"]["name"], f["league"]["country"], blocked_user, forced_user)]
             
-            if not fixtures: # FIX 2: Guardrail divisione zero
-                st.warning("Nessun match NS con i filtri attuali."); st.stop()
+            if not fixtures:
+                st.warning("Nessun match trovato con i filtri attuali."); st.stop()
             
             results, pb = [], st.progress(0)
             for i, m in enumerate(fixtures):
@@ -207,21 +214,20 @@ if st.button("🚀 AVVIA SCANSIONE MATCH"):
                     rating, det, status, is_gold, into_trap = res
                     if status != "ok" or rating < min_rating: continue
                     
-                    match_name = f"{m['teams']['home']['name']} - {m['teams']['away']['name']}{' *' if into_trap else ''}"
-                    advice = "🔥 TARGET: 0.5 HT" if is_gold else ""
                     results.append({
                         "Ora": m["fixture"]["date"][11:16], 
                         "Lega": f"{m['league']['name']} ({m['league']['country']})", 
-                        "Match": match_name, 
+                        "Match": f"{m['teams']['home']['name']} - {m['teams']['away']['name']}{' *' if into_trap else ''}", 
                         "1X2": f"{mk['q1']:.2f}|{mk['qx']:.2f}|{mk['q2']:.2f}", 
                         "O2.5": f"{mk['o25']:.2f}", "Rating": rating, 
-                        "Info": f"[{'|'.join(det)}]", "Advice": advice, 
+                        "Info": f"[{'|'.join(det)}]", 
+                        "Advice": "🔥 TARGET: 0.5 HT" if is_gold else "",
                         "Is_Gold": is_gold, "Fixture_ID": m["fixture"]["id"]
                     })
                 except: continue
             
             st.session_state["scan_results"] = results
-            if results: # FIX B: Log CSV automatico per Auditor
+            if results:
                 new_df = pd.DataFrame(results)
                 new_df["Log_Date"] = now_rome().strftime("%Y-%m-%d %H:%M")
                 new_df["Fixture_ID"] = new_df["Fixture_ID"].astype(str)
@@ -229,15 +235,17 @@ if st.button("🚀 AVVIA SCANSIONE MATCH"):
                     old = pd.read_csv(LOG_CSV, dtype={"Fixture_ID": str})
                     pd.concat([old, new_df], ignore_index=True).drop_duplicates(subset=["Fixture_ID"]).to_csv(LOG_CSV, index=False)
                 else: new_df.to_csv(LOG_CSV, index=False)
-
         except Exception as e: st.error(f"Errore: {e}")
 
 # ============================
-# RENDERING
+# RENDERING (FIX KEYERROR)
 # ============================
 if st.session_state["scan_results"]:
-    df_d = pd.DataFrame(st.session_state["scan_results"])
-    df_show = df_d[df_d["Is_Gold"] == True].copy() if only_gold_ui else df_d.copy()
+    res = st.session_state["scan_results"]
+    st.markdown(f"<div class='diag-box'>📡 ANALIZZATI: {len(res)} match validi</div>", unsafe_allow_html=True)
+    
+    df_raw = pd.DataFrame(res).sort_values("Ora")
+    df_show = df_raw[df_raw["Is_Gold"] == True].copy() if only_gold_ui else df_raw.copy()
 
     def style_rows(row):
         r_val, is_gold = row["Rating"], row["Is_Gold"]
@@ -246,6 +254,14 @@ if st.session_state["scan_results"]:
         return [''] * len(row)
 
     if not df_show.empty:
-        df_final = df_show[["Ora", "Lega", "Match", "1X2", "O2.5", "Rating", "Info"]]
-        st.write(df_final.style.apply(style_rows, axis=1).to_html(escape=False, index=False), unsafe_allow_html=True)
-                
+        # Applichiamo lo stile includendo Is_Gold, poi lo nascondiamo nel rendering
+        styled_df = df_show.style.apply(style_rows, axis=1)
+        cols_to_show = ["Ora", "Lega", "Match", "1X2", "O2.5", "Rating", "Info"]
+        
+        st.write(
+            styled_df.format(precision=2)
+            .hide(axis="columns", subset=[c for c in df_show.columns if c not in cols_to_show])
+            .to_html(escape=False, index=False), 
+            unsafe_allow_html=True
+        )
+        
