@@ -26,7 +26,7 @@ except Exception:
 def now_rome():
     return datetime.now(ROME_TZ) if ROME_TZ else datetime.now()
 
-st.set_page_config(page_title="ARAB SNIPER V15.52 - GOLD MASTER", layout="wide")
+st.set_page_config(page_title="ARAB SNIPER V15.53 - GOLD MASTER", layout="wide")
 
 if "odds_memory" not in st.session_state: st.session_state["odds_memory"] = {}
 if "snap_time_obj" not in st.session_state: st.session_state["snap_time_obj"] = None
@@ -63,14 +63,14 @@ def apply_custom_css():
             td { padding: 5px 8px; border: 1px solid #ccc; text-align: center; font-weight: 600; white-space: nowrap; }
             .match-cell { text-align: left !important; min-width: 220px; font-weight: 700; color: inherit !important; }
             .advice-tag { display: block; font-size: 0.65rem; color: #00e5ff; font-style: italic; margin-top: 2px; }
-            .diag-box { padding: 12px; background: #1a1c23; color: #00e5ff; border-radius: 8px; margin-bottom: 15px; font-family: monospace; border: 1px solid #00e5ff; }
+            .diag-box { padding: 12px; background: #1a1c23; color: #00e5ff; border-radius: 8px; margin-bottom: 15px; border: 1px solid #00e5ff; }
         </style>
     """, unsafe_allow_html=True)
 
 apply_custom_css()
 
 # ============================
-# API & PARSING (GG PT & O1.5 PT)
+# API & STATS ENGINES
 # ============================
 API_KEY = st.secrets.get("API_SPORTS_KEY")
 HEADERS = {"x-apisports-key": API_KEY}
@@ -149,7 +149,7 @@ def calculate_rating(fid, q1, qx, q2, o25, o05ht, snap_data, max_q_gold, inv_mar
     return min(100, sc), det, is_gold, into_trap
 
 # ============================
-# CORE ENGINE
+# LOGICA CORE SCANNER
 # ============================
 def execute_full_scan(session, fixtures, snap_mem, min_rating, max_q_gold, inv_margin):
     results, pb = [], st.progress(0)
@@ -173,7 +173,7 @@ def execute_full_scan(session, fixtures, snap_mem, min_rating, max_q_gold, inv_m
                 results.append({
                     "Ora": m["fixture"]["date"][11:16],
                     "Lega": f"{m['league']['name']} ({m['league']['country']})",
-                    "Match_Disp": f"{m['teams']['home']['name']} - {m['teams']['away']['name']}{' *' if into_trap else ''}",
+                    "Match_Disp_Raw": f"{m['teams']['home']['name']} - {m['teams']['away']['name']}{' *' if into_trap else ''}",
                     "1X2": f"{mk['q1']:.2f}|{mk['qx']:.2f}|{mk['q2']:.2f}",
                     "O2.5 Finale": f"{mk['o25']:.2f}",
                     "O0.5 PT": f"{mk['o05ht']:.2f}",
@@ -186,7 +186,7 @@ def execute_full_scan(session, fixtures, snap_mem, min_rating, max_q_gold, inv_m
     return results
 
 # ============================
-# UI & AZIONI
+# UI SIDEBAR & AZIONI
 # ============================
 st.sidebar.header("👑 Configurazione Sniper")
 min_rating = st.sidebar.slider("Rating Minimo", 0, 85, 60)
@@ -198,9 +198,9 @@ blocked_user = st.sidebar.multiselect("🚫 Blocca Paesi", st.session_state.get(
 forced_user = st.sidebar.multiselect("✅ Forza Paesi", st.session_state.get("found_countries", []), key="forced_user")
 
 oggi = now_rome().strftime("%Y-%m-%d")
-col_bt1, col_bt2 = st.columns(2)
+col_b1, col_b2 = st.columns(2)
 
-with col_bt1:
+with col_b1:
     if st.button("📌 SALVA SNAPSHOT E MOSTRA MATCH"):
         with requests.Session() as s:
             try:
@@ -208,10 +208,9 @@ with col_bt1:
                 fixtures = [f for f in (data.get("response", []) or []) if f["fixture"]["status"]["short"] == "NS" and is_allowed_league(f["league"]["name"], f["league"]["country"], blocked_user, forced_user)]
                 if not fixtures: st.warning("Nessun match NS."); st.stop()
                 
-                # Snapshot + Scan immediato
                 scan_res = execute_full_scan(s, fixtures, st.session_state.get("odds_memory", {}), min_rating, max_q_gold, inv_margin)
                 
-                # Creazione snapshot dalle quote correnti
+                # Snapshot basale aggiornato
                 new_snap = {}
                 for r in scan_res:
                     q_parts = r["1X2"].split("|")
@@ -234,18 +233,19 @@ with col_bt2:
             st.rerun()
 
 # ============================
-# RENDERING TABELLA (10 COLONNE)
+# RENDERING TABELLA (ORDINE 10 COLONNE)
 # ============================
 if st.session_state["scan_results"]:
     df_raw = pd.DataFrame(st.session_state["scan_results"])
     df_show = df_raw[df_raw["Is_Gold"] == True].copy() if only_gold_ui else df_raw.copy()
 
     if not df_show.empty:
-        df_show["Match_Final"] = df_show.apply(lambda r: f"<div class='match-cell'>{'👑 ' if r['Is_Gold'] else ''}{r['Match_Disp']}<span class='advice-tag'>{r['Advice']}</span></div>", axis=1)
-        df_show["Rating_Bold"] = df_show["Rating"].apply(lambda x: f"<b>{x}</b>")
+        # Costruzione colonna Match con Corona/Fiamma subito dopo Lega
+        df_show["Match_Disp"] = df_show.apply(lambda r: f"<div class='match-cell'>{'👑 ' if r['Is_Gold'] else ''}{r['Match_Disp_Raw']}<span class='advice-tag'>{r['Advice']}</span></div>", axis=1)
+        df_show["Rating_B"] = df_show["Rating"].apply(lambda x: f"<b>{x}</b>")
         
-        # Ordine Colonne 1-10
-        cols_order = ["Ora", "Lega", "Match_Final", "1X2", "O2.5 Finale", "O0.5 PT", "O1.5 PT", "GG PT", "Info", "Rating_Bold"]
+        # Ordine esatto: Ora | Lega | Match | 1X2 | O2.5 | O0.5 | O1.5 | GG | Info | Rating
+        cols_final = ["Ora", "Lega", "Match_Disp", "1X2", "O2.5 Finale", "O0.5 PT", "O1.5 PT", "GG PT", "Info", "Rating_B"]
         
         def style_rows(row):
             r_val, is_gold, info = row["Rating"], row["Is_Gold"], row["Info"]
@@ -253,12 +253,12 @@ if st.session_state["scan_results"]:
             elif is_gold or r_val >= 75 or "DRY" in info: return ['background-color: #2d6a4f; color: #ffffff; font-weight: bold;'] * len(row)
             return [''] * len(row)
 
-        st.write(df_show.style.apply(style_rows, axis=1).hide(axis="columns", subset=[c for c in df_show.columns if c not in cols_order]).to_html(escape=False, index=False), unsafe_allow_html=True)
+        st.write(df_show.style.apply(style_rows, axis=1).hide(axis="columns", subset=[c for c in df_show.columns if c not in cols_final]).to_html(escape=False, index=False), unsafe_allow_html=True)
 
         # Export Buttons
         st.markdown("---")
-        c_dl1, c_dl2, c_dl3 = st.columns(3)
-        with c_dl1: st.download_button("💾 CSV PER AUDITOR", data=df_raw.to_csv(index=False).encode('utf-8'), file_name=f"auditor_{oggi}.csv")
-        with c_dl2: st.download_button("🌐 REPORT HTML", data=df_raw.to_html().encode('utf-8'), file_name=f"report_{oggi}.html")
-        with c_dl3: 
+        c1, c2, c3 = st.columns(3)
+        with c1: st.download_button("💾 CSV PER AUDITOR", data=df_raw.to_csv(index=False).encode('utf-8'), file_name=f"auditor_{oggi}.csv")
+        with c2: st.download_button("🌐 REPORT HTML", data=df_raw.to_html().encode('utf-8'), file_name=f"report_{oggi}.html")
+        with c3: 
             if os.path.exists(LOG_CSV): st.download_button("🗂️ DATABASE STORICO", data=open(LOG_CSV,"rb").read(), file_name="sniper_history_log.csv")
