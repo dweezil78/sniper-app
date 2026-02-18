@@ -297,4 +297,3 @@ if st.session_state["scan_results"]:
             if os.path.exists(LOG_CSV):
                 with open(LOG_CSV, "rb") as f:
                     st.download_button("🗂️ DATABASE STORICO", data=f.read(), file_name="sniper_history_log.csv")
-```0
