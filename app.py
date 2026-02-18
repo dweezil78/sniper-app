@@ -107,7 +107,7 @@ def extract_markets_pro(resp_json):
     data = {"q1":0.0, "qx":0.0, "q2":0.0, "o25":0.0, "o05ht":0.0, "o15ht":0.0, "gg_ht":0.0}
     for bm in resp[0].get("bookmakers", []):
         for b in bm.get("bets", []):
-            bid, name = b.get("id"), (b.get("name") or "").lower()
+            bid, name = b.get("id"), str(b.get("name") or "").lower()
 
             if bid == 1 and data["q1"] == 0:
                 v = b.get("values", [])
@@ -118,7 +118,7 @@ def extract_markets_pro(resp_json):
 
             if ("1st" in name or "first" in name or "1h" in name or "half" in name) and ("goals" in name or "over/under" in name):
                 for x in b.get("values", []):
-                    v_val = (x.get("value") or "").lower().replace(" ", "")
+                    v_val = str(x.get("value") or "").lower().replace(" ", "")
                     if ("over0.5" in v_val or v_val == "over0.5") and data["o05ht"] == 0:
                         data["o05ht"] = float(x.get("odd") or 0)
                     if ("over1.5" in v_val or v_val == "over1.5") and data["o15ht"] == 0:
