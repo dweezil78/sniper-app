@@ -176,8 +176,19 @@ def execute_full_scan(session, fixtures, snap_mem, min_rating, max_q_gold, inv_m
         try:
             mk = extract_markets_pro(api_get(session, "odds", {"fixture": m["fixture"]["id"]}))
             if not mk or mk["q1"] <= 0: continue
+
+            # ============================
+            # FILTRI 1-1 PT (SENZA LEGHE)
+            # ============================
+            if not (1.30 <= mk.get("o05ht", 0) <= 1.50): continue
+            if min(mk.get("q1", 0), mk.get("q2", 0)) < 1.45: continue
+            if max(mk.get("q1", 0), mk.get("q2", 0)) > 6.50: continue
+            if mk.get("o25", 0) > 0 and mk.get("o25", 0) < 1.55: continue
+
             rating, det, is_gold, into_trap = calculate_rating(m["fixture"]["id"], mk["q1"], mk["qx"], mk["q2"], mk["o25"], mk["o05ht"], snap_mem, max_q_gold, inv_margin)
-            
+
+            det.append("⚽")
+
             h_id, a_id = m["teams"]["home"]["id"], m["teams"]["away"]["id"]
             if get_stats_ht(session, h_id) >= 0.6 and get_stats_ht(session, a_id) >= 0.6:
                 rating += 20; det.append("HT")
@@ -271,4 +282,3 @@ if st.session_state["scan_results"]:
         with c2: st.download_button("🌐 REPORT HTML", data=df.to_html().encode('utf-8'), file_name=f"report.html")
         with c3: 
             if os.path.exists(LOG_CSV): st.download_button("🗂️ DATABASE STORICO", data=open(LOG_CSV,"rb").read(), file_name="sniper_history_log.csv")
-                
