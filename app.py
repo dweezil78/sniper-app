@@ -89,64 +89,57 @@ def extract_markets_pro(resp_json):
     return data
 
 # ============================
-# LOGICA DRY REBOUND STRETTO (NUOVA)
+# LOGICA STATISTICA INTEGRATA (NUOVA)
 # ============================
-dry_cache = {}
+team_stats_cache = {}
 
-def get_dry_rebound_strict(session, tid):
-    if tid in dry_cache: return dry_cache[tid]
+def get_comprehensive_stats(session, tid):
+    """Analisi unica: HT Ratio, Vulnerabilità (Goal subiti) e Dry Rebound"""
+    if tid in team_stats_cache: return team_stats_cache[tid]
     try:
         rx = api_get(session, "fixtures", {"team": tid, "last": 5, "status": "FT"})
         fx = rx.get("response", [])
-        if len(fx) < 5:
-            dry_cache[tid] = (0, False)
-            return dry_cache[tid]
-
-        goals_list = []
+        if not fx: return {"ht_ratio": 0.0, "vulnerability": 0.0, "is_dry": False}
+        
+        ht_hits = 0
+        conceded_hits = 0
+        goals_scored_list = []
+        
         for f in fx:
+            # HT Ratio (Goal totali nel primo tempo >= 1)
+            h_score = f.get("score",{}).get("halftime",{}).get("home") or 0
+            a_score = f.get("score",{}).get("halftime",{}).get("away") or 0
+            if (h_score + a_score) >= 1: ht_hits += 1
+            
+            # Vulnerabilità (La squadra ha subito goal?)
             is_home = (f["teams"]["home"]["id"] == tid)
-            g = f["goals"]["home"] if is_home else f["goals"]["away"]
-            goals_list.append(int(g or 0))
+            g_subiti = f["goals"]["away"] if is_home else f["goals"]["home"]
+            if (g_subiti or 0) > 0: conceded_hits += 1
+            
+            # Per Dry Rebound
+            g_fatti = f["goals"]["home"] if is_home else f["goals"]["away"]
+            goals_scored_list.append(int(g_fatti or 0))
 
-        last_goals = goals_list[0]
-        if last_goals != 0:
-            dry_cache[tid] = (0, False)
-            return dry_cache[tid]
+        # Check Dry Rebound Strict
+        is_dry = False
+        if len(goals_scored_list) >= 5 and goals_scored_list[0] == 0:
+            if sum(1 for g in goals_scored_list if g >= 1) >= 4:
+                is_dry = True
 
-        scored_matches = sum(1 for g in goals_list if g >= 1)
-        zero_matches = sum(1 for g in goals_list if g == 0)
-        avg_goals = sum(goals_list) / len(goals_list)
-
-        # Filtri Strict: Rebound pulito
-        if scored_matches < 4 or avg_goals < 1.3 or zero_matches > 1:
-            dry_cache[tid] = (0, False)
-            return dry_cache[tid]
-
-        dry_cache[tid] = (15, True)
-        return dry_cache[tid]
-    except:
-        dry_cache[tid] = (0, False)
-        return dry_cache[tid]
-
-# Funzione HT rimasta invariata
-ht_cache = {}
-def get_stats_ht(session, tid):
-    if tid in ht_cache: return ht_cache[tid]
-    try:
-        rx = api_get(session, "fixtures", {"team": tid, "last": 5, "status": "FT"})
-        fx = rx.get("response", [])
-        if not fx: return 0.0
-        res = sum([1 for f in fx if (f.get("score",{}).get("halftime",{}).get("home") or 0) + (f.get("score",{}).get("halftime",{}).get("away") or 0) >= 1]) / len(fx)
-        ht_cache[tid] = res
+        res = {
+            "ht_ratio": ht_hits / len(fx),
+            "vulnerability": conceded_hits / len(fx),
+            "is_dry": is_dry
+        }
+        team_stats_cache[tid] = res
         return res
-    except: return 0.0
+    except: return {"ht_ratio": 0.0, "vulnerability": 0.0, "is_dry": False}
 
 def is_allowed_league(league_name, league_country, blocked_user, forced_user):
     name, country = str(league_name or "").lower(), str(league_country or "").strip()
     banned = ["women", "femminile", "u19", "u20", "u21", "u23", "primavera", "youth", "reserve", "friendly"]
     if any(t in name for t in banned): return False
-    AREAS = {"Italy", "Spain", "France", "Germany", "England", "Portugal", "Netherlands", "Belgium", "Switzerland", "Austria", "Greece", "Turkey", "Scotland", "Denmark", "Norway", "Sweden", "Poland", "Czech Republic", "Slovakia", "Hungary", "Romania", "Croatia", "Serbia", "Brazil", "Argentina", "Uruguay", "Colombia", "Chile", "USA", "Mexico", "Canada", "Japan", "South Korea", "Australia"}
-    return country in AREAS
+    return True # Tutti i campionati ammessi come da tua richiesta
 
 def calculate_rating(fid, q1, qx, q2, o25, o05ht, snap_data, max_q_gold, inv_margin):
     sc, det = 40, []
@@ -172,24 +165,47 @@ def execute_full_scan(session, fixtures, snap_mem, min_rating, max_q_gold, inv_m
     status_txt = st.empty()
     for i, m in enumerate(fixtures):
         pb.progress((i+1)/len(fixtures))
-        status_txt.text(f"Analisi {i+1}/{len(fixtures)}: {m['teams']['home']['name']}...")
+        status_txt.text(f"Analisi GG PT: {m['teams']['home']['name']}...")
         try:
             mk = extract_markets_pro(api_get(session, "odds", {"fixture": m["fixture"]["id"]}))
             if not mk or mk["q1"] <= 0: continue
+            
+            # Calcolo Rating e Parametri Base
             rating, det, is_gold, into_trap = calculate_rating(m["fixture"]["id"], mk["q1"], mk["qx"], mk["q2"], mk["o25"], mk["o05ht"], snap_mem, max_q_gold, inv_margin)
             
             h_id, a_id = m["teams"]["home"]["id"], m["teams"]["away"]["id"]
-            if get_stats_ht(session, h_id) >= 0.6 and get_stats_ht(session, a_id) >= 0.6:
+            s_home = get_comprehensive_stats(session, h_id)
+            s_away = get_comprehensive_stats(session, a_id)
+
+            # Logica Favorita/Underdog per Vulnerabilità
+            q_fav = min(mk["q1"], mk["q2"])
+            is_home_fav = (mk["q1"] < mk["q2"])
+            fav_stats = s_home if is_home_fav else s_away
+            dog_stats = s_away if is_home_fav else s_home
+            fav_id = h_id if is_home_fav else a_id
+
+            advice = "🔥 TARGET: 0.5 HT / 2.5 FT" if is_gold else ""
+
+            # --- ANALISI GG PT / DIAMOND ---
+            if s_home["ht_ratio"] >= 0.6 and s_away["ht_ratio"] >= 0.6:
                 rating += 20; det.append("HT")
-                fav_id = h_id if mk["q1"] < mk["q2"] else a_id
-                # INSERIMENTO LOGICA DRY STRETTO
-                bonus_dry, is_dry = get_dry_rebound_strict(session, fav_id)
-                if is_dry:
-                    rating = min(100, rating + bonus_dry)
-                    det.append("DRY 💧💧")
+                
+                # TRIGGER DIAMOND (Favorita vulnerabile + Dog che segna + Quota Sweet Spot)
+                if fav_stats["vulnerability"] >= 0.8 and dog_stats["ht_ratio"] >= 0.6:
+                    if 1.70 <= q_fav <= 2.20:
+                        rating = min(100, rating + 25)
+                        det.append("🎯 GG-PT")
+                        advice = "💎 DIAMOND: GG PT / O1.5 HT"
+                    else:
+                        det.append("GG-PT-POT")
+                        advice = "🔥 TARGET: GG PT"
+
+            # Bonus Dry Rebound
+            if fav_stats["is_dry"]:
+                rating = min(100, rating + 15)
+                det.append("DRY 💧")
             
             if rating >= min_rating:
-                advice = "🔥 TARGET: 0.5 HT (DRY REBOUND)" if "DRY" in det else "🔥 TARGET: 0.5 HT / 2.5 FT" if is_gold else ""
                 results.append({
                     "Ora": m["fixture"]["date"][11:16],
                     "Lega": f"{m['league']['name']} ({m['league']['country']})",
@@ -249,7 +265,7 @@ if st.session_state["scan_results"]:
     df = df[df["Is_Gold"]] if st.session_state["only_gold_ui"] else df
     
     if not df.empty:
-        df["Match Disponibili"] = df.apply(lambda r: f"<div class='match-cell'>{'👑 ' if r['Is_Gold'] else ''}{r['Match_Disp_Raw']}<span class='advice-tag'>{r['Advice']}</span></div>", axis=1)
+        df["Match Disponibili"] = df.apply(lambda r: f"<div class='match-cell'>{'💎 ' if 'DIAMOND' in r['Advice'] else '👑 ' if r['Is_Gold'] else ''}{r['Match_Disp_Raw']}<span class='advice-tag'>{r['Advice']}</span></div>", axis=1)
         df["Rating_Bold"] = df["Rating"].apply(lambda x: f"<b>{x}</b>")
         
         cols_final = ["Ora", "Lega", "Match Disponibili", "1X2", "O2.5 Finale", "O0.5 PT", "O1.5 PT", "GG PT", "Info", "Rating_Bold"]
@@ -258,6 +274,7 @@ if st.session_state["scan_results"]:
         def style_rows(row):
             idx = row.name
             r_val, is_gold, info = df.loc[idx, "Rating"], df.loc[idx, "Is_Gold"], df.loc[idx, "Info"]
+            if "GG-PT" in info: return ['background-color: #38003c; color: #00e5ff; font-weight: bold;'] * len(row) # Stile Diamond/GG PT
             if r_val >= 85: return ['background-color: #1b4332; color: #ffffff; font-weight: bold;'] * len(row)
             elif is_gold or r_val >= 75 or "DRY" in info: return ['background-color: #2d6a4f; color: #ffffff; font-weight: bold;'] * len(row)
             return [''] * len(row)
