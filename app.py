@@ -26,7 +26,7 @@ except Exception:
 def now_rome():
     return datetime.now(ROME_TZ) if ROME_TZ else datetime.now()
 
-st.set_page_config(page_title="ARAB SNIPER V15.53 - GOLD MASTER", layout="wide")
+st.set_page_config(page_title="ARAB SNIPER V15.54 - GOLD MASTER", layout="wide")
 
 if "odds_memory" not in st.session_state: st.session_state["odds_memory"] = {}
 if "snap_time_obj" not in st.session_state: st.session_state["snap_time_obj"] = None
@@ -210,7 +210,6 @@ with col_b1:
                 
                 scan_res = execute_full_scan(s, fixtures, st.session_state.get("odds_memory", {}), min_rating, max_q_gold, inv_margin)
                 
-                # Snapshot basale aggiornato
                 new_snap = {}
                 for r in scan_res:
                     q_parts = r["1X2"].split("|")
@@ -223,7 +222,7 @@ with col_b1:
                 st.rerun()
             except Exception as e: st.error(f"Errore: {e}")
 
-with col_bt2:
+with col_b2:
     if st.button("🚀 AVVIA SOLO SCANNER (Live)"):
         if not st.session_state["odds_memory"]: st.error("Esegui prima lo Snapshot."); st.stop()
         with requests.Session() as s:
@@ -240,7 +239,6 @@ if st.session_state["scan_results"]:
     df_show = df_raw[df_raw["Is_Gold"] == True].copy() if only_gold_ui else df_raw.copy()
 
     if not df_show.empty:
-        # Costruzione colonna Match con Corona/Fiamma subito dopo Lega
         df_show["Match_Disp"] = df_show.apply(lambda r: f"<div class='match-cell'>{'👑 ' if r['Is_Gold'] else ''}{r['Match_Disp_Raw']}<span class='advice-tag'>{r['Advice']}</span></div>", axis=1)
         df_show["Rating_B"] = df_show["Rating"].apply(lambda x: f"<b>{x}</b>")
         
