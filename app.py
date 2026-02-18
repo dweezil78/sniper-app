@@ -104,21 +104,37 @@ def get_stats(session, tid, mode="ht"):
 def extract_markets_pro(resp_json):
     resp = resp_json.get("response", [])
     if not resp: return None
-    data = {"q1":0.0, "qx":0.0, "q2":0.0, "o25":0.0, "o05ht":0.0}
+    data = {"q1":0.0, "qx":0.0, "q2":0.0, "o25":0.0, "o05ht":0.0, "o15ht":0.0, "gg_ht":0.0}
     for bm in resp[0].get("bookmakers", []):
         for b in bm.get("bets", []):
             bid, name = b.get("id"), (b.get("name") or "").lower()
+
             if bid == 1 and data["q1"] == 0:
                 v = b.get("values", [])
                 if len(v) >= 3: data["q1"], data["qx"], data["q2"] = float(v[0]["odd"]), float(v[1]["odd"]), float(v[2]["odd"])
+
             if bid == 5 and data["o25"] == 0:
                 data["o25"] = float(next((x["odd"] for x in b.get("values", []) if x["value"] == "Over 2.5"), 0))
-            if data["o05ht"] == 0 and ("1st" in name or "half" in name) and ("goals" in name or "over/under" in name):
+
+            if ("1st" in name or "first" in name or "1h" in name or "half" in name) and ("goals" in name or "over/under" in name):
                 for x in b.get("values", []):
                     v_val = (x.get("value") or "").lower().replace(" ", "")
-                    if "over0.5" in v_val or v_val == "over0.5":
-                        data["o05ht"] = float(x.get("odd") or 0); break
-        if data["q1"] > 0 and data["o25"] > 0: break
+                    if ("over0.5" in v_val or v_val == "over0.5") and data["o05ht"] == 0:
+                        data["o05ht"] = float(x.get("odd") or 0)
+                    if ("over1.5" in v_val or v_val == "over1.5") and data["o15ht"] == 0:
+                        data["o15ht"] = float(x.get("odd") or 0)
+
+            is_btts = ("both" in name and "team" in name) or ("btts" in name)
+            is_score = ("score" in name) or ("to score" in name) or ("btts" in name)
+            is_fh = ("1st" in name) or ("first" in name) or ("1h" in name) or ("half" in name)
+            if bid == 71 or (is_btts and is_score and is_fh):
+                if data["gg_ht"] == 0:
+                    for x in b.get("values", []):
+                        v_label = str(x.get("value") or "").strip().lower()
+                        if v_label in ["yes", "si", "oui"] or "yes" in v_label:
+                            data["gg_ht"] = float(x.get("odd") or 0); break
+
+        if data["q1"] > 0 and data["o25"] > 0 and data["o05ht"] > 0 and data["o15ht"] > 0 and data["gg_ht"] > 0: break
     return data
 
 def is_allowed_league(league_name, league_country, blocked_user, forced_user):
@@ -200,6 +216,7 @@ if st.button("🚀 AVVIA SCANSIONE MATCH"):
             fixtures = [f for f in all_raw if f["fixture"]["status"]["short"] == "NS" and is_allowed_league(f["league"]["name"], f["league"]["country"], blocked_user, forced_user)]
             results, pb = [], st.progress(0)
             txt = st.empty()
+            ball_pool = []
             for i, m in enumerate(fixtures):
                 pb.progress((i+1)/len(fixtures))
                 txt.text(f"Analisi {i+1}/{len(fixtures)}: {m['teams']['home']['name']}...")
@@ -209,15 +226,36 @@ if st.button("🚀 AVVIA SCANSIONE MATCH"):
                     rating, det, is_gold, into_trap = calculate_rating(m["fixture"]["id"], mk["q1"], mk["qx"], mk["q2"], mk["o25"], mk["o05ht"], st.session_state["odds_memory"], max_q_gold, inv_margin)
                     
                     h_id, a_id = m["teams"]["home"]["id"], m["teams"]["away"]["id"]
+                    ht_ok = False
                     if get_stats(s, h_id, "ht") >= 0.6 and get_stats(s, a_id, "ht") >= 0.6:
+                        ht_ok = True
                         rating += 20; det.append("HT")
                         fav_id = h_id if mk["q1"] < mk["q2"] else a_id
                         if get_stats(s, fav_id, "dry") >= 1.0: rating = min(100, rating + 15); det.append("DRY 💧💧")
                     
                     if rating >= min_rating:
                         advice = "🔥 TARGET: 0.5 HT (DRY REBOUND)" if "DRY" in det else "🔥 TARGET: 0.5 HT / 2.5 FT" if is_gold else ""
-                        results.append({"Ora": m["fixture"]["date"][11:16], "Lega": f"{m['league']['name']} ({m['league']['country']})", "Match": f"{m['teams']['home']['name']} - {m['teams']['away']['name']}{' *' if into_trap else ''}", "1X2": f"{mk['q1']:.2f}|{mk['qx']:.2f}|{mk['q2']:.2f}", "O2.5": f"{mk['o25']:.2f}", "O0.5HT": f"{mk['o05ht']:.2f}", "Rating": rating, "Info": f"[{'|'.join(det)}]", "Is_Gold": is_gold, "Advice": advice, "Fixture_ID": m["fixture"]["id"]})
+                        results.append({"Ora": m["fixture"]["date"][11:16], "Lega": f"{m['league']['name']} ({m['league']['country']})", "Match": f"{m['teams']['home']['name']} - {m['teams']['away']['name']}{' *' if into_trap else ''}", "1X2": f"{mk['q1']:.2f}|{mk['qx']:.2f}|{mk['q2']:.2f}", "O2.5": f"{mk['o25']:.2f}", "O0.5HT": f"{mk['o05ht']:.2f}", "Rating": rating, "Info": f"[{'|'.join(det)}]", "Is_Gold": is_gold, "Advice": advice, "Fixture_ID": str(m["fixture"]["id"])})
+                        
+                        o15 = mk.get("o15ht", 0) or 0
+                        gg1t = mk.get("gg_ht", 0) or 0
+                        if ht_ok and o15 > 0 and gg1t > 0:
+                            if abs(mk.get("q1", 0) - mk.get("q2", 0)) <= 1.10:
+                                if 2.20 <= o15 <= 2.80 and 4.20 <= gg1t <= 5.50:
+                                    ball_pool.append(str(m["fixture"]["id"]))
+
                 except: continue
+
+            if ball_pool and results:
+                top = [r for r in results if r.get("Fixture_ID") in set(ball_pool)]
+                top = sorted(top, key=lambda x: x.get("Rating", 0), reverse=True)[:5]
+                top_ids = set([t.get("Fixture_ID") for t in top])
+                for r in results:
+                    if r.get("Fixture_ID") in top_ids:
+                        info = r.get("Info","")
+                        if info.endswith("]"): r["Info"] = info[:-1] + "|⚽]"
+                        else: r["Info"] = info + "⚽"
+
             st.session_state["scan_results"] = results
             if results:
                 new_df = pd.DataFrame(results)
@@ -259,3 +297,4 @@ if st.session_state["scan_results"]:
             if os.path.exists(LOG_CSV):
                 with open(LOG_CSV, "rb") as f:
                     st.download_button("🗂️ DATABASE STORICO", data=f.read(), file_name="sniper_history_log.csv")
+```0
