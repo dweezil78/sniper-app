@@ -23,16 +23,15 @@ except Exception:
 def now_rome():
     return datetime.now(ROME_TZ) if ROME_TZ else datetime.now()
 
-st.set_page_config(page_title="ARAB SNIPER V15.55 - GOLD MASTER", layout="wide")
+st.set_page_config(page_title="ARAB SNIPER V15.58 - GOLD MASTER", layout="wide")
 
+# Inizializzazione Session State
 if "odds_memory" not in st.session_state: st.session_state["odds_memory"] = {}
 if "snap_time_obj" not in st.session_state: st.session_state["snap_time_obj"] = None
 if "scan_results" not in st.session_state: st.session_state["scan_results"] = None
 if "found_countries" not in st.session_state: st.session_state["found_countries"] = []
+if "only_gold_ui" not in st.session_state: st.session_state["only_gold_ui"] = False
 
-# ============================
-# CSS ORIGINALE (PUNTO FERMO)
-# ============================
 def apply_custom_css():
     st.markdown("""
         <style>
@@ -49,7 +48,7 @@ def apply_custom_css():
 apply_custom_css()
 
 # ============================
-# API & PARSING (FIX INT ERROR)
+# API & PARSING MULTI-BOOKMAKER (FIX BUG BREAK)
 # ============================
 API_KEY = st.secrets.get("API_SPORTS_KEY")
 HEADERS = {"x-apisports-key": API_KEY}
@@ -61,6 +60,56 @@ def api_get(session, path, params):
     if js.get("errors"): raise RuntimeError(f"API Errors: {js['errors']}")
     return js
 
+def extract_markets_pro(resp_json):
+    resp = resp_json.get("response", [])
+    if not resp: return None
+    data = {"q1":0.0, "qx":0.0, "q2":0.0, "o25":0.0, "o05ht":0.0, "o15ht":0.0, "gg_ht":0.0}
+    
+    # Rimosso il break prematuro: scorriamo tutti i bookmaker finché non abbiamo i dati
+    for bm in resp[0].get("bookmakers", []):
+        for b in bm.get("bets", []):
+            bid = b.get("id")
+            name = str(b.get("name") or "").lower()
+            
+            # 1X2 & O2.5 (Popoliamo solo se ancora a 0)
+            if bid == 1 and data["q1"] == 0:
+                v = b.get("values", [])
+                if len(v) >= 3: data["q1"], data["qx"], data["q2"] = float(v[0]["odd"]), float(v[1]["odd"]), float(v[2]["odd"])
+            
+            if bid == 5 and data["o25"] == 0:
+                for x in b.get("values", []):
+                    if x["value"] == "Over 2.5": data["o25"] = float(x["odd"]); break
+
+            # OVER 0.5 / 1.5 PT (Matching elastico 1H / 1st)
+            is_half_time_goals = ("1st" in name or "first" in name or "1h" in name) and ("goals" in name or "over/under" in name)
+            if is_half_time_goals:
+                for x in b.get("values", []):
+                    v_val = str(x.get("value") or "").lower().replace(" ", "")
+                    if "over0.5" in v_val and data["o05ht"] == 0: data["o05ht"] = float(x.get("odd") or 0)
+                    if "over1.5" in v_val and data["o15ht"] == 0: data["o15ht"] = float(x.get("odd") or 0)
+
+            # GG PT ELASTICO (Intercetta BTTS e varianti senza "half")
+            is_btts_name = ("both" in name and "team" in name) or "btts" in name
+            is_score_name = "score" in name or "to score" in name or "btts" in name
+            is_first_half = "1st" in name or "first" in name or "1h" in name or "half" in name
+            
+            # Se è un mercato di goal/score nel primo tempo
+            if bid == 71 or (is_btts_name and is_score_name and is_first_half):
+                if data["gg_ht"] == 0:
+                    for x in b.get("values", []):
+                        v_label = str(x.get("value") or "").strip().lower()
+                        if v_label in ["yes", "si", "oui"] or "yes" in v_label:
+                            data["gg_ht"] = float(x.get("odd") or 0); break
+                            
+        # Se abbiamo popolato i campi principali E i campi HT, potremmo fermarci, 
+        # ma lasciamo scorrere per sicurezza se mancano i GG
+        if data["q1"] > 0 and data["gg_ht"] > 0 and data["o15ht"] > 0: break
+        
+    return data
+
+# ============================
+# FUNZIONI STATISTICHE & RATING
+# ============================
 ht_cache, dry_cache = {}, {}
 def get_stats(session, tid, mode="ht"):
     cache = ht_cache if mode=="ht" else dry_cache
@@ -78,29 +127,6 @@ def get_stats(session, tid, mode="ht"):
         cache[tid] = res
         return res
     except: return 0.0
-
-def extract_markets_pro(resp_json):
-    resp = resp_json.get("response", [])
-    if not resp: return None
-    data = {"q1":0.0, "qx":0.0, "q2":0.0, "o25":0.0, "o05ht":0.0, "o15ht":0.0, "gg_ht":0.0}
-    for bm in resp[0].get("bookmakers", []):
-        for b in bm.get("bets", []):
-            bid, name = b.get("id"), str(b.get("name") or "").lower()
-            if bid == 1 and data["q1"] == 0:
-                v = b.get("values", [])
-                if len(v) >= 3: data["q1"], data["qx"], data["q2"] = float(v[0]["odd"]), float(v[1]["odd"]), float(v[2]["odd"])
-            if bid == 5 and data["o25"] == 0:
-                data["o25"] = float(next((x["odd"] for x in b.get("values", []) if x["value"] == "Over 2.5"), 0))
-            if ("1st" in name or "half" in name) and ("goals" in name or "over/under" in name):
-                for x in b.get("values", []):
-                    v_val = str(x.get("value") or "").lower().replace(" ", "")
-                    if "over0.5" in v_val: data["o05ht"] = float(x.get("odd") or 0)
-                    if "over1.5" in v_val: data["o15ht"] = float(x.get("odd") or 0)
-            if bid == 71 or "both teams to score - 1st half" in name:
-                for x in b.get("values", []):
-                    if str(x.get("value") or "") == "Yes": data["gg_ht"] = float(x.get("odd") or 0)
-        if data["q1"] > 0 and data["o25"] > 0: break
-    return data
 
 def is_allowed_league(league_name, league_country, blocked_user, forced_user):
     name, country = str(league_name or "").lower(), str(league_country or "").strip()
@@ -128,7 +154,7 @@ def calculate_rating(fid, q1, qx, q2, o25, o05ht, snap_data, max_q_gold, inv_mar
     return min(100, sc), det, is_gold, into_trap
 
 # ============================
-# SCANNER ENGINE
+# CORE ENGINE
 # ============================
 def execute_full_scan(session, fixtures, snap_mem, min_rating, max_q_gold, inv_margin):
     results, pb = [], st.progress(0)
@@ -152,7 +178,7 @@ def execute_full_scan(session, fixtures, snap_mem, min_rating, max_q_gold, inv_m
                 results.append({
                     "Ora": m["fixture"]["date"][11:16],
                     "Lega": f"{m['league']['name']} ({m['league']['country']})",
-                    "Match_Raw": f"{m['teams']['home']['name']} - {m['teams']['away']['name']}{' *' if into_trap else ''}",
+                    "Match_Disp_Raw": f"{m['teams']['home']['name']} - {m['teams']['away']['name']}{' *' if into_trap else ''}",
                     "1X2": f"{mk['q1']:.2f}|{mk['qx']:.2f}|{mk['q2']:.2f}",
                     "O2.5 Finale": f"{mk['o25']:.2f}",
                     "O0.5 PT": f"{mk['o05ht']:.2f}",
@@ -165,12 +191,13 @@ def execute_full_scan(session, fixtures, snap_mem, min_rating, max_q_gold, inv_m
     return results
 
 # ============================
-# UI SIDEBAR & PULSANTI
+# UI & AZIONI
 # ============================
 st.sidebar.header("👑 Configurazione Sniper")
 min_rating = st.sidebar.slider("Rating Minimo", 0, 85, 60)
 max_q_gold = st.sidebar.slider("Sweet Spot Max", 1.70, 2.10, 1.95)
-only_gold_ui = st.sidebar.toggle("🎯 SOLO SWEET SPOT", value=False)
+# Toggle sincronizzato con session_state
+st.session_state["only_gold_ui"] = st.sidebar.toggle("🎯 SOLO SWEET SPOT", value=st.session_state["only_gold_ui"])
 inv_margin = st.sidebar.slider("Margine inversione", 0.05, 0.30, 0.10, 0.01)
 
 oggi = now_rome().strftime("%Y-%m-%d")
@@ -179,19 +206,16 @@ col_b1, col_b2 = st.columns(2)
 with col_b1:
     if st.button("📌 SNAPSHOT + SCAN (Integrato)"):
         with requests.Session() as s:
-            data = api_get(s, "fixtures", {"date": oggi, "timezone": "Europe/Rome"})
-            fixtures = [f for f in data.get("response", []) if f["fixture"]["status"]["short"] == "NS" and is_allowed_league(f["league"]["name"], f["league"]["country"], [], [])]
-            scan_res = execute_full_scan(s, fixtures, st.session_state.get("odds_memory", {}), min_rating, max_q_gold, inv_margin)
-            
-            new_snap = {}
-            for r in scan_res:
-                q = r["1X2"].split("|")
-                new_snap[r["Fixture_ID"]] = {"q1": float(q[0]), "q2": float(q[2])}
-            
-            st.session_state["odds_memory"], st.session_state["snap_time_obj"] = new_snap, now_rome()
-            st.session_state["scan_results"] = scan_res
-            with open(JSON_FILE, "w") as f: json.dump({"date": oggi, "timestamp": now_rome().isoformat(), "odds": new_snap}, f)
-            st.rerun()
+            try:
+                data = api_get(s, "fixtures", {"date": oggi, "timezone": "Europe/Rome"})
+                fixtures = [f for f in data.get("response", []) if f["fixture"]["status"]["short"] == "NS" and is_allowed_league(f["league"]["name"], f["league"]["country"], [], [])]
+                scan_res = execute_full_scan(s, fixtures, st.session_state.get("odds_memory", {}), min_rating, max_q_gold, inv_margin)
+                new_snap = {r["Fixture_ID"]: {"q1": float(r["1X2"].split("|")[0]), "q2": float(r["1X2"].split("|")[2])} for r in scan_res}
+                st.session_state["odds_memory"], st.session_state["snap_time_obj"] = new_snap, now_rome()
+                st.session_state["scan_results"] = scan_res
+                with open(JSON_FILE, "w") as f: json.dump({"date": oggi, "timestamp": now_rome().isoformat(), "odds": new_snap}, f)
+                st.rerun()
+            except Exception as e: st.error(f"Errore: {e}")
 
 with col_b2:
     if st.button("🚀 AVVIA SOLO SCANNER (Live)"):
@@ -202,32 +226,30 @@ with col_b2:
             st.rerun()
 
 # ============================
-# RENDERING TABELLA (ORDINE FISSO)
+# RENDERING TABELLA (MATCH TERZO POSTO)
 # ============================
 if st.session_state["scan_results"]:
     df = pd.DataFrame(st.session_state["scan_results"])
-    df = df[df["Is_Gold"]] if only_gold_ui else df
+    df = df[df["Is_Gold"]] if st.session_state["only_gold_ui"] else df
     
     if not df.empty:
-        # 1. COSTRUZIONE DELLA CELLA MATCH (👑 + Match + 🔥 + Advice)
-        df["Match Disponibili"] = df.apply(lambda r: f"<div class='match-cell'>{'👑 ' if r['Is_Gold'] else ''}{r['Match_Raw']}<span class='advice-tag'>{r['Advice']}</span></div>", axis=1)
-        
-        # 2. RATING IN GRASSETTO
+        df["Match Disponibili"] = df.apply(lambda r: f"<div class='match-cell'>{'👑 ' if r['Is_Gold'] else ''}{r['Match_Disp_Raw']}<span class='advice-tag'>{r['Advice']}</span></div>", axis=1)
         df["Rating_Bold"] = df["Rating"].apply(lambda x: f"<b>{x}</b>")
         
-        # 3. FORZATURA ORDINE COLONNE (PUNTO FERMO)
+        # ORDINE COLONNE BLOCCATO
         cols_final = ["Ora", "Lega", "Match Disponibili", "1X2", "O2.5 Finale", "O0.5 PT", "O1.5 PT", "GG PT", "Info", "Rating_Bold"]
-        df_display = df[cols_final].copy() # <--- Qui spostiamo Match Disponibili in terza posizione
+        df_display = df[cols_final].copy()
         
         def style_rows(row):
-            r_val, is_gold, info = df.loc[row.name, "Rating"], df.loc[row.name, "Is_Gold"], df.loc[row.name, "Info"]
+            idx = row.name
+            r_val, is_gold, info = df.loc[idx, "Rating"], df.loc[idx, "Is_Gold"], df.loc[idx, "Info"]
             if r_val >= 85: return ['background-color: #1b4332; color: #ffffff; font-weight: bold;'] * len(row)
             elif is_gold or r_val >= 75 or "DRY" in info: return ['background-color: #2d6a4f; color: #ffffff; font-weight: bold;'] * len(row)
             return [''] * len(row)
 
         st.write(df_display.style.apply(style_rows, axis=1).to_html(escape=False, index=False), unsafe_allow_html=True)
-
-        # Export
+        
+        # Tasti Export
         st.markdown("---")
         c1, c2, c3 = st.columns(3)
         with c1: st.download_button("💾 CSV PER AUDITOR", data=df.to_csv(index=False).encode('utf-8'), file_name=f"auditor_{oggi}.csv")
