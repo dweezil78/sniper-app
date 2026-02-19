@@ -11,6 +11,7 @@ from pathlib import Path
 # ============================
 BASE_DIR = Path(__file__).resolve().parent
 JSON_FILE = str(BASE_DIR / "arab_snapshot.json")
+NAZIONI_FILE = str(BASE_DIR / "nazioni_config.json")
 LOG_CSV = str(BASE_DIR / "sniper_history_log.csv")
 
 try:
@@ -24,13 +25,25 @@ def now_rome():
 
 st.set_page_config(page_title="ARAB SNIPER V15.59 - GOLD MASTER", layout="wide")
 
+# --- INITIALIZATION & PERSISTENCE ---
 if "odds_memory" not in st.session_state: st.session_state["odds_memory"] = {}
 if "snap_time_obj" not in st.session_state: st.session_state["snap_time_obj"] = None
 if "scan_results" not in st.session_state: st.session_state["scan_results"] = None
 if "available_countries" not in st.session_state: st.session_state["available_countries"] = []
+if "selected_countries" not in st.session_state: st.session_state["selected_countries"] = []
+
+# Recovery Snapshot Fisico
+if not st.session_state["odds_memory"] and os.path.exists(JSON_FILE):
+    try:
+        with open(JSON_FILE, "r") as f:
+            saved = json.load(f)
+            if saved.get("date") == now_rome().strftime("%Y-%m-%d"):
+                st.session_state["odds_memory"] = saved.get("odds", {})
+                st.session_state["snap_time_obj"] = datetime.fromisoformat(saved["timestamp"])
+    except: pass
 
 # ============================
-# CSS E LAYOUT ORIGINALE
+# CSS E LAYOUT
 # ============================
 CUSTOM_CSS = """
     <style>
@@ -45,7 +58,7 @@ CUSTOM_CSS = """
 st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
 
 # ============================
-# API & PARSING POTENZIATO
+# API CORE & STATS
 # ============================
 API_KEY = st.secrets.get("API_SPORTS_KEY")
 HEADERS = {"x-apisports-key": API_KEY}
@@ -57,13 +70,39 @@ def api_get(session, path, params):
     if js.get("errors"): raise RuntimeError(f"API Errors: {js['errors']}")
     return js
 
-# Recupero paesi del giorno (Filtro preventivo)
+# Recupero elenco nazioni e gestione selezione persistente
 if not st.session_state["available_countries"]:
     try:
         with requests.Session() as s:
             data = api_get(s, "fixtures", {"date": now_rome().strftime("%Y-%m-%d"), "timezone": "Europe/Rome"})
-            st.session_state["available_countries"] = sorted(list(set([f["league"]["country"] for f in data.get("response", [])])))
+            all_c = sorted(list(set([f["league"]["country"] for f in data.get("response", [])])))
+            st.session_state["available_countries"] = all_c
+            if os.path.exists(NAZIONI_FILE):
+                with open(NAZIONI_FILE, "r") as f:
+                    saved_sel = json.load(f)
+                    st.session_state["selected_countries"] = [c for c in saved_sel if c in all_c]
+            else:
+                st.session_state["selected_countries"] = all_c
     except: pass
+
+team_stats_cache = {}
+def get_comprehensive_stats(session, tid):
+    if tid in team_stats_cache: return team_stats_cache[tid]
+    try:
+        rx = api_get(session, "fixtures", {"team": tid, "last": 5, "status": "FT"})
+        fx = rx.get("response", [])
+        if not fx: return {"ht_ratio": 0.0, "vulnerability": 0.0, "is_dry": False}
+        ht_h, conc_h, goals = 0, 0, []
+        for f in fx:
+            if ((f.get("score",{}).get("halftime",{}).get("home") or 0) + (f.get("score",{}).get("halftime",{}).get("away") or 0)) >= 1: ht_h += 1
+            is_home = (f["teams"]["home"]["id"] == tid)
+            conc_val = (f["goals"]["away"] if is_home else f["goals"]["home"]) or 0
+            if conc_val > 0: conc_h += 1
+            goals.append(int((f["goals"]["home"] if is_home else f["goals"]["away"]) or 0))
+        res = {"ht_ratio": ht_h/5, "vulnerability": conc_h/5, "is_dry": (len(goals)>0 and goals[0]==0 and sum(1 for g in goals if g>=1)>=4)}
+        team_stats_cache[tid] = res
+        return res
+    except: return {"ht_ratio": 0.0, "vulnerability": 0.0, "is_dry": False}
 
 def extract_markets_pro(resp_json):
     resp = resp_json.get("response", [])
@@ -82,37 +121,13 @@ def extract_markets_pro(resp_json):
                     v_val = str(x.get("value") or "").lower().replace(" ", "")
                     if "over0.5" in v_val and data["o05ht"] == 0: data["o05ht"] = float(x.get("odd") or 0)
                     if "over1.5" in v_val and data["o15ht"] == 0: data["o15ht"] = float(x.get("odd") or 0)
-            
-            # PARSING GG PT (BTTS 1H)
             is_btts = "both" in name or "btts" in name or "gg" in name
             is_1h = "1st" in name or "1h" in name or "half" in name
             if (bid == 71 or (is_btts and is_1h)) and data["gg_ht"] == 0:
                 for x in b.get("values", []):
                     if str(x.get("value") or "").lower() in ["yes", "si", "oui"]:
                         data["gg_ht"] = float(x.get("odd") or 0)
-        if data["q1"] > 0 and data["gg_ht"] > 0: break
     return data
-
-# ============================
-# LOGICA STATISTICA
-# ============================
-team_stats_cache = {}
-def get_comprehensive_stats(session, tid):
-    if tid in team_stats_cache: return team_stats_cache[tid]
-    try:
-        rx = api_get(session, "fixtures", {"team": tid, "last": 5, "status": "FT"})
-        fx = rx.get("response", [])
-        if not fx: return {"ht_ratio": 0.0, "vulnerability": 0.0, "is_dry": False}
-        ht_h, conc_h, goals = 0, 0, []
-        for f in fx:
-            if ((f.get("score",{}).get("halftime",{}).get("home") or 0) + (f.get("score",{}).get("halftime",{}).get("away") or 0)) >= 1: ht_h += 1
-            is_home = (f["teams"]["home"]["id"] == tid)
-            if (f["goals"]["away"] if is_home else f["goals"]["home"] or 0) > 0: conc_h += 1
-            goals.append(int((f["goals"]["home"] if is_home else f["goals"]["away"]) or 0))
-        res = {"ht_ratio": ht_h/5, "vulnerability": conc_h/5, "is_dry": (goals[0]==0 and sum(1 for g in goals if g>=1)>=4)}
-        team_stats_cache[tid] = res
-        return res
-    except: return {"ht_ratio": 0.0, "vulnerability": 0.0, "is_dry": False}
 
 # ============================
 # CORE ENGINE
@@ -120,6 +135,8 @@ def get_comprehensive_stats(session, tid):
 def execute_full_scan(session, fixtures, snap_mem, min_rating, max_q_gold, inv_margin, selected_countries):
     results, pb = [], st.progress(0)
     filtered = [f for f in fixtures if f["league"]["country"] in selected_countries]
+    if not filtered: return []
+    
     for i, m in enumerate(filtered):
         pb.progress((i+1)/len(filtered))
         try:
@@ -127,25 +144,27 @@ def execute_full_scan(session, fixtures, snap_mem, min_rating, max_q_gold, inv_m
             if not mk or mk["q1"] <= 0: continue
             
             sc, det = 40, []
-            is_gold = (1.40 <= min(mk["q1"], mk["q2"]) <= max_q_gold)
+            q_fav = min(mk["q1"], mk["q2"])
+            is_gold = (1.40 <= q_fav <= max_q_gold)
+            
             fid_s = str(m["fixture"]["id"])
             if fid_s in snap_mem:
                 old = snap_mem[fid_s]
-                old_f, cur_f = min(old.get("q1",0), old.get("q2",0)), min(mk["q1"], mk["q2"])
+                old_f, cur_f = min(old.get("q1",0), old.get("q2",0)), q_fav
                 if (old_f - cur_f) >= 0.15: sc += 40; det.append("Drop")
                 if abs(mk["q1"]-mk["q2"]) >= inv_margin:
                     fav_s = "1" if old.get("q1",0) < old.get("q2",0) else "2"
                     if (fav_s=="1" and mk["q2"]<mk["q1"]) or (fav_s=="2" and mk["q1"]<mk["q2"]): sc += 25; det.append("Inv")
+            
             if 1.70 <= mk["o25"] <= 2.15: sc += 20; det.append("Val")
             if 1.30 <= mk["o05ht"] <= 1.50: sc += 10; det.append("HT-Q")
             rating = min(100, sc)
 
             s_h, s_a = get_comprehensive_stats(session, m["teams"]["home"]["id"]), get_comprehensive_stats(session, m["teams"]["away"]["id"])
-            q_fav = min(mk["q1"], mk["q2"])
             f_s = s_h if mk["q1"] < mk["q2"] else s_a
             d_s = s_a if mk["q1"] < mk["q2"] else s_h
-            advice = "🔥 TARGET: 0.5 HT / 2.5 FT" if is_gold else ""
             
+            advice = "🔥 TARGET: 0.5 HT / 2.5 FT" if is_gold else ""
             if s_h["ht_ratio"] >= 0.6 and s_a["ht_ratio"] >= 0.6:
                 rating += 20; det.append("HT")
                 if f_s["vulnerability"] >= 0.8 and d_s["ht_ratio"] >= 0.6:
@@ -157,7 +176,8 @@ def execute_full_scan(session, fixtures, snap_mem, min_rating, max_q_gold, inv_m
 
             if rating >= min_rating:
                 results.append({
-                    "Ora": m["fixture"]["date"][11:16], "Lega": f"{m['league']['name']} ({m['league']['country']})", "Match": f"{m['teams']['home']['name']} - {m['teams']['away']['name']}",
+                    "Ora": m["fixture"]["date"][11:16], "Lega": f"{m['league']['name']} ({m['league']['country']})", 
+                    "Match": f"{m['teams']['home']['name']} - {m['teams']['away']['name']}",
                     "1X2": f"{mk['q1']:.2f}|{mk['qx']:.2f}|{mk['q2']:.2f}", "O2.5 Finale": f"{mk['o25']:.2f}", "O0.5 PT": f"{mk['o05ht']:.2f}",
                     "O1.5 PT": f"{mk['o15ht']:.2f}", "GG PT": f"{mk['gg_ht']:.2f}", "Info": f"[{'|'.join(det)}]", "Rating": rating, "Is_Gold": is_gold, "Advice": advice, "Fixture_ID": fid_s
                 })
@@ -165,16 +185,19 @@ def execute_full_scan(session, fixtures, snap_mem, min_rating, max_q_gold, inv_m
     return results
 
 # ============================
-# INTERFACCIA SIDEBAR
+# SIDEBAR UI
 # ============================
 st.sidebar.header("👑 Configurazione Sniper")
 
+new_selection = st.sidebar.multiselect("🌍 Seleziona Nazioni", options=st.session_state["available_countries"], default=st.session_state["selected_countries"])
+if new_selection != st.session_state["selected_countries"]:
+    st.session_state["selected_countries"] = new_selection
+    with open(NAZIONI_FILE, "w") as f: json.dump(new_selection, f)
+
 if st.session_state["odds_memory"]:
-    st.sidebar.success(f"✅ Snapshot Attivo: {st.session_state['snap_time_obj'].strftime('%H:%M')}")
+    st.sidebar.success(f"✅ Snapshot: {st.session_state['snap_time_obj'].strftime('%H:%M')}")
 else:
     st.sidebar.warning("⚠️ Nessun Snapshot Caricato")
-
-selected_countries = st.sidebar.multiselect("🌍 Filtra Nazioni", options=st.session_state["available_countries"], default=st.session_state["available_countries"])
 
 min_rating = st.sidebar.slider("Rating Minimo", 0, 85, 60)
 max_q_gold = st.sidebar.slider("Sweet Spot Max", 1.70, 2.10, 2.10)
@@ -187,25 +210,26 @@ inv_margin = st.sidebar.slider("Margine inversione", 0.05, 0.30, 0.15, 0.01)
 oggi = now_rome().strftime("%Y-%m-%d")
 col_b1, col_b2 = st.columns(2)
 
-def run_scan(is_snapshot):
+def handle_run(is_snap):
     with requests.Session() as s:
         try:
             data = api_get(s, "fixtures", {"date": oggi, "timezone": "Europe/Rome"})
             fixtures = [f for f in data.get("response", []) if f["fixture"]["status"]["short"] == "NS" and not any(t in f["league"]["name"].lower() for t in ["women","u19","u20","u21","u23","youth","friendly"])]
-            res = execute_full_scan(s, fixtures, {} if is_snapshot else st.session_state["odds_memory"], min_rating, max_q_gold, inv_margin, selected_countries)
-            if is_snapshot:
+            res = execute_full_scan(s, fixtures, {} if is_snap else st.session_state["odds_memory"], min_rating, max_q_gold, inv_margin, st.session_state["selected_countries"])
+            if is_snap:
                 new_snap = {r["Fixture_ID"]: {"q1": float(r["1X2"].split("|")[0]), "q2": float(r["1X2"].split("|")[2])} for r in res}
-                st.session_state["odds_memory"], st.session_state["snap_time_obj"] = new_snap, now_rome()
+                st.session_state["odds_memory"] = new_snap
+                st.session_state["snap_time_obj"] = now_rome()
                 with open(JSON_FILE, "w") as f: json.dump({"date": oggi, "timestamp": now_rome().isoformat(), "odds": new_snap}, f)
             st.session_state["scan_results"] = res
             st.rerun()
         except Exception as e: st.error(f"Errore: {e}")
 
-if col_b1.button("📌 SNAPSHOT + SCAN"): run_scan(True)
-if col_b2.button("🚀 AVVIA SOLO SCANNER"): run_scan(False)
+if col_b1.button("📌 SNAPSHOT + SCAN"): handle_run(True)
+if col_b2.button("🚀 AVVIA SOLO SCANNER"): handle_run(False)
 
 # ============================
-# TABELLA E EXPORT
+# TABELLA E DOWNLOAD
 # ============================
 if st.session_state["scan_results"]:
     df = pd.DataFrame(st.session_state["scan_results"])
@@ -214,10 +238,8 @@ if st.session_state["scan_results"]:
     if not df.empty:
         df["Match Disponibili"] = df.apply(lambda r: f"<div class='match-cell'>{'💎 ' if 'DIAMOND' in r['Advice'] else '👑 ' if r['Is_Gold'] else ''}{r['Match']}<span class='advice-tag'>{r['Advice']}</span></div>", axis=1)
         df["Rating_Bold"] = df["Rating"].apply(lambda x: f"<b>{x}</b>")
-        
         cols = ["Ora", "Lega", "Match Disponibili", "1X2", "O2.5 Finale", "O0.5 PT", "O1.5 PT", "GG PT", "Info", "Rating_Bold"]
         st_style = df[cols].style.apply(lambda row: ['background-color: #38003c; color: #00e5ff;' if 'GG-PT' in df.loc[row.name, 'Info'] else '' for _ in row], axis=1)
-        
         st.write(st_style.to_html(escape=False, index=False), unsafe_allow_html=True)
         
         st.markdown("---")
