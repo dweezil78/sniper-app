@@ -85,12 +85,11 @@ def save_excluded_countries(excluded_list):
 if "excluded_countries" not in st.session_state:
     st.session_state["excluded_countries"] = load_excluded_countries()
 
-# Normalizza nazioni
 st.session_state["excluded_countries"] = [c for c in st.session_state["excluded_countries"] if c in st.session_state["available_countries"]]
 st.session_state["selected_countries"] = [c for c in st.session_state["available_countries"] if c not in st.session_state["excluded_countries"]]
 
 # ============================
-# LOGICA STATISTICA E PARSING
+# LOGICA STATISTICA E PARSING (SANITY CHECK)
 # ============================
 team_stats_cache = {}
 
@@ -207,7 +206,7 @@ def execute_full_scan(session, fixtures, snap_mem, min_rating, max_q_gold, inv_m
     return results
 
 # ============================
-# SIDEBAR UI
+# SIDEBAR UI (GESTIONE NAZIONI PRO)
 # ============================
 st.sidebar.header("👑 Configurazione Sniper")
 
@@ -237,8 +236,9 @@ st.session_state["only_gold_ui"] = st.sidebar.toggle("🎯 SOLO SWEET SPOT", val
 inv_margin = st.sidebar.slider("Margine inversione", 0.05, 0.30, 0.15, 0.01)
 
 # ============================
-# AZIONI E RENDERING
+# CSS E RENDERING (COLORI AGGIORNATI)
 # ============================
+# Aggiunto il colore verde per il target 0.5ht/2.5ft
 CUSTOM_CSS = """
     <style>
         .main { background-color: #f0f2f6; }
@@ -279,18 +279,23 @@ if st.session_state["scan_results"]:
         df["Rating_Bold"] = df["Rating"].apply(lambda x: f"<b>{x}</b>")
         cols = ["Ora", "Lega", "Match Disponibili", "1X2", "O2.5 Finale", "O0.5 PT", "O1.5 PT", "GG PT", "Info", "Rating_Bold"]
         
-        # Generazione stile e tabella
-        st_style = df[cols].style.apply(lambda row: ['background-color: #38003c; color: #00e5ff;' if 'GG-PT' in df.loc[row.name, 'Info'] else '' for _ in row], axis=1)
+        # LOGICA COLORI: Viola per GG-PT, Verde per Target 0.5 HT / 2.5 FT
+        def apply_row_style(row):
+            info_val = df.loc[row.name, 'Info']
+            advice_val = df.loc[row.name, 'Advice']
+            if 'GG-PT' in info_val:
+                return ['background-color: #38003c; color: #00e5ff;' for _ in row]
+            elif 'TARGET: 0.5 HT / 2.5 FT' in advice_val:
+                return ['background-color: #003300; color: #00ff00;' for _ in row]
+            return ['' for _ in row]
+
+        st_style = df[cols].style.apply(apply_row_style, axis=1)
         st.write(st_style.to_html(escape=False, index=False), unsafe_allow_html=True)
         
-        # DOWNLOAD SECTION (Risolto bug NameError)
         st.markdown("---")
         c1, c2, c3 = st.columns(3)
         c1.download_button("💾 CSV AUDITOR", df.to_csv(index=False).encode('utf-8'), f"auditor_{oggi}.csv")
-        
-        # Creiamo il file HTML completo
         html_to_download = f"<html><head>{CUSTOM_CSS}</head><body>{st_style.to_html(escape=False, index=False)}</body></html>"
         c2.download_button("🌐 REPORT HTML", html_to_download.encode('utf-8'), f"report_{oggi}.html")
-        
         if os.path.exists(LOG_CSV): 
             c3.download_button("🗂️ LOG STORICO", open(LOG_CSV,"rb").read(), "history.csv")
