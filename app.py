@@ -30,7 +30,6 @@ if "odds_memory" not in st.session_state: st.session_state["odds_memory"] = {}
 if "snap_time_obj" not in st.session_state: st.session_state["snap_time_obj"] = None
 if "scan_results" not in st.session_state: st.session_state["scan_results"] = None
 if "available_countries" not in st.session_state: st.session_state["available_countries"] = []
-if "selected_countries" not in st.session_state: st.session_state["selected_countries"] = []
 
 # Recovery Snapshot Fisico
 if not st.session_state["odds_memory"] and os.path.exists(JSON_FILE):
@@ -41,21 +40,6 @@ if not st.session_state["odds_memory"] and os.path.exists(JSON_FILE):
                 st.session_state["odds_memory"] = saved.get("odds", {})
                 st.session_state["snap_time_obj"] = datetime.fromisoformat(saved["timestamp"])
     except: pass
-
-# ============================
-# CSS E LAYOUT
-# ============================
-CUSTOM_CSS = """
-    <style>
-        .main { background-color: #f0f2f6; }
-        table { width: 100%; border-collapse: collapse; font-size: 0.82rem; font-family: sans-serif; }
-        th { background-color: #1a1c23; color: #00e5ff; padding: 8px; text-align: center; border: 1px solid #444; }
-        td { padding: 5px 8px; border: 1px solid #ccc; text-align: center; font-weight: 600; white-space: nowrap; }
-        .match-cell { text-align: left !important; min-width: 220px; font-weight: 700; color: inherit !important; }
-        .advice-tag { display: block; font-size: 0.65rem; color: #00e5ff; font-style: italic; margin-top: 2px; }
-    </style>
-"""
-st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
 
 # ============================
 # API CORE
@@ -70,23 +54,44 @@ def api_get(session, path, params):
     if js.get("errors"): raise RuntimeError(f"API Errors: {js['errors']}")
     return js
 
-# Recupero elenco nazioni e gestione selezione persistente
+# Recupero elenco nazioni del giorno
 if not st.session_state["available_countries"]:
     try:
         with requests.Session() as s:
             data = api_get(s, "fixtures", {"date": now_rome().strftime("%Y-%m-%d"), "timezone": "Europe/Rome"})
             all_c = sorted(list(set([f["league"]["country"] for f in data.get("response", [])])))
             st.session_state["available_countries"] = all_c
-            if os.path.exists(NAZIONI_FILE):
-                with open(NAZIONI_FILE, "r") as f:
-                    saved_sel = json.load(f)
-                    st.session_state["selected_countries"] = [c for c in saved_sel if c in all_c]
-            else:
-                st.session_state["selected_countries"] = all_c
     except: pass
 
 # ============================
-# LOGICA STATISTICA E PARSING POTENZIATO
+# NUOVA GESTIONE NAZIONI: INCLUSE / ESCLUSE
+# ============================
+def load_excluded_countries():
+    if os.path.exists(NAZIONI_FILE):
+        try:
+            with open(NAZIONI_FILE, "r") as f:
+                data = json.load(f)
+                if isinstance(data, dict): return list(data.get("excluded", []))
+                if isinstance(data, list): return list(data)
+        except: return []
+    return []
+
+def save_excluded_countries(excluded_list):
+    try:
+        with open(NAZIONI_FILE, "w") as f:
+            json.dump({"excluded": excluded_list}, f)
+    except: pass
+
+if "excluded_countries" not in st.session_state:
+    st.session_state["excluded_countries"] = load_excluded_countries()
+
+# Normalizza: mantengo solo gli esclusi presenti oggi
+st.session_state["excluded_countries"] = [c for c in st.session_state["excluded_countries"] if c in st.session_state["available_countries"]]
+# Calcolo selezionate (Incluse)
+st.session_state["selected_countries"] = [c for c in st.session_state["available_countries"] if c not in st.session_state["excluded_countries"]]
+
+# ============================
+# LOGICA STATISTICA E PARSING (SANITY CHECK)
 # ============================
 team_stats_cache = {}
 
@@ -108,11 +113,9 @@ def get_comprehensive_stats(session, tid):
         return res
     except: return {"ht_ratio": 0.0, "vulnerability": 0.0, "is_dry": False}
 
-# NUOVA FUNZIONE EXTRACT_MARKETS_PRO CON SANITY CHECK
 def extract_markets_pro(resp_json):
     resp = resp_json.get("response", [])
     if not resp: return None
-
     data = {"q1":0.0, "qx":0.0, "q2":0.0, "o25":0.0, "o05ht":0.0, "o15ht":0.0, "gg_ht":0.0}
 
     def is_first_half_market(n):
@@ -140,11 +143,9 @@ def extract_markets_pro(resp_json):
                 v = b.get("values", [])
                 if len(v) >= 3:
                     data["q1"], data["qx"], data["q2"] = float(v[0]["odd"]), float(v[1]["odd"]), float(v[2]["odd"])
-
             if bid == 5 and data["o25"] == 0:
                 try: data["o25"] = float(next((x["odd"] for x in b.get("values", []) if x.get("value") == "Over 2.5"), 0))
                 except: data["o25"] = 0.0
-
             if is_first_half_market(name):
                 if data["o05ht"] == 0:
                     o05 = pick_over(b.get("values", []), "over0.5")
@@ -153,17 +154,14 @@ def extract_markets_pro(resp_json):
                     o15 = pick_over(b.get("values", []), "over1.5")
                     if 1.40 <= o15 <= 8.50: data["o15ht"] = o15
 
-            is_btts = ("both" in name) or ("btts" in name) or ("gg" in name)
-            is_1h = ("1st" in name) or ("first" in name) or ("1h" in name) or ("half" in name)
+            is_btts, is_1h = ("both" in name) or ("btts" in name) or ("gg" in name), ("1st" in name) or ("first" in name) or ("1h" in name) or ("half" in name)
             if (bid == 71 or (is_btts and is_1h)) and data["gg_ht"] == 0:
                 for x in b.get("values", []):
                     if str(x.get("value") or "").strip().lower() in ["yes", "si", "oui"]:
                         try: data["gg_ht"] = float(x.get("odd") or 0)
                         except: data["gg_ht"] = 0.0
                         break
-
-        if data["q1"] > 0 and data["o05ht"] > 0 and data["o15ht"] > 0 and data["gg_ht"] > 0:
-            break
+        if data["q1"] > 0 and data["o05ht"] > 0 and data["o15ht"] > 0 and data["gg_ht"] > 0: break
     return data
 
 # ============================
@@ -193,8 +191,7 @@ def execute_full_scan(session, fixtures, snap_mem, min_rating, max_q_gold, inv_m
             if 1.30 <= mk["o05ht"] <= 1.55: sc += 10; det.append("HT-Q")
             rating = min(100, sc)
             s_h, s_a = get_comprehensive_stats(session, m["teams"]["home"]["id"]), get_comprehensive_stats(session, m["teams"]["away"]["id"])
-            f_s = s_h if mk["q1"] < mk["q2"] else s_a
-            d_s = s_a if mk["q1"] < mk["q2"] else s_h
+            f_s, d_s = (s_h, s_a) if mk["q1"] < mk["q2"] else (s_a, s_h)
             advice = "🔥 TARGET: 0.5 HT / 2.5 FT" if is_gold else ""
             if s_h["ht_ratio"] >= 0.6 and s_a["ht_ratio"] >= 0.6:
                 rating += 20; det.append("HT")
@@ -215,14 +212,29 @@ def execute_full_scan(session, fixtures, snap_mem, min_rating, max_q_gold, inv_m
     return results
 
 # ============================
-# SIDEBAR UI
+# SIDEBAR UI (NUOVA GESTIONE NAZIONI PRO)
 # ============================
 st.sidebar.header("👑 Configurazione Sniper")
-new_selection = st.sidebar.multiselect("🌍 Seleziona Nazioni", options=st.session_state["available_countries"], default=st.session_state["selected_countries"])
-if new_selection != st.session_state["selected_countries"]:
-    st.session_state["selected_countries"] = new_selection
-    with open(NAZIONI_FILE, "w") as f: json.dump(new_selection, f)
 
+with st.sidebar.expander("🌍 Gestione Nazioni (PRO)", expanded=False):
+    # Lista Incluse
+    st.write(f"✅ **Incluse ({len(st.session_state['selected_countries'])})**")
+    to_exclude = st.selectbox("Sposta in Escluse:", ["-- seleziona --"] + st.session_state["selected_countries"])
+    if to_exclude != "-- seleziona --":
+        st.session_state["excluded_countries"].append(to_exclude)
+        save_excluded_countries(st.session_state["excluded_countries"])
+        st.rerun()
+
+    st.markdown("---")
+    # Lista Escluse
+    st.write(f"🚫 **Escluse ({len(st.session_state['excluded_countries'])})**")
+    to_include = st.selectbox("Sposta in Incluse:", ["-- seleziona --"] + st.session_state["excluded_countries"])
+    if to_include != "-- seleziona --":
+        st.session_state["excluded_countries"].remove(to_include)
+        save_excluded_countries(st.session_state["excluded_countries"])
+        st.rerun()
+
+# Status Snapshot e Parametri
 if st.session_state["odds_memory"]:
     st.sidebar.success(f"✅ Snapshot: {st.session_state['snap_time_obj'].strftime('%H:%M')}")
 else:
@@ -234,7 +246,7 @@ st.session_state["only_gold_ui"] = st.sidebar.toggle("🎯 SOLO SWEET SPOT", val
 inv_margin = st.sidebar.slider("Margine inversione", 0.05, 0.30, 0.15, 0.01)
 
 # ============================
-# AZIONI BOTTONI
+# AZIONI E RENDERING
 # ============================
 oggi = now_rome().strftime("%Y-%m-%d")
 col_b1, col_b2 = st.columns(2)
@@ -247,8 +259,7 @@ def handle_run(is_snap):
             res = execute_full_scan(s, fixtures, {} if is_snap else st.session_state["odds_memory"], min_rating, max_q_gold, inv_margin, st.session_state["selected_countries"])
             if is_snap:
                 new_snap = {r["Fixture_ID"]: {"q1": float(r["1X2"].split("|")[0]), "q2": float(r["1X2"].split("|")[2])} for r in res}
-                st.session_state["odds_memory"] = new_snap
-                st.session_state["snap_time_obj"] = now_rome()
+                st.session_state["odds_memory"], st.session_state["snap_time_obj"] = new_snap, now_rome()
                 with open(JSON_FILE, "w") as f: json.dump({"date": oggi, "timestamp": now_rome().isoformat(), "odds": new_snap}, f)
             st.session_state["scan_results"] = res
             st.rerun()
@@ -257,9 +268,6 @@ def handle_run(is_snap):
 if col_b1.button("📌 SNAPSHOT + SCAN"): handle_run(True)
 if col_b2.button("🚀 AVVIA SOLO SCANNER"): handle_run(False)
 
-# ============================
-# RENDERING TABELLA E DOWNLOAD
-# ============================
 if st.session_state["scan_results"]:
     df = pd.DataFrame(st.session_state["scan_results"])
     if st.session_state["only_gold_ui"]: df = df[df["Is_Gold"]]
