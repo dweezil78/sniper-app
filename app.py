@@ -25,14 +25,14 @@ def now_rome():
 
 st.set_page_config(page_title="ARAB SNIPER V15.59 - GOLD MASTER", layout="wide")
 
-# --- INITIALIZATION & PERSISTENCE ---
+# --- INIZIALIZZAZIONE SESSION STATE ---
 if "odds_memory" not in st.session_state: st.session_state["odds_memory"] = {}
 if "snap_time_obj" not in st.session_state: st.session_state["snap_time_obj"] = None
 if "scan_results" not in st.session_state: st.session_state["scan_results"] = None
 if "available_countries" not in st.session_state: st.session_state["available_countries"] = []
 if "selected_countries" not in st.session_state: st.session_state["selected_countries"] = []
 
-# Recovery Snapshot Fisico
+# --- AUTO-RECOVERY SNAPSHOT FISICO ---
 if not st.session_state["odds_memory"] and os.path.exists(JSON_FILE):
     try:
         with open(JSON_FILE, "r") as f:
@@ -58,7 +58,7 @@ CUSTOM_CSS = """
 st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
 
 # ============================
-# API CORE & STATS
+# API CORE
 # ============================
 API_KEY = st.secrets.get("API_SPORTS_KEY")
 HEADERS = {"x-apisports-key": API_KEY}
@@ -85,7 +85,11 @@ if not st.session_state["available_countries"]:
                 st.session_state["selected_countries"] = all_c
     except: pass
 
+# ============================
+# LOGICA STATISTICA E PARSING
+# ============================
 team_stats_cache = {}
+
 def get_comprehensive_stats(session, tid):
     if tid in team_stats_cache: return team_stats_cache[tid]
     try:
@@ -136,17 +140,14 @@ def execute_full_scan(session, fixtures, snap_mem, min_rating, max_q_gold, inv_m
     results, pb = [], st.progress(0)
     filtered = [f for f in fixtures if f["league"]["country"] in selected_countries]
     if not filtered: return []
-    
     for i, m in enumerate(filtered):
         pb.progress((i+1)/len(filtered))
         try:
             mk = extract_markets_pro(api_get(session, "odds", {"fixture": m["fixture"]["id"]}))
             if not mk or mk["q1"] <= 0: continue
-            
             sc, det = 40, []
             q_fav = min(mk["q1"], mk["q2"])
             is_gold = (1.40 <= q_fav <= max_q_gold)
-            
             fid_s = str(m["fixture"]["id"])
             if fid_s in snap_mem:
                 old = snap_mem[fid_s]
@@ -155,15 +156,12 @@ def execute_full_scan(session, fixtures, snap_mem, min_rating, max_q_gold, inv_m
                 if abs(mk["q1"]-mk["q2"]) >= inv_margin:
                     fav_s = "1" if old.get("q1",0) < old.get("q2",0) else "2"
                     if (fav_s=="1" and mk["q2"]<mk["q1"]) or (fav_s=="2" and mk["q1"]<mk["q2"]): sc += 25; det.append("Inv")
-            
             if 1.70 <= mk["o25"] <= 2.15: sc += 20; det.append("Val")
             if 1.30 <= mk["o05ht"] <= 1.50: sc += 10; det.append("HT-Q")
             rating = min(100, sc)
-
             s_h, s_a = get_comprehensive_stats(session, m["teams"]["home"]["id"]), get_comprehensive_stats(session, m["teams"]["away"]["id"])
             f_s = s_h if mk["q1"] < mk["q2"] else s_a
             d_s = s_a if mk["q1"] < mk["q2"] else s_h
-            
             advice = "🔥 TARGET: 0.5 HT / 2.5 FT" if is_gold else ""
             if s_h["ht_ratio"] >= 0.6 and s_a["ht_ratio"] >= 0.6:
                 rating += 20; det.append("HT")
@@ -173,7 +171,6 @@ def execute_full_scan(session, fixtures, snap_mem, min_rating, max_q_gold, inv_m
                         advice = "💎 DIAMOND: GG PT / O1.5 HT / O2.5 FT"
                     else: det.append("GG-PT-POT"); advice = "🔥 TARGET: GG PT"
             if f_s["is_dry"]: rating = min(100, rating + 15); det.append("DRY 💧")
-
             if rating >= min_rating:
                 results.append({
                     "Ora": m["fixture"]["date"][11:16], "Lega": f"{m['league']['name']} ({m['league']['country']})", 
@@ -185,15 +182,33 @@ def execute_full_scan(session, fixtures, snap_mem, min_rating, max_q_gold, inv_m
     return results
 
 # ============================
-# SIDEBAR UI
+# SIDEBAR UI (GESTIONE NAZIONI PULITA)
 # ============================
 st.sidebar.header("👑 Configurazione Sniper")
 
-new_selection = st.sidebar.multiselect("🌍 Seleziona Nazioni", options=st.session_state["available_countries"], default=st.session_state["selected_countries"])
-if new_selection != st.session_state["selected_countries"]:
-    st.session_state["selected_countries"] = new_selection
-    with open(NAZIONI_FILE, "w") as f: json.dump(new_selection, f)
+with st.sidebar.expander("🌍 Filtro Nazioni Avanzato", expanded=False):
+    c1, c2 = st.columns(2)
+    if c1.button("✅ Tutti"):
+        st.session_state["selected_countries"] = st.session_state["available_countries"]
+        with open(NAZIONI_FILE, "w") as f: json.dump(st.session_state["available_countries"], f)
+        st.rerun()
+    if c2.button("❌ Vuota"):
+        st.session_state["selected_countries"] = []
+        with open(NAZIONI_FILE, "w") as f: json.dump([], f)
+        st.rerun()
+    
+    new_selection = st.multiselect(
+        "Aggiungi/Rimuovi Paesi:",
+        options=st.session_state["available_countries"],
+        default=st.session_state["selected_countries"],
+        label_visibility="collapsed"
+    )
+    
+    if new_selection != st.session_state["selected_countries"]:
+        st.session_state["selected_countries"] = new_selection
+        with open(NAZIONI_FILE, "w") as f: json.dump(new_selection, f)
 
+# Status Snapshot
 if st.session_state["odds_memory"]:
     st.sidebar.success(f"✅ Snapshot: {st.session_state['snap_time_obj'].strftime('%H:%M')}")
 else:
@@ -229,19 +244,17 @@ if col_b1.button("📌 SNAPSHOT + SCAN"): handle_run(True)
 if col_b2.button("🚀 AVVIA SOLO SCANNER"): handle_run(False)
 
 # ============================
-# TABELLA E DOWNLOAD
+# RENDERING TABELLA E DOWNLOAD
 # ============================
 if st.session_state["scan_results"]:
     df = pd.DataFrame(st.session_state["scan_results"])
     if st.session_state["only_gold_ui"]: df = df[df["Is_Gold"]]
-    
     if not df.empty:
         df["Match Disponibili"] = df.apply(lambda r: f"<div class='match-cell'>{'💎 ' if 'DIAMOND' in r['Advice'] else '👑 ' if r['Is_Gold'] else ''}{r['Match']}<span class='advice-tag'>{r['Advice']}</span></div>", axis=1)
         df["Rating_Bold"] = df["Rating"].apply(lambda x: f"<b>{x}</b>")
         cols = ["Ora", "Lega", "Match Disponibili", "1X2", "O2.5 Finale", "O0.5 PT", "O1.5 PT", "GG PT", "Info", "Rating_Bold"]
         st_style = df[cols].style.apply(lambda row: ['background-color: #38003c; color: #00e5ff;' if 'GG-PT' in df.loc[row.name, 'Info'] else '' for _ in row], axis=1)
         st.write(st_style.to_html(escape=False, index=False), unsafe_allow_html=True)
-        
         st.markdown("---")
         c1, c2, c3 = st.columns(3)
         c1.download_button("💾 CSV AUDITOR", df.to_csv(index=False).encode('utf-8'), f"auditor_{oggi}.csv")
