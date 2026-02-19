@@ -149,7 +149,7 @@ def execute_full_scan(session, fixtures, snap_mem, min_rating, max_q_gold, inv_m
             if s_h["ht_ratio"] >= 0.6 and s_a["ht_ratio"] >= 0.6:
                 rating += 20; det.append("HT")
                 if f_s["vulnerability"] >= 0.8 and d_s["ht_ratio"] >= 0.6:
-                    if 1.70 <= q_fav <= max_q_gold:
+                    if 1.40 <= q_fav <= max_q_gold:
                         rating = min(100, rating + 25); det.append("🎯 GG-PT")
                         advice = "💎 DIAMOND: GG PT / O1.5 HT / O2.5 FT"
                     else: det.append("GG-PT-POT"); advice = "🔥 TARGET: GG PT"
