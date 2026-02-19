@@ -86,7 +86,7 @@ if not st.session_state["available_countries"]:
     except: pass
 
 # ============================
-# LOGICA STATISTICA E PARSING RINFORZATO
+# LOGICA STATISTICA E PARSING POTENZIATO
 # ============================
 team_stats_cache = {}
 
@@ -108,44 +108,62 @@ def get_comprehensive_stats(session, tid):
         return res
     except: return {"ht_ratio": 0.0, "vulnerability": 0.0, "is_dry": False}
 
+# NUOVA FUNZIONE EXTRACT_MARKETS_PRO CON SANITY CHECK
 def extract_markets_pro(resp_json):
     resp = resp_json.get("response", [])
     if not resp: return None
+
     data = {"q1":0.0, "qx":0.0, "q2":0.0, "o25":0.0, "o05ht":0.0, "o15ht":0.0, "gg_ht":0.0}
-    
+
+    def is_first_half_market(n):
+        n = str(n or "").lower()
+        if ("2nd" in n) or ("second" in n): return False
+        has_time = ("1st" in n) or ("first" in n) or ("1h" in n)
+        has_half = ("half" in n)
+        has_ou = ("over/under" in n) or ("over under" in n) or ("goals" in n) or ("total" in n)
+        return has_time and has_half and has_ou
+
+    def pick_over(values, key):
+        for x in values or []:
+            v_val = str(x.get("value") or "").lower().replace(" ", "")
+            if v_val.startswith(key):
+                try: return float(x.get("odd") or 0)
+                except: return 0.0
+        return 0.0
+
     for bm in resp[0].get("bookmakers", []):
         for b in bm.get("bets", []):
-            bid, name = b.get("id"), str(b.get("name") or "").lower()
-            
-            # 1X2 Finale
+            bid = b.get("id")
+            name = str(b.get("name") or "").lower()
+
             if bid == 1 and data["q1"] == 0:
                 v = b.get("values", [])
-                if len(v) >= 3: data["q1"], data["qx"], data["q2"] = float(v[0]["odd"]), float(v[1]["odd"]), float(v[2]["odd"])
-            
-            # Over 2.5 Finale
-            if bid == 5 and data["o25"] == 0:
-                data["o25"] = float(next((x["odd"] for x in b.get("values", []) if x["value"] == "Over 2.5"), 0))
-            
-            # CORREZIONE OVER PT CON FILTRO VERIDICITÀ
-            if ("1st half" in name or "1h" in name) and ("goals" in name or "over/under" in name):
-                for x in b.get("values", []):
-                    v_val = str(x.get("value") or "").lower().replace(" ", "")
-                    odd = float(x.get("odd") or 0)
-                    if "over0.5" in v_val and data["o05ht"] == 0:
-                        if 1.10 <= odd <= 1.90: data["o05ht"] = odd
-                    if "over1.5" in v_val and data["o15ht"] == 0:
-                        if 1.80 <= odd <= 5.00: data["o15ht"] = odd
+                if len(v) >= 3:
+                    data["q1"], data["qx"], data["q2"] = float(v[0]["odd"]), float(v[1]["odd"]), float(v[2]["odd"])
 
-            # GG PT (BTTS 1H)
-            is_btts = "both" in name or "btts" in name or "gg" in name
-            is_1h = "1st" in name or "1h" in name or "half" in name
+            if bid == 5 and data["o25"] == 0:
+                try: data["o25"] = float(next((x["odd"] for x in b.get("values", []) if x.get("value") == "Over 2.5"), 0))
+                except: data["o25"] = 0.0
+
+            if is_first_half_market(name):
+                if data["o05ht"] == 0:
+                    o05 = pick_over(b.get("values", []), "over0.5")
+                    if 1.05 <= o05 <= 2.20: data["o05ht"] = o05
+                if data["o15ht"] == 0:
+                    o15 = pick_over(b.get("values", []), "over1.5")
+                    if 1.40 <= o15 <= 8.50: data["o15ht"] = o15
+
+            is_btts = ("both" in name) or ("btts" in name) or ("gg" in name)
+            is_1h = ("1st" in name) or ("first" in name) or ("1h" in name) or ("half" in name)
             if (bid == 71 or (is_btts and is_1h)) and data["gg_ht"] == 0:
                 for x in b.get("values", []):
-                    if str(x.get("value") or "").lower() in ["yes", "si", "oui"]:
-                        data["gg_ht"] = float(x.get("odd") or 0)
-        
-        # Se abbiamo quote sensate, usciamo dal ciclo bookmakers
-        if data["q1"] > 0 and data["o05ht"] > 0: break
+                    if str(x.get("value") or "").strip().lower() in ["yes", "si", "oui"]:
+                        try: data["gg_ht"] = float(x.get("odd") or 0)
+                        except: data["gg_ht"] = 0.0
+                        break
+
+        if data["q1"] > 0 and data["o05ht"] > 0 and data["o15ht"] > 0 and data["gg_ht"] > 0:
+            break
     return data
 
 # ============================
@@ -160,11 +178,9 @@ def execute_full_scan(session, fixtures, snap_mem, min_rating, max_q_gold, inv_m
         try:
             mk = extract_markets_pro(api_get(session, "odds", {"fixture": m["fixture"]["id"]}))
             if not mk or mk["q1"] <= 0: continue
-            
             sc, det = 40, []
             q_fav = min(mk["q1"], mk["q2"])
             is_gold = (1.40 <= q_fav <= max_q_gold)
-            
             fid_s = str(m["fixture"]["id"])
             if fid_s in snap_mem:
                 old = snap_mem[fid_s]
@@ -173,15 +189,12 @@ def execute_full_scan(session, fixtures, snap_mem, min_rating, max_q_gold, inv_m
                 if abs(mk["q1"]-mk["q2"]) >= inv_margin:
                     fav_s = "1" if old.get("q1",0) < old.get("q2",0) else "2"
                     if (fav_s=="1" and mk["q2"]<mk["q1"]) or (fav_s=="2" and mk["q1"]<mk["q2"]): sc += 25; det.append("Inv")
-            
             if 1.70 <= mk["o25"] <= 2.15: sc += 20; det.append("Val")
             if 1.30 <= mk["o05ht"] <= 1.55: sc += 10; det.append("HT-Q")
             rating = min(100, sc)
-
             s_h, s_a = get_comprehensive_stats(session, m["teams"]["home"]["id"]), get_comprehensive_stats(session, m["teams"]["away"]["id"])
             f_s = s_h if mk["q1"] < mk["q2"] else s_a
             d_s = s_a if mk["q1"] < mk["q2"] else s_h
-            
             advice = "🔥 TARGET: 0.5 HT / 2.5 FT" if is_gold else ""
             if s_h["ht_ratio"] >= 0.6 and s_a["ht_ratio"] >= 0.6:
                 rating += 20; det.append("HT")
@@ -191,7 +204,6 @@ def execute_full_scan(session, fixtures, snap_mem, min_rating, max_q_gold, inv_m
                         advice = "💎 DIAMOND: GG PT / O1.5 HT / O2.5 FT"
                     else: det.append("GG-PT-POT"); advice = "🔥 TARGET: GG PT"
             if f_s["is_dry"]: rating = min(100, rating + 15); det.append("DRY 💧")
-
             if rating >= min_rating:
                 results.append({
                     "Ora": m["fixture"]["date"][11:16], "Lega": f"{m['league']['name']} ({m['league']['country']})", 
@@ -203,31 +215,13 @@ def execute_full_scan(session, fixtures, snap_mem, min_rating, max_q_gold, inv_m
     return results
 
 # ============================
-# SIDEBAR UI (GESTIONE NAZIONI PULITA)
+# SIDEBAR UI
 # ============================
 st.sidebar.header("👑 Configurazione Sniper")
-
-with st.sidebar.expander("🌍 Filtro Nazioni Avanzato", expanded=False):
-    c1, c2 = st.columns(2)
-    if c1.button("✅ Tutti"):
-        st.session_state["selected_countries"] = st.session_state["available_countries"]
-        with open(NAZIONI_FILE, "w") as f: json.dump(st.session_state["available_countries"], f)
-        st.rerun()
-    if c2.button("❌ Vuota"):
-        st.session_state["selected_countries"] = []
-        with open(NAZIONI_FILE, "w") as f: json.dump([], f)
-        st.rerun()
-    
-    new_selection = st.multiselect(
-        "Aggiungi/Rimuovi Paesi:",
-        options=st.session_state["available_countries"],
-        default=st.session_state["selected_countries"],
-        label_visibility="collapsed"
-    )
-    
-    if new_selection != st.session_state["selected_countries"]:
-        st.session_state["selected_countries"] = new_selection
-        with open(NAZIONI_FILE, "w") as f: json.dump(new_selection, f)
+new_selection = st.sidebar.multiselect("🌍 Seleziona Nazioni", options=st.session_state["available_countries"], default=st.session_state["selected_countries"])
+if new_selection != st.session_state["selected_countries"]:
+    st.session_state["selected_countries"] = new_selection
+    with open(NAZIONI_FILE, "w") as f: json.dump(new_selection, f)
 
 if st.session_state["odds_memory"]:
     st.sidebar.success(f"✅ Snapshot: {st.session_state['snap_time_obj'].strftime('%H:%M')}")
