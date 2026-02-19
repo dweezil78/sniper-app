@@ -64,7 +64,7 @@ if not st.session_state["available_countries"]:
     except: pass
 
 # ============================
-# NUOVA GESTIONE NAZIONI: INCLUSE / ESCLUSE
+# GESTIONE NAZIONI: INCLUSE / ESCLUSE
 # ============================
 def load_excluded_countries():
     if os.path.exists(NAZIONI_FILE):
@@ -85,13 +85,12 @@ def save_excluded_countries(excluded_list):
 if "excluded_countries" not in st.session_state:
     st.session_state["excluded_countries"] = load_excluded_countries()
 
-# Normalizza: mantengo solo gli esclusi presenti oggi
+# Normalizza nazioni
 st.session_state["excluded_countries"] = [c for c in st.session_state["excluded_countries"] if c in st.session_state["available_countries"]]
-# Calcolo selezionate (Incluse)
 st.session_state["selected_countries"] = [c for c in st.session_state["available_countries"] if c not in st.session_state["excluded_countries"]]
 
 # ============================
-# LOGICA STATISTICA E PARSING (SANITY CHECK)
+# LOGICA STATISTICA E PARSING
 # ============================
 team_stats_cache = {}
 
@@ -136,13 +135,10 @@ def extract_markets_pro(resp_json):
 
     for bm in resp[0].get("bookmakers", []):
         for b in bm.get("bets", []):
-            bid = b.get("id")
-            name = str(b.get("name") or "").lower()
-
+            bid, name = b.get("id"), str(b.get("name") or "").lower()
             if bid == 1 and data["q1"] == 0:
                 v = b.get("values", [])
-                if len(v) >= 3:
-                    data["q1"], data["qx"], data["q2"] = float(v[0]["odd"]), float(v[1]["odd"]), float(v[2]["odd"])
+                if len(v) >= 3: data["q1"], data["qx"], data["q2"] = float(v[0]["odd"]), float(v[1]["odd"]), float(v[2]["odd"])
             if bid == 5 and data["o25"] == 0:
                 try: data["o25"] = float(next((x["odd"] for x in b.get("values", []) if x.get("value") == "Over 2.5"), 0))
                 except: data["o25"] = 0.0
@@ -153,7 +149,6 @@ def extract_markets_pro(resp_json):
                 if data["o15ht"] == 0:
                     o15 = pick_over(b.get("values", []), "over1.5")
                     if 1.40 <= o15 <= 8.50: data["o15ht"] = o15
-
             is_btts, is_1h = ("both" in name) or ("btts" in name) or ("gg" in name), ("1st" in name) or ("first" in name) or ("1h" in name) or ("half" in name)
             if (bid == 71 or (is_btts and is_1h)) and data["gg_ht"] == 0:
                 for x in b.get("values", []):
@@ -212,21 +207,18 @@ def execute_full_scan(session, fixtures, snap_mem, min_rating, max_q_gold, inv_m
     return results
 
 # ============================
-# SIDEBAR UI (NUOVA GESTIONE NAZIONI PRO)
+# SIDEBAR UI
 # ============================
 st.sidebar.header("👑 Configurazione Sniper")
 
 with st.sidebar.expander("🌍 Gestione Nazioni (PRO)", expanded=False):
-    # Lista Incluse
     st.write(f"✅ **Incluse ({len(st.session_state['selected_countries'])})**")
     to_exclude = st.selectbox("Sposta in Escluse:", ["-- seleziona --"] + st.session_state["selected_countries"])
     if to_exclude != "-- seleziona --":
         st.session_state["excluded_countries"].append(to_exclude)
         save_excluded_countries(st.session_state["excluded_countries"])
         st.rerun()
-
     st.markdown("---")
-    # Lista Escluse
     st.write(f"🚫 **Escluse ({len(st.session_state['excluded_countries'])})**")
     to_include = st.selectbox("Sposta in Incluse:", ["-- seleziona --"] + st.session_state["excluded_countries"])
     if to_include != "-- seleziona --":
@@ -234,7 +226,6 @@ with st.sidebar.expander("🌍 Gestione Nazioni (PRO)", expanded=False):
         save_excluded_countries(st.session_state["excluded_countries"])
         st.rerun()
 
-# Status Snapshot e Parametri
 if st.session_state["odds_memory"]:
     st.sidebar.success(f"✅ Snapshot: {st.session_state['snap_time_obj'].strftime('%H:%M')}")
 else:
@@ -248,6 +239,18 @@ inv_margin = st.sidebar.slider("Margine inversione", 0.05, 0.30, 0.15, 0.01)
 # ============================
 # AZIONI E RENDERING
 # ============================
+CUSTOM_CSS = """
+    <style>
+        .main { background-color: #f0f2f6; }
+        table { width: 100%; border-collapse: collapse; font-size: 0.82rem; font-family: sans-serif; }
+        th { background-color: #1a1c23; color: #00e5ff; padding: 8px; text-align: center; border: 1px solid #444; }
+        td { padding: 5px 8px; border: 1px solid #ccc; text-align: center; font-weight: 600; white-space: nowrap; }
+        .match-cell { text-align: left !important; min-width: 220px; font-weight: 700; color: inherit !important; }
+        .advice-tag { display: block; font-size: 0.65rem; color: #00e5ff; font-style: italic; margin-top: 2px; }
+    </style>
+"""
+st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
+
 oggi = now_rome().strftime("%Y-%m-%d")
 col_b1, col_b2 = st.columns(2)
 
@@ -275,11 +278,19 @@ if st.session_state["scan_results"]:
         df["Match Disponibili"] = df.apply(lambda r: f"<div class='match-cell'>{'💎 ' if 'DIAMOND' in r['Advice'] else '👑 ' if r['Is_Gold'] else ''}{r['Match']}<span class='advice-tag'>{r['Advice']}</span></div>", axis=1)
         df["Rating_Bold"] = df["Rating"].apply(lambda x: f"<b>{x}</b>")
         cols = ["Ora", "Lega", "Match Disponibili", "1X2", "O2.5 Finale", "O0.5 PT", "O1.5 PT", "GG PT", "Info", "Rating_Bold"]
+        
+        # Generazione stile e tabella
         st_style = df[cols].style.apply(lambda row: ['background-color: #38003c; color: #00e5ff;' if 'GG-PT' in df.loc[row.name, 'Info'] else '' for _ in row], axis=1)
         st.write(st_style.to_html(escape=False, index=False), unsafe_allow_html=True)
+        
+        # DOWNLOAD SECTION (Risolto bug NameError)
         st.markdown("---")
         c1, c2, c3 = st.columns(3)
         c1.download_button("💾 CSV AUDITOR", df.to_csv(index=False).encode('utf-8'), f"auditor_{oggi}.csv")
-        full_html = f"<html><head>{CUSTOM_CSS}</head><body>{st_style.to_html(escape=False, index=False)}</body></html>"
-        c2.download_button("🌐 REPORT HTML", full_html.encode('utf-8'), f"report_{oggi}.html")
-        if os.path.exists(LOG_CSV): c3.download_button("🗂️ LOG STORICO", open(LOG_CSV,"rb").read(), "history.csv")
+        
+        # Creiamo il file HTML completo
+        html_to_download = f"<html><head>{CUSTOM_CSS}</head><body>{st_style.to_html(escape=False, index=False)}</body></html>"
+        c2.download_button("🌐 REPORT HTML", html_to_download.encode('utf-8'), f"report_{oggi}.html")
+        
+        if os.path.exists(LOG_CSV): 
+            c3.download_button("🗂️ LOG STORICO", open(LOG_CSV,"rb").read(), "history.csv")
