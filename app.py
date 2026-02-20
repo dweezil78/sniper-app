@@ -89,7 +89,7 @@ st.session_state["excluded_countries"] = [c for c in st.session_state["excluded_
 st.session_state["selected_countries"] = [c for c in st.session_state["available_countries"] if c not in st.session_state["excluded_countries"]]
 
 # ============================
-# LOGICA STATISTICA E PARSING (SANITY CHECK)
+# LOGICA STATISTICA E PARSING
 # ============================
 team_stats_cache = {}
 
@@ -186,14 +186,22 @@ def execute_full_scan(session, fixtures, snap_mem, min_rating, max_q_gold, inv_m
             rating = min(100, sc)
             s_h, s_a = get_comprehensive_stats(session, m["teams"]["home"]["id"]), get_comprehensive_stats(session, m["teams"]["away"]["id"])
             f_s, d_s = (s_h, s_a) if mk["q1"] < mk["q2"] else (s_a, s_h)
+            
+            # --- FIX #1: GATE QUOTE PER GG-PT E DIAMOND ---
+            # Verifichiamo se le quote per l'1-1 HT sono nel range target
+            is_11ht_odds_ok = (2.00 <= mk["o15ht"] <= 3.00) and (4.00 <= mk["gg_ht"] <= 6.00)
+            
             advice = "🔥 TARGET: 0.5 HT / 2.5 FT" if is_gold else ""
             if s_h["ht_ratio"] >= 0.6 and s_a["ht_ratio"] >= 0.6:
                 rating += 20; det.append("HT")
                 if f_s["vulnerability"] >= 0.8 and d_s["ht_ratio"] >= 0.6:
-                    if 1.40 <= q_fav <= max_q_gold:
+                    if 1.40 <= q_fav <= max_q_gold and is_11ht_odds_ok:
                         rating = min(100, rating + 25); det.append("🎯 GG-PT")
                         advice = "💎 DIAMOND: GG PT / O1.5 HT / O2.5 FT"
-                    else: det.append("GG-PT-POT"); advice = "🔥 TARGET: GG PT"
+                    else: 
+                        # Se le statistiche ci sono ma le quote no, mettiamo solo un tag potenziale senza label Diamond
+                        det.append("GG-PT-POT"); advice = "🔥 TARGET: GG PT"
+            
             if f_s["is_dry"]: rating = min(100, rating + 15); det.append("DRY 💧")
             if rating >= min_rating:
                 results.append({
@@ -206,7 +214,7 @@ def execute_full_scan(session, fixtures, snap_mem, min_rating, max_q_gold, inv_m
     return results
 
 # ============================
-# SIDEBAR UI (GESTIONE NAZIONI PRO)
+# SIDEBAR UI
 # ============================
 st.sidebar.header("👑 Configurazione Sniper")
 
@@ -236,9 +244,8 @@ st.session_state["only_gold_ui"] = st.sidebar.toggle("🎯 SOLO SWEET SPOT", val
 inv_margin = st.sidebar.slider("Margine inversione", 0.05, 0.30, 0.15, 0.01)
 
 # ============================
-# CSS E RENDERING (COLORI AGGIORNATI)
+# AZIONI E RENDERING
 # ============================
-# Aggiunto il colore verde per il target 0.5ht/2.5ft
 CUSTOM_CSS = """
     <style>
         .main { background-color: #f0f2f6; }
@@ -279,14 +286,11 @@ if st.session_state["scan_results"]:
         df["Rating_Bold"] = df["Rating"].apply(lambda x: f"<b>{x}</b>")
         cols = ["Ora", "Lega", "Match Disponibili", "1X2", "O2.5 Finale", "O0.5 PT", "O1.5 PT", "GG PT", "Info", "Rating_Bold"]
         
-        # LOGICA COLORI: Viola per GG-PT, Verde per Target 0.5 HT / 2.5 FT
         def apply_row_style(row):
             info_val = df.loc[row.name, 'Info']
             advice_val = df.loc[row.name, 'Advice']
-            if 'GG-PT' in info_val:
-                return ['background-color: #38003c; color: #00e5ff;' for _ in row]
-            elif 'TARGET: 0.5 HT / 2.5 FT' in advice_val:
-                return ['background-color: #003300; color: #00ff00;' for _ in row]
+            if 'GG-PT' in info_val: return ['background-color: #38003c; color: #00e5ff;' for _ in row]
+            elif 'TARGET: 0.5 HT / 2.5 FT' in advice_val: return ['background-color: #003300; color: #00ff00;' for _ in row]
             return ['' for _ in row]
 
         st_style = df[cols].style.apply(apply_row_style, axis=1)
@@ -297,5 +301,4 @@ if st.session_state["scan_results"]:
         c1.download_button("💾 CSV AUDITOR", df.to_csv(index=False).encode('utf-8'), f"auditor_{oggi}.csv")
         html_to_download = f"<html><head>{CUSTOM_CSS}</head><body>{st_style.to_html(escape=False, index=False)}</body></html>"
         c2.download_button("🌐 REPORT HTML", html_to_download.encode('utf-8'), f"report_{oggi}.html")
-        if os.path.exists(LOG_CSV): 
-            c3.download_button("🗂️ LOG STORICO", open(LOG_CSV,"rb").read(), "history.csv")
+        if os.path.exists(LOG_CSV): c3.download_button("🗂️ LOG STORICO", open(LOG_CSV,"rb").read(), "history.csv")
