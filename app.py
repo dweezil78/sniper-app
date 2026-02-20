@@ -23,7 +23,7 @@ except Exception:
 def now_rome():
     return datetime.now(ROME_TZ) if ROME_TZ else datetime.now()
 
-st.set_page_config(page_title="ARAB SNIPER V15.59 - GOLD MASTER", layout="wide")
+st.set_page_config(page_title="ARAB SNIPER V15.60 - GOLD MASTER", layout="wide")
 
 # --- INITIALIZATION & PERSISTENCE ---
 if "odds_memory" not in st.session_state: st.session_state["odds_memory"] = {}
@@ -170,9 +170,11 @@ def execute_full_scan(session, fixtures, snap_mem, min_rating, max_q_gold, inv_m
         try:
             mk = extract_markets_pro(api_get(session, "odds", {"fixture": m["fixture"]["id"]}))
             if not mk or mk["q1"] <= 0: continue
+            
             sc, det = 40, []
             q_fav = min(mk["q1"], mk["q2"])
             is_gold = (1.40 <= q_fav <= max_q_gold)
+            
             fid_s = str(m["fixture"]["id"])
             if fid_s in snap_mem:
                 old = snap_mem[fid_s]
@@ -181,36 +183,54 @@ def execute_full_scan(session, fixtures, snap_mem, min_rating, max_q_gold, inv_m
                 if abs(mk["q1"]-mk["q2"]) >= inv_margin:
                     fav_s = "1" if old.get("q1",0) < old.get("q2",0) else "2"
                     if (fav_s=="1" and mk["q2"]<mk["q1"]) or (fav_s=="2" and mk["q1"]<mk["q2"]): sc += 25; det.append("Inv")
+            
             if 1.70 <= mk["o25"] <= 2.15: sc += 20; det.append("Val")
             if 1.30 <= mk["o05ht"] <= 1.55: sc += 10; det.append("HT-Q")
             rating = min(100, sc)
+
             s_h, s_a = get_comprehensive_stats(session, m["teams"]["home"]["id"]), get_comprehensive_stats(session, m["teams"]["away"]["id"])
             f_s, d_s = (s_h, s_a) if mk["q1"] < mk["q2"] else (s_a, s_h)
             
-            # --- FIX #1: GATE QUOTE PER GG-PT E DIAMOND ---
-            # Verifichiamo se le quote per l'1-1 HT sono nel range target
-            is_11ht_odds_ok = (2.00 <= mk["o15ht"] <= 3.00) and (4.00 <= mk["gg_ht"] <= 6.00)
+            # --- LOGICA PRO: 1-1 HT GATE & SEGNALI SPECIALI ---
+            ht_ok = (s_h["ht_ratio"] >= 0.6 and s_a["ht_ratio"] >= 0.6)
+            is_11ht_gate = (2.20 <= mk["o15ht"] <= 2.80) and (4.20 <= mk["gg_ht"] <= 5.50) and ht_ok
             
             advice = "🔥 TARGET: 0.5 HT / 2.5 FT" if is_gold else ""
-            if s_h["ht_ratio"] >= 0.6 and s_a["ht_ratio"] >= 0.6:
-                rating += 20; det.append("HT")
+            
+            # Il segnale DIAMOND/GG-PT si attiva SOLO se passa il gate delle quote
+            if is_11ht_gate:
                 if f_s["vulnerability"] >= 0.8 and d_s["ht_ratio"] >= 0.6:
-                    if 1.40 <= q_fav <= max_q_gold and is_11ht_odds_ok:
-                        rating = min(100, rating + 25); det.append("🎯 GG-PT")
-                        advice = "💎 DIAMOND: GG PT / O1.5 HT / O2.5 FT"
-                    else: 
-                        # Se le statistiche ci sono ma le quote no, mettiamo solo un tag potenziale senza label Diamond
-                        det.append("GG-PT-POT"); advice = "🔥 TARGET: GG PT"
+                    rating = min(100, rating + 25)
+                    det.append("🎯 GG-PT")
+                    advice = "💎 DIAMOND: GG PT / O1.5 HT / O2.5 FT"
+            elif ht_ok:
+                # Se passa le stats ma non le quote, rimane un target potenziale senza badge
+                det.append("HT")
+                if f_s["vulnerability"] >= 0.8:
+                    det.append("GG-PT-POT")
+                    advice = "🔥 TARGET: GG PT"
             
             if f_s["is_dry"]: rating = min(100, rating + 15); det.append("DRY 💧")
+
             if rating >= min_rating:
                 results.append({
                     "Ora": m["fixture"]["date"][11:16], "Lega": f"{m['league']['name']} ({m['league']['country']})", 
                     "Match": f"{m['teams']['home']['name']} - {m['teams']['away']['name']}",
                     "1X2": f"{mk['q1']:.2f}|{mk['qx']:.2f}|{mk['q2']:.2f}", "O2.5 Finale": f"{mk['o25']:.2f}", "O0.5 PT": f"{mk['o05ht']:.2f}",
-                    "O1.5 PT": f"{mk['o15ht']:.2f}", "GG PT": f"{mk['gg_ht']:.2f}", "Info": f"[{'|'.join(det)}]", "Rating": rating, "Is_Gold": is_gold, "Advice": advice, "Fixture_ID": fid_s
+                    "O1.5 PT": f"{mk['o15ht']:.2f}", "GG PT": f"{mk['gg_ht']:.2f}", "Info": f"[{'|'.join(det)}]", "Rating": rating, "Is_Gold": is_gold, "Advice": advice, "Fixture_ID": fid_s,
+                    "In_Pool": is_11ht_gate
                 })
         except: continue
+    
+    # --- FILTRO TOP 5 PALLONE ⚽ ---
+    # Identifichiamo i top 5 match nel pool 1-1 HT per rating
+    pool_matches = [r for r in results if r["In_Pool"]]
+    top_5_ids = [r["Fixture_ID"] for r in sorted(pool_matches, key=lambda x: x["Rating"], reverse=True)[:5]]
+    
+    for r in results:
+        if r["Fixture_ID"] in top_5_ids:
+            r["Match"] = "⚽ " + r["Match"]
+            
     return results
 
 # ============================
