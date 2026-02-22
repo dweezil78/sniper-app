@@ -4,7 +4,6 @@ import requests
 import os
 from pathlib import Path
 from datetime import datetime, timedelta
-import json
 
 # ============================
 # CONFIGURAZIONE
@@ -18,10 +17,10 @@ API_KEY = st.secrets.get("API_SPORTS_KEY")
 HEADERS = {"x-apisports-key": API_KEY}
 
 st.title("📊 Arab Auditor V3.2")
-st.markdown("### Audit esiti reali vs quote Sniper (GG PT / O1.5 PT) — allineato alla versione Sniper attuale")
+st.markdown("### Audit esiti reali vs quote Sniper (GG PT / O1.5 PT / O2.5 FT) — allineato alla versione Sniper attuale")
 
 # ============================
-# TIMEZONE (ROME) - light
+# TIMEZONE (ROME)
 # ============================
 try:
     from zoneinfo import ZoneInfo
@@ -44,7 +43,6 @@ def parse_float(val):
         return None
 
 def safe_col(df, candidates):
-    # ritorna il primo nome colonna presente
     for c in candidates:
         if c in df.columns:
             return c
@@ -87,28 +85,30 @@ if df_log is not None:
         st.error("❌ Nel CSV manca la colonna Fixture_ID. Impossibile auditare.")
         st.stop()
 
-    # ---- filtro "ieri" robusto ----
+    # ---- filtro giorno ----
     st.sidebar.markdown("---")
     st.sidebar.subheader("🗓️ Filtro Giorno")
 
     yesterday = (now_rome().date() - timedelta(days=1))
     default_day = yesterday
 
+    df_work = df_log.copy()
+
     if col_logdate is not None:
-        # provo a parse Log_Date
-        dt_parsed = pd.to_datetime(df_log[col_logdate], errors="coerce")
-        df_log["_log_dt"] = dt_parsed
-        df_log["_log_day"] = df_log["_log_dt"].dt.date
-        available_days = sorted([d for d in df_log["_log_day"].dropna().unique()])
+        dt_parsed = pd.to_datetime(df_work[col_logdate], errors="coerce")
+        df_work["_log_dt"] = dt_parsed
+        df_work["_log_day"] = df_work["_log_dt"].dt.date
+        available_days = sorted([d for d in df_work["_log_day"].dropna().unique()])
         if available_days:
-            chosen_day = st.sidebar.selectbox("Seleziona giorno (da Log_Date)", options=available_days, index=min(len(available_days)-1, max(0, available_days.index(default_day) if default_day in available_days else len(available_days)-1)))
-            df_day = df_log[df_log["_log_day"] == chosen_day].copy()
+            idx = available_days.index(default_day) if default_day in available_days else (len(available_days)-1)
+            chosen_day = st.sidebar.selectbox("Seleziona giorno (da Log_Date)", options=available_days, index=idx)
+            df_day = df_work[df_work["_log_day"] == chosen_day].copy()
         else:
             chosen_day = st.sidebar.date_input("Seleziona giorno", value=default_day)
-            df_day = df_log.copy()
+            df_day = df_work.copy()
     else:
         chosen_day = st.sidebar.date_input("Seleziona giorno (Log_Date non trovato)", value=default_day)
-        df_day = df_log.copy()
+        df_day = df_work.copy()
 
     st.sidebar.markdown("---")
     st.sidebar.subheader("🎯 Gate Sniper 1–1 HT (quote)")
@@ -119,7 +119,7 @@ if df_log is not None:
 
     only_ball = st.sidebar.toggle("Mostra solo match ⚽ (se presente in Info)", value=False)
 
-    # de-dup fixture id (evita doppie chiamate)
+    # de-dup fixture id
     df_day[col_fixture] = df_day[col_fixture].astype(str).str.split(".").str[0]
     df_day = df_day.dropna(subset=[col_fixture]).copy()
     df_day = df_day.drop_duplicates(subset=[col_fixture]).copy()
@@ -133,20 +133,23 @@ if df_log is not None:
         df_day = df_day[df_day[col_info].apply(has_ball)].copy()
         st.write(f"Filtro ⚽ attivo → match rimasti: **{len(df_day)}**")
 
-    # Pulsante audit
     if st.button("🧐 AVVIA AUDIT (esiti reali)"):
         results = []
         progress_bar = st.progress(0)
         total = len(df_day)
 
-        # cache per evitare richieste duplicate
         fixture_cache = {}
 
         def fetch_fixture(session, f_id):
             if f_id in fixture_cache:
                 return fixture_cache[f_id]
             try:
-                resp = session.get("https://v3.football.api-sports.io/fixtures", headers=HEADERS, params={"id": f_id}, timeout=25)
+                resp = session.get(
+                    "https://v3.football.api-sports.io/fixtures",
+                    headers=HEADERS,
+                    params={"id": f_id},
+                    timeout=25
+                )
                 js = resp.json()
                 if not js.get("response"):
                     fixture_cache[f_id] = None
@@ -169,21 +172,25 @@ if df_log is not None:
                     continue
 
                 score = data.get("score", {}) or {}
+
                 ht_res = (score.get("halftime", {}) or {})
                 ht_h = ht_res.get("home", 0) if ht_res.get("home") is not None else 0
                 ht_a = ht_res.get("away", 0) if ht_res.get("away") is not None else 0
 
+                ft_res = (score.get("fulltime", {}) or {})
+                ft_h = ft_res.get("home", 0) if ft_res.get("home") is not None else 0
+                ft_a = ft_res.get("away", 0) if ft_res.get("away") is not None else 0
+
                 win_05_ht = (ht_h + ht_a) >= 1
                 win_15_ht = (ht_h + ht_a) >= 2
                 win_gg_ht = (ht_h > 0 and ht_a > 0)
+                win_25_ft = (ft_h + ft_a) >= 3
 
-                # quote dal log (supporta N/D)
                 q_o05 = parse_float(row[col_o05]) if col_o05 else None
                 q_o15 = parse_float(row[col_o15]) if col_o15 else None
                 q_gg  = parse_float(row[col_gg])  if col_gg  else None
                 q_o25 = parse_float(row[col_o25]) if col_o25 else None
 
-                # gate sniper 1-1 HT (quote + esistenza quote)
                 gate_ok = (q_o15 is not None and q_gg is not None and (gate_o15_min <= q_o15 <= gate_o15_max) and (gate_gg_min <= q_gg <= gate_gg_max))
 
                 match_name = str(row[col_match]) if col_match else f"Fixture {f_id}"
@@ -196,6 +203,7 @@ if df_log is not None:
                     "Ora": ora_val,
                     "Match": match_name,
                     "Esito HT": f"{ht_h}-{ht_a}",
+                    "Esito FT": f"{ft_h}-{ft_a}",
                     "Q O0.5 PT": q_o05,
                     "Q O1.5 PT": q_o15,
                     "Q GG PT": q_gg,
@@ -204,6 +212,7 @@ if df_log is not None:
                     "O0.5 HT": "✅" if win_05_ht else "❌",
                     "O1.5 HT": "✅" if win_15_ht else "❌",
                     "GG HT": "✅" if win_gg_ht else "❌",
+                    "O2.5 FT": "✅" if win_25_ft else "❌",
                     "Rating": rating_val,
                     "Info": info_val
                 })
@@ -214,42 +223,45 @@ if df_log is not None:
 
         res_df = pd.DataFrame(results)
 
-        st.subheader("📋 Quote Sniper vs Esiti Reali (HT)")
+        st.subheader("📋 Quote Sniper vs Esiti Reali (HT/FT)")
         st.dataframe(
             res_df.style.applymap(
                 lambda x: 'background-color: #1b4332; color: white' if x == "✅" else ('background-color: #431b1b; color: white' if x == "❌" else ''),
-                subset=["Gate 1-1 HT", "O0.5 HT", "O1.5 HT", "GG HT"]
+                subset=["Gate 1-1 HT", "O0.5 HT", "O1.5 HT", "GG HT", "O2.5 FT"]
             ),
             use_container_width=True
         )
 
         # ============================
-        # STATISTICHE MIRATE (coerenti con Sniper)
+        # STATISTICHE MIRATE
         # ============================
         st.markdown("---")
         st.subheader("🎯 Insights (allineati alla strategia)")
 
-        c1, c2, c3, c4 = st.columns(4)
+        c1, c2, c3, c4, c5 = st.columns(5)
 
         with c1:
             wr_05 = (res_df["O0.5 HT"] == "✅").mean() * 100
-            st.metric("Win Rate O0.5 HT", f"{wr_05:.1f}%")
+            st.metric("WR O0.5 HT", f"{wr_05:.1f}%")
 
         with c2:
             wr_15 = (res_df["O1.5 HT"] == "✅").mean() * 100
-            st.metric("Win Rate O1.5 HT", f"{wr_15:.1f}%")
+            st.metric("WR O1.5 HT", f"{wr_15:.1f}%")
 
         with c3:
             wr_gg = (res_df["GG HT"] == "✅").mean() * 100
-            st.metric("Win Rate GG HT", f"{wr_gg:.1f}%")
+            st.metric("WR GG HT", f"{wr_gg:.1f}%")
 
         with c4:
+            wr_25 = (res_df["O2.5 FT"] == "✅").mean() * 100
+            st.metric("WR O2.5 FT", f"{wr_25:.1f}%")
+
+        with c5:
             df_gate = res_df[res_df["Gate 1-1 HT"] == "✅"].copy()
             st.metric("Match in Gate", f"{len(df_gate)}/{len(res_df)}")
 
-        # Performance del gate (questa è la metrica chiave per noi)
         st.markdown("### 🔥 Performance del Gate 1–1 HT (quote)")
-        g1, g2, g3 = st.columns(3)
+        g1, g2, g3, g4 = st.columns(4)
 
         if not df_gate.empty:
             with g1:
@@ -257,13 +269,13 @@ if df_log is not None:
             with g2:
                 st.metric("WR GG HT (Gate)", f"{((df_gate['GG HT']=='✅').mean()*100):.1f}%")
             with g3:
-                # vero target "1-1 HT": entrambe segnano + 2+ gol
                 target_11 = ((df_gate["O1.5 HT"]=="✅") & (df_gate["GG HT"]=="✅")).mean() * 100
                 st.metric("WR Target 1–1 HT", f"{target_11:.1f}%")
+            with g4:
+                st.metric("WR O2.5 FT (Gate)", f"{((df_gate['O2.5 FT']=='✅').mean()*100):.1f}%")
         else:
             st.info("Nessun match ha soddisfatto il Gate con i range attuali.")
 
-        # download
         st.download_button(
             "💾 SCARICA AUDIT COMPLETO",
             data=res_df.to_csv(index=False).encode('utf-8'),
