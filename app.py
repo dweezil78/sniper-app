@@ -23,7 +23,7 @@ except Exception:
 def now_rome():
     return datetime.now(ROME_TZ) if ROME_TZ else datetime.now()
 
-st.set_page_config(page_title="ARAB SNIPER V15.60 - GOLD MASTER", layout="wide")
+st.set_page_config(page_title="ARAB SNIPER V15.65 - GOLD MASTER", layout="wide")
 
 # --- INITIALIZATION & PERSISTENCE ---
 if "odds_memory" not in st.session_state: st.session_state["odds_memory"] = {}
@@ -191,24 +191,23 @@ def execute_full_scan(session, fixtures, snap_mem, min_rating, max_q_gold, inv_m
             s_h, s_a = get_comprehensive_stats(session, m["teams"]["home"]["id"]), get_comprehensive_stats(session, m["teams"]["away"]["id"])
             f_s, d_s = (s_h, s_a) if mk["q1"] < mk["q2"] else (s_a, s_h)
             
-            # --- LOGICA PRO: 1-1 HT GATE & SEGNALI SPECIALI ---
             ht_ok = (s_h["ht_ratio"] >= 0.6 and s_a["ht_ratio"] >= 0.6)
             is_11ht_gate = (2.20 <= mk["o15ht"] <= 2.80) and (4.20 <= mk["gg_ht"] <= 5.50) and ht_ok
+            over_pro = (ht_ok and (1.70 <= mk["o25"] <= 2.00) and (1.30 <= mk["o05ht"] <= 1.55))
             
             advice = "🔥 TARGET: 0.5 HT / 2.5 FT" if is_gold else ""
-            
-            # Il segnale DIAMOND/GG-PT si attiva SOLO se passa il gate delle quote
             if is_11ht_gate:
                 if f_s["vulnerability"] >= 0.8 and d_s["ht_ratio"] >= 0.6:
-                    rating = min(100, rating + 25)
-                    det.append("🎯 GG-PT")
+                    rating = min(100, rating + 25); det.append("🎯 GG-PT")
                     advice = "💎 DIAMOND: GG PT / O1.5 HT / O2.5 FT"
             elif ht_ok:
-                # Se passa le stats ma non le quote, rimane un target potenziale senza badge
                 det.append("HT")
                 if f_s["vulnerability"] >= 0.8:
-                    det.append("GG-PT-POT")
-                    advice = "🔥 TARGET: GG PT"
+                    det.append("GG-PT-POT"); advice = "🔥 TARGET: GG PT"
+            
+            if over_pro:
+                det.append("🔥 OVER-PRO"); rating = min(100, rating + 20)
+                if f_s["vulnerability"] >= 0.8: rating = min(100, rating + 10); det.append("OVER+")
             
             if f_s["is_dry"]: rating = min(100, rating + 15); det.append("DRY 💧")
 
@@ -222,14 +221,10 @@ def execute_full_scan(session, fixtures, snap_mem, min_rating, max_q_gold, inv_m
                 })
         except: continue
     
-    # --- FILTRO TOP 5 PALLONE ⚽ ---
-    # Identifichiamo i top 5 match nel pool 1-1 HT per rating
     pool_matches = [r for r in results if r["In_Pool"]]
     top_5_ids = [r["Fixture_ID"] for r in sorted(pool_matches, key=lambda x: x["Rating"], reverse=True)[:5]]
-    
     for r in results:
-        if r["Fixture_ID"] in top_5_ids:
-            r["Match"] = "⚽ " + r["Match"]
+        if r["Fixture_ID"] in top_5_ids: r["Match"] = "⚽ " + r["Match"]
             
     return results
 
@@ -237,14 +232,14 @@ def execute_full_scan(session, fixtures, snap_mem, min_rating, max_q_gold, inv_m
 # SIDEBAR UI
 # ============================
 st.sidebar.header("👑 Configurazione Sniper")
-
 with st.sidebar.expander("🌍 Gestione Nazioni (PRO)", expanded=False):
     st.write(f"✅ **Incluse ({len(st.session_state['selected_countries'])})**")
     to_exclude = st.selectbox("Sposta in Escluse:", ["-- seleziona --"] + st.session_state["selected_countries"])
     if to_exclude != "-- seleziona --":
-        st.session_state["excluded_countries"].append(to_exclude)
-        save_excluded_countries(st.session_state["excluded_countries"])
-        st.rerun()
+        if to_exclude not in st.session_state["excluded_countries"]:
+            st.session_state["excluded_countries"].append(to_exclude)
+            save_excluded_countries(st.session_state["excluded_countries"])
+            st.rerun()
     st.markdown("---")
     st.write(f"🚫 **Escluse ({len(st.session_state['excluded_countries'])})**")
     to_include = st.selectbox("Sposta in Incluse:", ["-- seleziona --"] + st.session_state["excluded_countries"])
@@ -286,11 +281,23 @@ def handle_run(is_snap):
         try:
             data = api_get(s, "fixtures", {"date": oggi, "timezone": "Europe/Rome"})
             fixtures = [f for f in data.get("response", []) if f["fixture"]["status"]["short"] == "NS" and not any(t in f["league"]["name"].lower() for t in ["women","u19","u20","u21","u23","youth","friendly"])]
-            res = execute_full_scan(s, fixtures, {} if is_snap else st.session_state["odds_memory"], min_rating, max_q_gold, inv_margin, st.session_state["selected_countries"])
+            
+            # --- FIX #1: SNAPSHOT GLOBALE ---
             if is_snap:
-                new_snap = {r["Fixture_ID"]: {"q1": float(r["1X2"].split("|")[0]), "q2": float(r["1X2"].split("|")[2])} for r in res}
+                new_snap = {}
+                pb_snap = st.progress(0)
+                for i, m in enumerate(fixtures):
+                    pb_snap.progress((i+1)/len(fixtures))
+                    try:
+                        mk_snap = extract_markets_pro(api_get(s, "odds", {"fixture": m["fixture"]["id"]}))
+                        if mk_snap and mk_snap["q1"] > 0 and mk_snap["q2"] > 0:
+                            new_snap[str(m["fixture"]["id"])] = {"q1": float(mk_snap["q1"]), "q2": float(mk_snap["q2"])}
+                    except: continue
+                
                 st.session_state["odds_memory"], st.session_state["snap_time_obj"] = new_snap, now_rome()
                 with open(JSON_FILE, "w") as f: json.dump({"date": oggi, "timestamp": now_rome().isoformat(), "odds": new_snap}, f)
+            
+            res = execute_full_scan(s, fixtures, st.session_state["odds_memory"], min_rating, max_q_gold, inv_margin, st.session_state["selected_countries"])
             st.session_state["scan_results"] = res
             st.rerun()
         except Exception as e: st.error(f"Errore: {e}")
@@ -315,7 +322,6 @@ if st.session_state["scan_results"]:
 
         st_style = df[cols].style.apply(apply_row_style, axis=1)
         st.write(st_style.to_html(escape=False, index=False), unsafe_allow_html=True)
-        
         st.markdown("---")
         c1, c2, c3 = st.columns(3)
         c1.download_button("💾 CSV AUDITOR", df.to_csv(index=False).encode('utf-8'), f"auditor_{oggi}.csv")
