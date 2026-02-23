@@ -60,7 +60,6 @@ def save_snapshot_file(payload):
 def prune_snapshot_days(days_dict, keep_dates):
     return {d: v for d, v in days_dict.items() if d in keep_dates}
 
-# Caricamento Snapshot
 snap_payload = load_snapshot_file()
 st.session_state["odds_memory"] = snap_payload.get("days", {})
 
@@ -78,7 +77,7 @@ def api_get(session, path, params):
     return js
 
 # ============================
-# GESTIONE NAZIONI (PRO) - RIPRISTINATA
+# GESTIONE NAZIONI (PRO)
 # ============================
 def load_excluded_countries():
     if os.path.exists(NAZIONI_FILE):
@@ -112,8 +111,7 @@ today_ymd = now_rome().date().isoformat()
 use_rolling = st.sidebar.toggle("🔁 Rolling automatico (3 giorni)", value=True)
 
 if use_rolling:
-    start_ymd = today_ymd
-    end_ymd = (now_rome().date() + timedelta(days=2)).isoformat()
+    start_ymd, end_ymd = today_ymd, (now_rome().date() + timedelta(days=2)).isoformat()
     st.sidebar.caption(f"Range: {start_ymd} / {end_ymd}")
 else:
     dr = st.sidebar.date_input("Intervallo", value=(now_rome().date(), now_rome().date() + timedelta(days=2)))
@@ -124,7 +122,6 @@ else:
 selected_dates = daterange_ymd(start_ymd, end_ymd)
 selected_dates_set = set(selected_dates)
 
-# Filtro Nazioni PRO (Cruciale per multi-giorno)
 st.sidebar.markdown("---")
 st.sidebar.subheader("🌍 Filtro Nazioni PRO")
 with st.sidebar.expander("Gestisci Esclusioni", expanded=False):
@@ -134,7 +131,6 @@ with st.sidebar.expander("Gestisci Esclusioni", expanded=False):
         st.session_state["excluded_countries"].append(to_exclude)
         save_excluded_countries(st.session_state["excluded_countries"])
         st.rerun()
-    
     st.markdown("---")
     to_include = st.selectbox("Ripristina nazione:", ["-- seleziona --"] + st.session_state["excluded_countries"])
     if to_include != "-- seleziona --":
@@ -145,7 +141,7 @@ with st.sidebar.expander("Gestisci Esclusioni", expanded=False):
 st.session_state["only_gold_ui"] = st.sidebar.toggle("🎯 SOLO SWEET SPOT", value=False)
 
 # ============================
-# LOGICA STATISTICA (V16.00)
+# LOGICA STATISTICA
 # ============================
 team_stats_cache = {}
 
@@ -206,7 +202,6 @@ CUSTOM_CSS = """
         th { background-color: #1a1c23; color: #00e5ff; padding: 8px; text-align: center; border: 1px solid #444; }
         td { padding: 5px 8px; border: 1px solid #ccc; text-align: center; font-weight: 600; white-space: nowrap; }
         .match-cell { text-align: left !important; min-width: 220px; font-weight: 700; color: inherit !important; }
-        .date-cell { background-color: #e0e0e0; font-weight: 800; color: #000; text-align: left !important; }
     </style>
 """
 st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
@@ -223,29 +218,21 @@ def execute_full_scan(session, fixtures, snap_days, excluded_list):
         try:
             mk = extract_markets_pro(api_get(session, "odds", {"fixture": m["fixture"]["id"]}))
             if not mk or mk["q1"] <= 0: continue
-            
-            fid_s = str(m["fixture"]["id"])
-            match_day = to_ymd(m["fixture"]["date"])
+            fid_s, match_day = str(m["fixture"]["id"]), to_ymd(m["fixture"]["date"])
             s_h, s_a = get_comprehensive_stats(session, m["teams"]["home"]["id"]), get_comprehensive_stats(session, m["teams"]["away"]["id"])
             f_s = s_h if mk["q1"] < mk["q2"] else s_a
-
-            # Snapshot check
             day_snap = (snap_days.get(match_day, {}) or {}).get("odds", {})
             det = []
             if s_h["ht_ratio"] >= 0.6 and s_a["ht_ratio"] >= 0.6: det.append("HT-OK")
             if 1.70 <= mk["o25"] < 2.00: det.append("O25-OK")
             if 1.30 <= mk["o05ht"] <= 1.55: det.append("O05-OK")
-            
             if fid_s in day_snap:
                 if (min(day_snap[fid_s]["q1"], day_snap[fid_s]["q2"]) - min(mk["q1"], mk["q2"])) >= 0.15: det.append("Drop")
-
             if (2.20 <= mk["o15ht"] <= 2.80) and (4.20 <= mk["gg_ht"] <= 5.50) and ("HT-OK" in det):
                 det.append("GATE-11")
                 if f_s["vulnerability"] >= 0.8: det.append("🎯 GG-PT")
             elif "HT-OK" in det and f_s["vulnerability"] >= 0.8: det.append("GG-PT-POT")
-
-            if "O25-OK" in det and "O05-OK" in det and "HT-OK" in det:
-                det.append("🔥 OVER-PRO")
+            if "O25-OK" in det and "O05-OK" in det and "HT-OK" in det: det.append("🔥 OVER-PRO")
 
             results.append({
                 "Data": match_day, "Ora": m["fixture"]["date"][11:16],
@@ -271,7 +258,6 @@ def handle_run(is_snap):
                 data = api_get(s, "fixtures", {"date": d, "timezone": "Europe/Rome"})
                 day_fix = [f for f in data.get("response", []) if f["fixture"]["status"]["short"] == "NS" and not any(t in f["league"]["name"].lower() for t in ["women","u19","u20","u21","u23","youth","friendly"])]
                 all_fix.extend(day_fix)
-            
             if is_snap:
                 new_days = dict(st.session_state["odds_memory"])
                 pb_s = st.progress(0)
@@ -284,7 +270,6 @@ def handle_run(is_snap):
                         new_days[d]["odds"][str(m["fixture"]["id"])] = {"q1": mk_s["q1"], "q2": mk_s["q2"]}
                 st.session_state["odds_memory"] = prune_snapshot_days(new_days, selected_dates_set)
                 save_snapshot_file({"version": 1, "days": st.session_state["odds_memory"]})
-
             st.session_state["scan_results"] = execute_full_scan(s, all_fix, st.session_state["odds_memory"], st.session_state["excluded_countries"])
             st.rerun()
         except Exception as e: st.error(f"Errore: {e}")
@@ -295,19 +280,22 @@ if col2.button("🚀 AVVIA RADAR 3 GIORNI"): handle_run(False)
 if st.session_state["scan_results"]:
     df = pd.DataFrame(st.session_state["scan_results"])
     if st.session_state["only_gold_ui"]: df = df[df["Is_Gold"]]
-    
     if not df.empty:
         df = df.sort_values(["Data", "Ora"])
         cols = ["Data", "Ora", "Lega", "Match", "1X2", "O2.5", "O0.5 PT", "Info"]
-        
         def apply_style(row):
             info = row['Info']
             if '🎯 GG-PT' in info: return ['background-color: #38003c; color: #00e5ff;' for _ in row]
             if '🔥 OVER-PRO' in info: return ['background-color: #003300; color: #00ff00;' for _ in row]
             if 'GG-PT-POT' in info: return ['background-color: #0c1a2b; color: #ffffff;' for _ in row]
             return ['' for _ in row]
-
         st_style = df[cols].style.apply(apply_style, axis=1)
         st.write(st_style.to_html(escape=False, index=False), unsafe_allow_html=True)
-        st.download_button("💾 SCARICA AUDITOR 3-GG", df.to_csv(index=False).encode('utf-8'), "auditor_3days.csv")
+        
+        # --- BLOCCO DOWNLOAD (CSV + HTML) ---
+        st.markdown("---")
+        c1, c2 = st.columns(2)
+        c1.download_button("💾 SCARICA CSV", df.to_csv(index=False).encode('utf-8'), "auditor_3days.csv")
+        html_report = f"<html><head>{CUSTOM_CSS}</head><body>{st_style.to_html(escape=False, index=False)}</body></html>"
+        c2.download_button("🌐 REPORT HTML", html_report.encode('utf-8'), "report_3days.html")
         
