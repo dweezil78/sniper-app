@@ -266,7 +266,7 @@ if st.session_state["odds_memory"]:
     st.sidebar.success(f"✅ Snapshot: {st.session_state['snap_time_obj'].strftime('%H:%M')}")
 else: st.sidebar.warning("⚠️ Nessun Snapshot Caricato")
 
-min_rating = st.sidebar.slider("Rating Minimo", 0, 85, 60)
+min_rating = st.sidebar.slider("Rating Minimo", 0, 85, 20)
 max_q_gold = st.sidebar.slider("Sweet Spot Max", 1.70, 2.10, 2.10)
 st.session_state["only_gold_ui"] = st.sidebar.toggle("🎯 SOLO SWEET SPOT", value=False)
 
