@@ -3,284 +3,370 @@ import pandas as pd
 import requests
 import os
 from pathlib import Path
-from datetime import datetime, timedelta
+from datetime import datetime
 
 # ============================
-# CONFIGURAZIONE
+# CONFIG
 # ============================
 BASE_DIR = Path(__file__).resolve().parent
-LOG_CSV = str(BASE_DIR / "sniper_history_log.csv")
-
-st.set_page_config(page_title="ARAB AUDITOR V3.2 - SNIPER SYNC", layout="wide")
+DEFAULT_CSV = str(BASE_DIR / "auditor_full.csv")  # opzionale, se vuoi un default
+st.set_page_config(page_title="ARAB AUDITOR V16.00 - DAY AFTER", layout="wide")
 
 API_KEY = st.secrets.get("API_SPORTS_KEY")
 HEADERS = {"x-apisports-key": API_KEY}
 
-st.title("📊 Arab Auditor V3.2")
-st.markdown("### Audit esiti reali vs quote Sniper (GG PT / O1.5 PT / O2.5 FT) — allineato alla versione Sniper attuale")
+st.title("📊 ARAB AUDITOR V16.00 - Day After")
+st.markdown("Audit risultati reali: **Tag/Flag/Quote** (da V16.00 PURE) vs **Esiti HT/FT**")
 
 # ============================
-# TIMEZONE (ROME)
+# HELPERS
 # ============================
-try:
-    from zoneinfo import ZoneInfo
-    ROME_TZ = ZoneInfo("Europe/Rome")
-except Exception:
-    ROME_TZ = None
-
-def now_rome():
-    return datetime.now(ROME_TZ) if ROME_TZ else datetime.now()
-
-def parse_float(val):
-    if val is None:
-        return None
-    s = str(val).strip()
-    if s in ["", "N/D", "ND", "nan", "None"]:
-        return None
+def safe_float(x):
     try:
-        return float(s.replace(",", "."))
+        if x is None:
+            return None
+        s = str(x).strip()
+        if s in ["", "N/D", "ND", "None", "nan", "NaN"]:
+            return None
+        s = s.replace(",", ".")
+        return float(s)
     except:
         return None
 
-def safe_col(df, candidates):
-    for c in candidates:
-        if c in df.columns:
-            return c
-    return None
+def has_tag(info_str, token):
+    return token in str(info_str or "")
+
+def bucketize(series, bins, labels):
+    vals = pd.to_numeric(series, errors="coerce")
+    return pd.cut(vals, bins=bins, labels=labels, include_lowest=True)
+
+def style_ok_fail(x):
+    if x == "✅":
+        return "background-color:#1b4332; color:white; font-weight:700;"
+    if x == "❌":
+        return "background-color:#431b1b; color:white; font-weight:700;"
+    return ""
+
+def api_fixture_result(session, fixture_id: str):
+    # ritorna ht_h, ht_a, ft_h, ft_a oppure None
+    url = f"https://v3.football.api-sports.io/fixtures?id={fixture_id}"
+    r = session.get(url, headers=HEADERS, timeout=25)
+    js = r.json()
+    if not js.get("response"):
+        return None
+    data = js["response"][0]
+    score = data.get("score", {}) or {}
+    ht = score.get("halftime", {}) or {}
+    ft = score.get("fulltime", {}) or {}
+
+    ht_h = ht.get("home", 0) if ht.get("home") is not None else 0
+    ht_a = ht.get("away", 0) if ht.get("away") is not None else 0
+    ft_h = ft.get("home", 0) if ft.get("home") is not None else 0
+    ft_a = ft.get("away", 0) if ft.get("away") is not None else 0
+    return ht_h, ht_a, ft_h, ft_a
+
+# Tag che ci aspettiamo da V16.00
+KNOWN_TAGS = [
+    "HT-OK", "O25-OK", "O25-VAL", "O05-OK", "GATE-11",
+    "🎯 GG-PT", "GG-PT-POT", "🔥 OVER-PRO", "OVER-PRO+",
+    "DRY 💧", "Drop", "⚽"
+]
 
 # ============================
-# CARICAMENTO DATI
+# LOAD CSV
 # ============================
-st.sidebar.header("📂 Sorgente Dati")
-uploaded_file = st.sidebar.file_uploader("Carica CSV generato dallo Sniper", type=["csv"])
+st.sidebar.header("📂 Dati in input")
+uploaded = st.sidebar.file_uploader("Carica CSV esportato da V16.00 (auditor_full_YYYYMMDD.csv)", type=["csv"])
 
-df_log = None
-if uploaded_file:
-    df_log = pd.read_csv(uploaded_file, dtype={"Fixture_ID": str})
-    st.success(f"✅ File caricato: {uploaded_file.name}")
-elif os.path.exists(LOG_CSV):
-    df_log = pd.read_csv(LOG_CSV, dtype={"Fixture_ID": str})
-    st.info("🔄 Utilizzo database storico locale")
-
-# ============================
-# MOTORE AUDIT
-# ============================
-if df_log is not None:
-    df_log.columns = df_log.columns.astype(str).str.strip()
-
-    # Mappatura colonne (supporta più versioni)
-    col_fixture = safe_col(df_log, ["Fixture_ID", "fixture_id", "FixtureId"])
-    col_match = safe_col(df_log, ["Match_Disp_Raw", "Match", "Match_Disp", "Match Disponibili"])
-    col_info = safe_col(df_log, ["Info", "Tag"])
-    col_rating = safe_col(df_log, ["Rating", "rating"])
-    col_time = safe_col(df_log, ["Ora", "Time", "Kickoff"])
-    col_logdate = safe_col(df_log, ["Log_Date", "LogDate", "log_date", "Timestamp"])
-
-    col_o05 = safe_col(df_log, ["O0.5 PT", "O0.5HT", "O0.5 HT", "O0.5 1T"])
-    col_o15 = safe_col(df_log, ["O1.5 PT", "O1.5HT", "O1.5 HT", "O1.5 1T"])
-    col_gg  = safe_col(df_log, ["GG PT", "GG HT", "GG 1T", "Q. GG PT"])
-    col_o25 = safe_col(df_log, ["O2.5 Finale", "O2.5", "O2.5 FT"])
-
-    if col_fixture is None:
-        st.error("❌ Nel CSV manca la colonna Fixture_ID. Impossibile auditare.")
-        st.stop()
-
-    # ---- filtro giorno ----
-    st.sidebar.markdown("---")
-    st.sidebar.subheader("🗓️ Filtro Giorno")
-
-    yesterday = (now_rome().date() - timedelta(days=1))
-    default_day = yesterday
-
-    df_work = df_log.copy()
-
-    if col_logdate is not None:
-        dt_parsed = pd.to_datetime(df_work[col_logdate], errors="coerce")
-        df_work["_log_dt"] = dt_parsed
-        df_work["_log_day"] = df_work["_log_dt"].dt.date
-        available_days = sorted([d for d in df_work["_log_day"].dropna().unique()])
-        if available_days:
-            idx = available_days.index(default_day) if default_day in available_days else (len(available_days)-1)
-            chosen_day = st.sidebar.selectbox("Seleziona giorno (da Log_Date)", options=available_days, index=idx)
-            df_day = df_work[df_work["_log_day"] == chosen_day].copy()
-        else:
-            chosen_day = st.sidebar.date_input("Seleziona giorno", value=default_day)
-            df_day = df_work.copy()
-    else:
-        chosen_day = st.sidebar.date_input("Seleziona giorno (Log_Date non trovato)", value=default_day)
-        df_day = df_work.copy()
-
-    st.sidebar.markdown("---")
-    st.sidebar.subheader("🎯 Gate Sniper 1–1 HT (quote)")
-    gate_o15_min = st.sidebar.number_input("O1.5 PT min", value=2.20, step=0.05, format="%.2f")
-    gate_o15_max = st.sidebar.number_input("O1.5 PT max", value=2.80, step=0.05, format="%.2f")
-    gate_gg_min  = st.sidebar.number_input("GG PT min", value=4.20, step=0.05, format="%.2f")
-    gate_gg_max  = st.sidebar.number_input("GG PT max", value=5.50, step=0.05, format="%.2f")
-
-    only_ball = st.sidebar.toggle("Mostra solo match ⚽ (se presente in Info)", value=False)
-
-    # de-dup fixture id
-    df_day[col_fixture] = df_day[col_fixture].astype(str).str.split(".").str[0]
-    df_day = df_day.dropna(subset=[col_fixture]).copy()
-    df_day = df_day.drop_duplicates(subset=[col_fixture]).copy()
-
-    st.write(f"Match nel dataset (giorno selezionato): **{len(df_day)}**")
-
-    def has_ball(info_val):
-        return "⚽" in str(info_val or "")
-
-    if only_ball and col_info is not None:
-        df_day = df_day[df_day[col_info].apply(has_ball)].copy()
-        st.write(f"Filtro ⚽ attivo → match rimasti: **{len(df_day)}**")
-
-    if st.button("🧐 AVVIA AUDIT (esiti reali)"):
-        results = []
-        progress_bar = st.progress(0)
-        total = len(df_day)
-
-        fixture_cache = {}
-
-        def fetch_fixture(session, f_id):
-            if f_id in fixture_cache:
-                return fixture_cache[f_id]
-            try:
-                resp = session.get(
-                    "https://v3.football.api-sports.io/fixtures",
-                    headers=HEADERS,
-                    params={"id": f_id},
-                    timeout=25
-                )
-                js = resp.json()
-                if not js.get("response"):
-                    fixture_cache[f_id] = None
-                    return None
-                fixture_cache[f_id] = js["response"][0]
-                return fixture_cache[f_id]
-            except:
-                fixture_cache[f_id] = None
-                return None
-
-        with requests.Session() as s:
-            for i, (_, row) in enumerate(df_day.iterrows()):
-                progress_bar.progress((i + 1) / max(1, total))
-                f_id = str(row[col_fixture]).split(".")[0].strip()
-                if not f_id or f_id == "nan":
-                    continue
-
-                data = fetch_fixture(s, f_id)
-                if not data:
-                    continue
-
-                score = data.get("score", {}) or {}
-
-                ht_res = (score.get("halftime", {}) or {})
-                ht_h = ht_res.get("home", 0) if ht_res.get("home") is not None else 0
-                ht_a = ht_res.get("away", 0) if ht_res.get("away") is not None else 0
-
-                ft_res = (score.get("fulltime", {}) or {})
-                ft_h = ft_res.get("home", 0) if ft_res.get("home") is not None else 0
-                ft_a = ft_res.get("away", 0) if ft_res.get("away") is not None else 0
-
-                win_05_ht = (ht_h + ht_a) >= 1
-                win_15_ht = (ht_h + ht_a) >= 2
-                win_gg_ht = (ht_h > 0 and ht_a > 0)
-                win_25_ft = (ft_h + ft_a) >= 3
-
-                q_o05 = parse_float(row[col_o05]) if col_o05 else None
-                q_o15 = parse_float(row[col_o15]) if col_o15 else None
-                q_gg  = parse_float(row[col_gg])  if col_gg  else None
-                q_o25 = parse_float(row[col_o25]) if col_o25 else None
-
-                gate_ok = (q_o15 is not None and q_gg is not None and (gate_o15_min <= q_o15 <= gate_o15_max) and (gate_gg_min <= q_gg <= gate_gg_max))
-
-                match_name = str(row[col_match]) if col_match else f"Fixture {f_id}"
-                info_val = str(row[col_info]) if col_info else ""
-                rating_val = row[col_rating] if col_rating else None
-                ora_val = row[col_time] if col_time else ""
-
-                results.append({
-                    "Fixture_ID": f_id,
-                    "Ora": ora_val,
-                    "Match": match_name,
-                    "Esito HT": f"{ht_h}-{ht_a}",
-                    "Esito FT": f"{ft_h}-{ft_a}",
-                    "Q O0.5 PT": q_o05,
-                    "Q O1.5 PT": q_o15,
-                    "Q GG PT": q_gg,
-                    "Q O2.5": q_o25,
-                    "Gate 1-1 HT": "✅" if gate_ok else "❌",
-                    "O0.5 HT": "✅" if win_05_ht else "❌",
-                    "O1.5 HT": "✅" if win_15_ht else "❌",
-                    "GG HT": "✅" if win_gg_ht else "❌",
-                    "O2.5 FT": "✅" if win_25_ft else "❌",
-                    "Rating": rating_val,
-                    "Info": info_val
-                })
-
-        if not results:
-            st.warning("Nessun dato auditabile trovato (fixture mancanti o API senza response).")
-            st.stop()
-
-        res_df = pd.DataFrame(results)
-
-        st.subheader("📋 Quote Sniper vs Esiti Reali (HT/FT)")
-        st.dataframe(
-            res_df.style.applymap(
-                lambda x: 'background-color: #1b4332; color: white' if x == "✅" else ('background-color: #431b1b; color: white' if x == "❌" else ''),
-                subset=["Gate 1-1 HT", "O0.5 HT", "O1.5 HT", "GG HT", "O2.5 FT"]
-            ),
-            use_container_width=True
-        )
-
-        # ============================
-        # STATISTICHE MIRATE
-        # ============================
-        st.markdown("---")
-        st.subheader("🎯 Insights (allineati alla strategia)")
-
-        c1, c2, c3, c4, c5 = st.columns(5)
-
-        with c1:
-            wr_05 = (res_df["O0.5 HT"] == "✅").mean() * 100
-            st.metric("WR O0.5 HT", f"{wr_05:.1f}%")
-
-        with c2:
-            wr_15 = (res_df["O1.5 HT"] == "✅").mean() * 100
-            st.metric("WR O1.5 HT", f"{wr_15:.1f}%")
-
-        with c3:
-            wr_gg = (res_df["GG HT"] == "✅").mean() * 100
-            st.metric("WR GG HT", f"{wr_gg:.1f}%")
-
-        with c4:
-            wr_25 = (res_df["O2.5 FT"] == "✅").mean() * 100
-            st.metric("WR O2.5 FT", f"{wr_25:.1f}%")
-
-        with c5:
-            df_gate = res_df[res_df["Gate 1-1 HT"] == "✅"].copy()
-            st.metric("Match in Gate", f"{len(df_gate)}/{len(res_df)}")
-
-        st.markdown("### 🔥 Performance del Gate 1–1 HT (quote)")
-        g1, g2, g3, g4 = st.columns(4)
-
-        if not df_gate.empty:
-            with g1:
-                st.metric("WR O1.5 HT (Gate)", f"{((df_gate['O1.5 HT']=='✅').mean()*100):.1f}%")
-            with g2:
-                st.metric("WR GG HT (Gate)", f"{((df_gate['GG HT']=='✅').mean()*100):.1f}%")
-            with g3:
-                target_11 = ((df_gate["O1.5 HT"]=="✅") & (df_gate["GG HT"]=="✅")).mean() * 100
-                st.metric("WR Target 1–1 HT", f"{target_11:.1f}%")
-            with g4:
-                st.metric("WR O2.5 FT (Gate)", f"{((df_gate['O2.5 FT']=='✅').mean()*100):.1f}%")
-        else:
-            st.info("Nessun match ha soddisfatto il Gate con i range attuali.")
-
-        st.download_button(
-            "💾 SCARICA AUDIT COMPLETO",
-            data=res_df.to_csv(index=False).encode('utf-8'),
-            file_name=f"audit_results_{now_rome().strftime('%Y%m%d')}.csv"
-        )
-
+df = None
+if uploaded:
+    df = pd.read_csv(uploaded, dtype={"Fixture_ID": str})
+    st.success(f"✅ Caricato: {uploaded.name}")
+elif os.path.exists(DEFAULT_CSV):
+    df = pd.read_csv(DEFAULT_CSV, dtype={"Fixture_ID": str})
+    st.info("🔄 Caricato CSV default locale (auditor_full.csv)")
 else:
-    st.warning("Carica un file CSV per iniziare l'analisi.")
+    st.warning("Carica un CSV per iniziare.")
+    st.stop()
+
+df.columns = df.columns.str.strip()
+if "Fixture_ID" not in df.columns:
+    st.error("CSV non valido: manca la colonna Fixture_ID.")
+    st.stop()
+
+# Normalize / fix types
+df["Fixture_ID"] = df["Fixture_ID"].astype(str).str.split(".").str[0].str.strip()
+df["Info"] = df.get("Info", "").astype(str)
+
+# Quote numeriche (da V16.00)
+df["Q_O25"] = df.get("O2.5 Finale", None).apply(safe_float)
+df["Q_O05HT"] = df.get("O0.5 PT", None).apply(safe_float)
+df["Q_O15HT"] = df.get("O1.5 PT", None).apply(safe_float)
+df["Q_GGHT"] = df.get("GG PT", None).apply(safe_float)
+
+# Flags (da V16.00)
+if "ScoreOV" not in df.columns:
+    df["ScoreOV"] = 0
+if "ScoreGG" not in df.columns:
+    df["ScoreGG"] = 0
+
+df["ScoreOV"] = pd.to_numeric(df["ScoreOV"], errors="coerce").fillna(0).astype(int)
+df["ScoreGG"] = pd.to_numeric(df["ScoreGG"], errors="coerce").fillna(0).astype(int)
+
+# Tag flags
+for t in KNOWN_TAGS:
+    df[f"TAG__{t}"] = df["Info"].apply(lambda x: has_tag(x, t))
+
+# ============================
+# FILTERS
+# ============================
+st.sidebar.markdown("---")
+st.sidebar.subheader("🎛️ Filtri Audit")
+only_gold = st.sidebar.toggle("Solo Sweet Spot (Is_Gold=True)", value=False)
+only_ball = st.sidebar.toggle("Solo ⚽ (Top5 Gate)", value=False)
+only_over = st.sidebar.toggle("Solo OVER-PRO / OVER-PRO+", value=False)
+only_gg = st.sidebar.toggle("Solo 🎯 GG-PT", value=False)
+
+df_f = df.copy()
+if only_gold and "Is_Gold" in df_f.columns:
+    df_f = df_f[df_f["Is_Gold"] == True]
+if only_ball:
+    df_f = df_f[df_f["TAG__⚽"] == True]
+if only_over:
+    df_f = df_f[(df_f["TAG__🔥 OVER-PRO"] == True) | (df_f["TAG__OVER-PRO+"] == True)]
+if only_gg:
+    df_f = df_f[df_f["TAG__🎯 GG-PT"] == True]
+
+st.markdown("#### 📌 Dataset selezionato")
+st.write(f"Match nel CSV: **{len(df)}** | Match dopo filtri: **{len(df_f)}**")
+
+# ============================
+# RUN AUDIT
+# ============================
+st.markdown("---")
+st.subheader("🧐 Avvia audit su risultati reali (API-Sports)")
+
+cA, cB = st.columns([1, 2])
+with cA:
+    go = st.button("🚀 AVVIA AUDIT")
+with cB:
+    st.caption("Suggerimento: filtra prima (es. solo OVER-PRO) per non stressare l’API.")
+
+if not go:
+    st.stop()
+
+if df_f.empty:
+    st.warning("Nessun match dopo i filtri.")
+    st.stop()
+
+results = []
+pb = st.progress(0)
+total = len(df_f)
+
+with requests.Session() as s:
+    for i, row in enumerate(df_f.itertuples(index=False)):
+        pb.progress((i + 1) / total)
+        fid = str(getattr(row, "Fixture_ID", "")).strip()
+        if not fid:
+            continue
+
+        try:
+            r = api_fixture_result(s, fid)
+            if not r:
+                continue
+            ht_h, ht_a, ft_h, ft_a = r
+
+            win_o05_ht = (ht_h + ht_a) >= 1
+            win_o15_ht = (ht_h + ht_a) >= 2
+            win_gg_ht = (ht_h > 0 and ht_a > 0)
+            win_o25_ft = (ft_h + ft_a) >= 3
+
+            info = getattr(row, "Info", "")
+            results.append({
+                "Fixture_ID": fid,
+                "Ora": getattr(row, "Ora", ""),
+                "Lega": getattr(row, "Lega", ""),
+                "Match": getattr(row, "Match", ""),
+                "Esito HT": f"{ht_h}-{ht_a}",
+                "Esito FT": f"{ft_h}-{ft_a}",
+
+                "Q O2.5 FT": getattr(row, "Q_O25", None),
+                "Q O0.5 HT": getattr(row, "Q_O05HT", None),
+                "Q O1.5 HT": getattr(row, "Q_O15HT", None),
+                "Q GG HT": getattr(row, "Q_GGHT", None),
+
+                "O0.5 HT": "✅" if win_o05_ht else "❌",
+                "O1.5 HT": "✅" if win_o15_ht else "❌",
+                "GG HT": "✅" if win_gg_ht else "❌",
+                "O2.5 FT": "✅" if win_o25_ft else "❌",
+
+                "ScoreOV": int(getattr(row, "ScoreOV", 0)),
+                "ScoreGG": int(getattr(row, "ScoreGG", 0)),
+                "Info": info
+            })
+        except:
+            continue
+
+if not results:
+    st.error("Nessun risultato recuperato (possibile limite API o fixture non validi).")
+    st.stop()
+
+res_df = pd.DataFrame(results)
+
+# ============================
+# TABLE
+# ============================
+st.markdown("---")
+st.subheader("📋 Quote/Tag vs Risultati (HT + FT)")
+
+view_cols = [
+    "Ora", "Lega", "Match",
+    "Esito HT", "Esito FT",
+    "Q O2.5 FT", "Q O0.5 HT", "Q O1.5 HT", "Q GG HT",
+    "O0.5 HT", "O1.5 HT", "GG HT", "O2.5 FT",
+    "ScoreOV", "ScoreGG", "Info"
+]
+for c in view_cols:
+    if c not in res_df.columns:
+        res_df[c] = None
+
+st.dataframe(
+    res_df[view_cols].style.applymap(
+        style_ok_fail,
+        subset=["O0.5 HT", "O1.5 HT", "GG HT", "O2.5 FT"]
+    ),
+    use_container_width=True
+)
+
+# ============================
+# GLOBAL METRICS
+# ============================
+st.markdown("---")
+st.subheader("🎯 Win Rate globali (dataset filtrato)")
+
+def wr(col):
+    return (res_df[col] == "✅").mean() * 100 if len(res_df) else 0.0
+
+m1, m2, m3, m4 = st.columns(4)
+m1.metric("WR O0.5 HT", f"{wr('O0.5 HT'):.1f}%")
+m2.metric("WR O1.5 HT", f"{wr('O1.5 HT'):.1f}%")
+m3.metric("WR GG HT", f"{wr('GG HT'):.1f}%")
+m4.metric("WR O2.5 FT", f"{wr('O2.5 FT'):.1f}%")
+
+# ============================
+# TAG IMPACT (O2.5 FT)
+# ============================
+st.markdown("---")
+st.subheader("🧩 Impatto tag su O2.5 FT (WR per tag)")
+
+tag_rows = []
+for t in KNOWN_TAGS:
+    mask = res_df["Info"].apply(lambda x: has_tag(x, t))
+    n = int(mask.sum())
+    if n < 3:
+        continue
+    tag_rows.append({
+        "Tag": t,
+        "Match (n)": n,
+        "WR O2.5 FT": (res_df.loc[mask, "O2.5 FT"] == "✅").mean() * 100,
+        "WR O1.5 HT": (res_df.loc[mask, "O1.5 HT"] == "✅").mean() * 100,
+        "WR GG HT": (res_df.loc[mask, "GG HT"] == "✅").mean() * 100,
+    })
+
+tag_df = pd.DataFrame(tag_rows).sort_values(["WR O2.5 FT", "Match (n)"], ascending=[False, False])
+if tag_df.empty:
+    st.info("Non ci sono abbastanza match (n>=3) per calcolare WR per tag con i filtri attuali.")
+else:
+    st.dataframe(tag_df, use_container_width=True)
+
+# ============================
+# SCORE FLAGS IMPACT
+# ============================
+st.markdown("---")
+st.subheader("📌 Impatto flag ScoreOV / ScoreGG su O2.5 FT")
+
+c1, c2 = st.columns(2)
+with c1:
+    g = res_df.groupby("ScoreOV").agg(
+        n=("O2.5 FT", "size"),
+        wr_o25=("O2.5 FT", lambda x: (x == "✅").mean() * 100)
+    ).reset_index().sort_values("ScoreOV", ascending=False)
+    g = g[g["n"] >= 2]
+    st.markdown("**WR O2.5 FT per ScoreOV** (min 2 match)")
+    st.dataframe(g, use_container_width=True)
+
+with c2:
+    g2 = res_df.groupby("ScoreGG").agg(
+        n=("O2.5 FT", "size"),
+        wr_o25=("O2.5 FT", lambda x: (x == "✅").mean() * 100)
+    ).reset_index().sort_values("ScoreGG", ascending=False)
+    g2 = g2[g2["n"] >= 2]
+    st.markdown("**WR O2.5 FT per ScoreGG** (min 2 match)")
+    st.dataframe(g2, use_container_width=True)
+
+# ============================
+# QUOTE BUCKETS
+# ============================
+st.markdown("---")
+st.subheader("💰 Bucket quote: dove migliora l’O2.5 FT?")
+
+tmp = res_df.copy()
+tmp["Q O2.5 FT"] = pd.to_numeric(tmp["Q O2.5 FT"], errors="coerce")
+tmp["Q O0.5 HT"] = pd.to_numeric(tmp["Q O0.5 HT"], errors="coerce")
+tmp["Q O1.5 HT"] = pd.to_numeric(tmp["Q O1.5 HT"], errors="coerce")
+tmp["Q GG HT"] = pd.to_numeric(tmp["Q GG HT"], errors="coerce")
+
+bins_o25 = [0, 1.60, 1.70, 1.80, 1.95, 2.00, 2.10, 2.25, 99]
+labels_o25 = ["<1.60", "1.60-1.70", "1.70-1.80", "1.80-1.95", "1.95-2.00", "2.00-2.10", "2.10-2.25", ">2.25"]
+tmp["BUCKET_O25"] = bucketize(tmp["Q O2.5 FT"], bins_o25, labels_o25)
+
+bins_o05 = [0, 1.25, 1.30, 1.40, 1.55, 1.70, 99]
+labels_o05 = ["<1.25", "1.25-1.30", "1.30-1.40", "1.40-1.55", "1.55-1.70", ">1.70"]
+tmp["BUCKET_O05"] = bucketize(tmp["Q O0.5 HT"], bins_o05, labels_o05)
+
+b1 = tmp.groupby("BUCKET_O25").agg(
+    n=("O2.5 FT", "size"),
+    wr=("O2.5 FT", lambda x: (x == "✅").mean() * 100)
+).reset_index().dropna().sort_values("wr", ascending=False)
+
+st.markdown("**WR O2.5 FT per bucket quota O2.5** (min 3 match)")
+st.dataframe(b1[b1["n"] >= 3], use_container_width=True)
+
+b2 = tmp.groupby("BUCKET_O05").agg(
+    n=("O2.5 FT", "size"),
+    wr=("O2.5 FT", lambda x: (x == "✅").mean() * 100)
+).reset_index().dropna().sort_values("wr", ascending=False)
+
+st.markdown("**WR O2.5 FT per bucket quota O0.5 HT** (min 3 match)")
+st.dataframe(b2[b2["n"] >= 3], use_container_width=True)
+
+# ============================
+# SWEET SPOT CHECK (la tua regola)
+# ============================
+st.markdown("---")
+st.subheader("⭐ Verifica regola Sweet Spot O2.5 (1.70–2.00 + O0.5HT 1.30–1.55 + HT-OK)")
+
+sweet_mask = (
+    (tmp["Q O2.5 FT"].between(1.70, 2.00, inclusive="both")) &
+    (tmp["Q O0.5 HT"].between(1.30, 1.55, inclusive="both")) &
+    (tmp["Info"].apply(lambda x: has_tag(x, "HT-OK")))
+)
+
+n_sweet = int(sweet_mask.sum())
+if n_sweet == 0:
+    st.info("Nessun match nel dataset filtrato che rispetta la regola Sweet Spot.")
+else:
+    wr_sweet = (tmp.loc[sweet_mask, "O2.5 FT"] == "✅").mean() * 100
+    st.write(f"Match sweet spot: **{n_sweet}** | WR O2.5 FT: **{wr_sweet:.1f}%**")
+    st.dataframe(tmp.loc[sweet_mask, ["Match", "Q O2.5 FT", "Q O0.5 HT", "Info", "O2.5 FT"]], use_container_width=True)
+
+# ============================
+# DOWNLOAD
+# ============================
+st.markdown("---")
+out_name = f"audit_v1600_{datetime.now().strftime('%Y%m%d_%H%M')}.csv"
+st.download_button(
+    "💾 SCARICA AUDIT COMPLETO (CSV)",
+    data=res_df.to_csv(index=False).encode("utf-8"),
+    file_name=out_name
+)
