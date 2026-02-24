@@ -25,10 +25,10 @@ def now_rome():
 def get_snapshot_path(horizon):
     return str(BASE_DIR / f"arab_snapshot_{horizon}d.json")
 
-st.set_page_config(page_title="ARAB SNIPER V17.10 - MASTER GOLD FINAL", layout="wide")
+st.set_page_config(page_title="ARAB SNIPER V17.30 - MASTER CLEAN PLUS", layout="wide")
 
 # ============================
-# API CORE (Robustezza 429)
+# API CORE
 # ============================
 API_KEY = st.secrets.get("API_SPORTS_KEY")
 HEADERS = {"x-apisports-key": API_KEY}
@@ -86,17 +86,13 @@ if "excluded" not in st.session_state: st.session_state["excluded"] = load_exclu
 
 target_dates = [(now_rome().date() + timedelta(days=i)).strftime("%Y-%m-%d") for i in range(HORIZON)]
 
-# Recovery Snapshot Blindato
+# Recovery Snapshot
 SNAP_FILE = get_snapshot_path(HORIZON)
 if not st.session_state["odds_memory"] and os.path.exists(SNAP_FILE):
     try:
         with open(SNAP_FILE, "r") as f:
             saved = json.load(f)
-            if (
-                saved.get("base_date") == target_dates[0] 
-                and saved.get("horizon") == HORIZON
-                and saved.get("dates") == target_dates
-            ):
+            if (saved.get("base_date") == target_dates[0] and saved.get("horizon") == HORIZON and saved.get("dates") == target_dates):
                 st.session_state["odds_memory"] = saved.get("odds", {})
     except: pass
 
@@ -118,18 +114,17 @@ def get_stats(session, tid):
     try:
         rx = api_get(session, "fixtures", {"team": tid, "last": 5, "status": "FT"})
         fx = rx.get("response", [])
-        if not fx: return {"ht_ratio": 0.0, "vulnerability": 0.0, "is_dry": False}
-        ht_h, conc_h, goals = 0, 0, []
+        if not fx: return {"ht_ratio": 0.0, "vulnerability": 0.0}
+        ht_h, conc_h = 0, 0
         for f in fx:
             if ((f.get("score",{}).get("halftime",{}).get("home") or 0) + (f.get("score",{}).get("halftime",{}).get("away") or 0)) >= 1: ht_h += 1
             is_home = (f["teams"]["home"]["id"] == tid)
             conc_val = (f["goals"]["away"] if is_home else f["goals"]["home"]) or 0
             if conc_val > 0: conc_h += 1
-            goals.append(int((f["goals"]["home"] if is_home else f["goals"]["away"]) or 0))
-        res = {"ht_ratio": ht_h/5, "vulnerability": conc_h/5, "is_dry": (len(goals)>0 and goals[0]==0 and sum(1 for g in goals if g>=1)>=4)}
+        res = {"ht_ratio": ht_h/5, "vulnerability": conc_h/5}
         team_stats_cache[tid] = res
         return res
-    except: return {"ht_ratio": 0.0, "vulnerability": 0.0, "is_dry": False}
+    except: return {"ht_ratio": 0.0, "vulnerability": 0.0}
 
 def extract_markets(resp_json):
     resp = resp_json.get("response", [])
@@ -147,30 +142,37 @@ def extract_markets(resp_json):
     for ibm, bm in enumerate(resp[0].get("bookmakers", [])):
         for b in bm.get("bets", []):
             bid, name = b.get("id"), str(b.get("name") or "").lower()
+            
             if bid == 1 and data["q1"] == 0:
                 v = b.get("values", [])
                 if len(v) >= 3: data["q1"], data["qx"], data["q2"] = float(v[0]["odd"]), float(v[1]["odd"]), float(v[2]["odd"])
+            
             if bid == 5 and data["o25"] == 0:
                 for x in b.get("values", []) or []:
                     val = str(x.get("value") or "").lower().replace(" ", "").replace(",", ".")
                     if val.startswith("over2.5"):
                         try: data["o25"] = float(x.get("odd") or 0); break
                         except: pass
-            if bid == 71 and data["gg_ht"] == 0:
+            
+            # FIX GG HT: Ricerca testuale robusta + ID 71 (Ampliata)
+            is_btts_ht = (("both" in name or "btts" in name or "gg" in name) and ("1st" in name or "first" in name or "1h" in name or "half" in name))
+            if (bid == 71 or is_btts_ht) and data["gg_ht"] == 0:
                 for x in b.get("values", []):
                     if str(x.get("value") or "").strip().lower() in ["yes","si","oui"]:
                         try: data["gg_ht"] = float(x.get("odd") or 0); break
                         except: pass
-            if ("1st" in name or "first half" in name):
-                if ("over/under" in name or "total" in name):
-                    if data["o05ht"] == 0: data["o05ht"] = pick_o(b.get("values", []), "over0.5")
-                    if data["o15ht"] == 0: data["o15ht"] = pick_o(b.get("values", []), "over1.5")
+            
+            if ("1st" in name or "first half" in name) and ("over/under" in name or "total" in name):
+                if data["o05ht"] == 0: data["o05ht"] = pick_o(b.get("values", []), "over0.5")
+                if data["o15ht"] == 0: data["o15ht"] = pick_o(b.get("values", []), "over1.5")
         
+        # FIX #1: Logica di break corretta (have_gate)
         have_core = (data["q1"] > 0 and data["qx"] > 0 and data["q2"] > 0)
-        have_over_pack = (data["o25"] > 0 and data["o05ht"] > 0)
+        have_over = (data["o25"] > 0 and data["o05ht"] > 0)
         have_gate = (data["o15ht"] > 0 and data["gg_ht"] > 0)
-        if have_core and have_over_pack and have_gate: break
-        if have_core and have_over_pack and ibm >= 3: break
+
+        if have_core and have_over and have_gate: break
+        if ibm >= 4 and have_core and have_over: break # Cap massimo 5 bookies
             
     return data
 
@@ -197,21 +199,12 @@ def execute_scan(session, fixtures, snap_mem, excluded, min_rating_val):
             HT_OK = 1 if (s_h["ht_ratio"] >= 0.6 and s_a["ht_ratio"] >= 0.6) else 0
             O25_OK = 1 if (1.70 <= mk["o25"] < 2.00) else 0
             GATE_11 = 1 if ((2.20 <= mk["o15ht"] <= 2.80) and (4.20 <= mk["gg_ht"] <= 5.50) and HT_OK) else 0
-            
-            HAS_DROP = 0
-            if fid_s in snap_mem:
-                sd = snap_mem[fid_s]
-                if (sd.get("fav_odd", 0) - mk[sd.get("fav_side", "q1")]) >= 0.15: HAS_DROP = 1
+            HAS_DROP = 1 if (fid_s in snap_mem and (snap_mem[fid_s].get("fav_odd", 0) - mk[snap_mem[fid_s].get("fav_side", "q1")]) >= 0.15) else 0
 
             SIG_GG_PT = 1 if (GATE_11 and f_s["vulnerability"] >= 0.8) else 0
             avg_vul = (s_h["vulnerability"] + s_a["vulnerability"]) / 2
             SIG_O25_BOOST = 1 if (HT_OK and (1.70 <= mk["o25"] <= 2.10) and (1.18 <= mk["o05ht"] <= 1.40) and (avg_vul >= 0.6 or f_s["vulnerability"] >= 0.8)) else 0
-            SIG_OVER_PRO = 1 if (O25_OK and (1.30 <= mk["o05ht"] <= 1.55) and HT_OK and not f_s["is_dry"]) else 0
-
-            if match_date == target_dates[0]: day_label = "OGGI"
-            elif HORIZON > 1 and match_date == target_dates[1]: day_label = "DOMANI"
-            elif HORIZON > 2 and match_date == target_dates[2]: day_label = "DOPODOMANI"
-            else: day_label = "ALTRO"
+            SIG_OVER_PRO = 1 if (O25_OK and (1.30 <= mk["o05ht"] <= 1.55) and HT_OK) else 0
 
             det = []
             if HT_OK: det.append("HT-OK")
@@ -226,13 +219,14 @@ def execute_scan(session, fixtures, snap_mem, excluded, min_rating_val):
 
             if rating >= min_rating_val:
                 results.append({
-                    "Giorno": day_label, "Data": match_date, "Ora": m["fixture"]["date"][11:16], 
+                    "Data": match_date, "Ora": m["fixture"]["date"][11:16], 
                     "Lega": f"{m['league']['name']} ({m['league']['country']})", "Match": f"{m['teams']['home']['name']} - {m['teams']['away']['name']}",
                     "1X2": f"{mk['q1']:.2f}|{mk['qx']:.2f}|{mk['q2']:.2f}", "O2.5": f"{mk['o25']:.2f}", "O0.5HT": f"{mk['o05ht']:.2f}",
-                    "O1.5HT_Raw": mk["o15ht"], "GGHT_Raw": mk["gg_ht"], 
-                    "Info": f"[{'|'.join(det)}]", "Rating": rating, "Fixture_ID": fid_s, "Is_Gold": (1.40 <= min(mk["q1"], mk["q2"]) <= 2.10),
+                    "Info": f"[{'|'.join(det)}]", "Rating": rating, "Gold": "✅" if (1.40 <= min(mk["q1"], mk["q2"]) <= 2.10) else "❌",
+                    # Nascoste in UI ma nel CSV
+                    "Fixture_ID": fid_s, "O1.5HT_Raw": mk["o15ht"], "GGHT_Raw": mk["gg_ht"], 
                     "HTR_H": s_h["ht_ratio"], "HTR_A": s_a["ht_ratio"], "VUL_H": s_h["vulnerability"], "VUL_A": s_a["vulnerability"],
-                    "HT_OK": HT_OK, "O25_OK": O25_OK, "GATE_11": GATE_11, "HAS_DROP": HAS_DROP, "SIG_GG_PT": SIG_GG_PT, "SIG_OVER_PRO": SIG_OVER_PRO, "SIG_O25_BOOST": SIG_O25_BOOST
+                    "HT_OK": HT_OK, "O25_OK": O25_OK, "GATE_11": GATE_11, "HAS_DROP": HAS_DROP, "SIG_GG_PT": SIG_GG_PT, "SIG_OVER_PRO": SIG_OVER_PRO, "SIG_O25_BOOST": SIG_O25_BOOST, "Is_Gold_Bool": (1.40 <= min(mk["q1"], mk["q2"]) <= 2.10)
                 })
         except: continue
     return results
@@ -241,7 +235,7 @@ def execute_scan(session, fixtures, snap_mem, excluded, min_rating_val):
 # UI E RENDERING
 # ============================
 st.sidebar.markdown("---")
-st.sidebar.subheader("🛡️ Configurazione Audit")
+st.sidebar.subheader("🛡️ Filtri Dashboard")
 only_fav_gold = st.sidebar.toggle("🎯 SOLO SWEET SPOT FAV", value=False)
 only_o25_gold = st.sidebar.toggle("⚽ SOLO SWEET SPOT O2.5", value=False)
 min_rating_ui = st.sidebar.slider("Rating Minimo", 0, 85, 20)
@@ -274,6 +268,7 @@ def run_scan(is_snap):
                 new_snap = {}
                 pb_s = st.progress(0)
                 total_s = len(all_fixs)
+                # FIX #2: Progress Bar Snapshot Safe
                 if total_s == 0:
                     pb_s.progress(1.0)
                 else:
@@ -283,16 +278,9 @@ def run_scan(is_snap):
                         if mk and mk["q1"] > 0:
                             fs = "q1" if mk["q1"] < mk["q2"] else "q2"
                             new_snap[str(m["fixture"]["id"])] = {"fav_side": fs, "fav_odd": mk[fs], "q1": mk["q1"], "q2": mk["q2"]}
-                
                 st.session_state["odds_memory"] = new_snap
                 with open(get_snapshot_path(HORIZON), "w") as f:
-                    json.dump({
-                        "base_date": target_dates[0], 
-                        "horizon": HORIZON, 
-                        "dates": target_dates, 
-                        "created_at": now_rome().strftime("%Y-%m-%d %H:%M:%S"), 
-                        "odds": new_snap
-                    }, f)
+                    json.dump({"base_date": target_dates[0], "horizon": HORIZON, "dates": target_dates, "odds": new_snap}, f)
             
             st.session_state["scan_results"] = execute_scan(s, all_fixs, st.session_state["odds_memory"], st.session_state["excluded"], min_rating_ui)
             st.rerun()
@@ -302,30 +290,30 @@ col1, col2 = st.columns(2)
 if col1.button("📌 SNAPSHOT + SCAN"): run_scan(True)
 if col2.button("🚀 SCAN TOTALE"): run_scan(False)
 
-# ============================
-# RENDERING FINALE (FIX BUG LOGICO)
-# ============================
 if st.session_state["scan_results"] is not None:
     df = pd.DataFrame(st.session_state["scan_results"])
-
+    
+    # FIX #3: Filtri su bool veri prima del check empty
     if not df.empty:
-        if only_fav_gold:
-            df = df[df["Is_Gold"]]
-        if only_o25_gold:
+        if only_fav_gold and "Is_Gold_Bool" in df.columns:
+            df = df[df["Is_Gold_Bool"]]
+        if only_o25_gold and "O25_OK" in df.columns:
             df = df[df["O25_OK"] == 1]
 
     if df.empty:
-        st.warning("Nessun match trovato con i filtri attuali. Prova ad abbassare il Rating o disattivare i filtri Sweet Spot.")
+        st.warning("Nessun match trovato con i filtri attuali. Prova ad abbassare il Rating.")
     else:
         def style_row(row):
             if '🎯 GG-PT' in row['Info']: return ['background-color: #38003c; color: #00e5ff;' for _ in row]
             if '💣 O25-BOOST' in row['Info']: return ['background-color: #003300; color: #00ff00;' for _ in row] 
             return ['' for _ in row]
 
-        st_style = df.sort_values(["Data", "Ora"]).style.apply(style_row, axis=1)
+        DISPLAY_COLS = ["Data", "Ora", "Lega", "Match", "1X2", "O2.5", "O0.5HT", "Info", "Rating", "Gold"]
+        st_style = df[DISPLAY_COLS].sort_values(["Data", "Ora"]).style.apply(style_row, axis=1)
         st.write(st_style.to_html(escape=False, index=False), unsafe_allow_html=True)
+        
         st.markdown("---")
         c1, c2 = st.columns(2)
-        c1.download_button(f"💾 CSV ({HORIZON}d)", df.to_csv(index=False).encode('utf-8'), f"auditor_{HORIZON}d.csv")
+        c1.download_button(f"💾 CSV COMPLETO", df.to_csv(index=False).encode('utf-8'), f"auditor_full.csv")
         h_out = f"<html><head>{CUSTOM_CSS}</head><body>{st_style.to_html(escape=False, index=False)}</body></html>"
-        c2.download_button(f"🌐 HTML ({HORIZON}d)", h_out.encode('utf-8'), f"report_{HORIZON}d.html")
+        c2.download_button(f"🌐 HTML PULITO", h_out.encode('utf-8'), f"report_clean.html")
