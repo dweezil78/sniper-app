@@ -22,10 +22,10 @@ except Exception:
 def now_rome():
     return datetime.now(ROME_TZ) if ROME_TZ else datetime.now()
 
-st.set_page_config(page_title="ARAB SNIPER V16.50 - STABILITY", layout="wide")
+st.set_page_config(page_title="ARAB SNIPER V16.60 - ANALYTICAL GOLD", layout="wide")
 
 # ============================
-# API CORE (Spostata in alto per evitare NameError)
+# API CORE (Definita subito per stabilità)
 # ============================
 API_KEY = st.secrets.get("API_SPORTS_KEY")
 HEADERS = {"x-apisports-key": API_KEY}
@@ -38,7 +38,7 @@ def api_get(session, path, params):
     return js
 
 # ============================
-# INITIALIZATION & RECOVERY (Fix #1: NameError risolto)
+# INITIALIZATION & RECOVERY
 # ============================
 if "odds_memory" not in st.session_state: st.session_state["odds_memory"] = {}
 if "scan_results" not in st.session_state: st.session_state["scan_results"] = None
@@ -55,21 +55,12 @@ def load_excluded():
 if "excluded" not in st.session_state:
     st.session_state["excluded"] = load_excluded()
 
-# Recupero paesi del giorno (Ora api_get è definita)
+# Caricamento paesi del giorno
 if not st.session_state["available_countries"]:
     try:
         with requests.Session() as s:
             data = api_get(s, "fixtures", {"date": now_rome().strftime("%Y-%m-%d"), "timezone": "Europe/Rome"})
             st.session_state["available_countries"] = sorted(list(set(f["league"]["country"] for f in data.get("response", []))))
-    except: pass
-
-# Recovery Snapshot
-if not st.session_state["odds_memory"] and os.path.exists(JSON_FILE):
-    try:
-        with open(JSON_FILE, "r") as f:
-            saved = json.load(f)
-            if saved.get("date") == now_rome().strftime("%Y-%m-%d"):
-                st.session_state["odds_memory"] = saved.get("odds", {})
     except: pass
 
 # ============================
@@ -108,50 +99,39 @@ def extract_markets(resp_json):
                 except: return 0.0
         return 0.0
 
-    # FIX #3: Compromesso di scansione (max 4 bookmaker per trovare il Gate)
     for ibm, bm in enumerate(resp[0].get("bookmakers", [])):
         for b in bm.get("bets", []):
             bid, name = b.get("id"), str(b.get("name") or "").lower()
-            
             if bid == 1 and data["q1"] == 0:
                 v = b.get("values", [])
                 if len(v) >= 3: data["q1"], data["qx"], data["q2"] = float(v[0]["odd"]), float(v[1]["odd"]), float(v[2]["odd"])
-            
             if bid == 5 and data["o25"] == 0:
                 for x in b.get("values", []) or []:
                     val = str(x.get("value") or "").lower().replace(" ", "").replace(",", ".")
                     if val.startswith("over2.5"):
                         try: data["o25"] = float(x.get("odd") or 0); break
                         except: pass
-            
             if bid == 71 and data["gg_ht"] == 0:
                 for x in b.get("values", []):
                     if str(x.get("value") or "").strip().lower() in ["yes","si","oui"]:
                         try: data["gg_ht"] = float(x.get("odd") or 0); break
                         except: pass
-            
             if ("1st" in name or "first half" in name):
                 if ("over/under" in name or "total" in name):
                     if data["o05ht"] == 0: data["o05ht"] = pick_o(b.get("values", []), "over0.5")
                     if data["o15ht"] == 0: data["o15ht"] = pick_o(b.get("values", []), "over1.5")
-                # FIX #4: Fallback GGHT robusto
-                if data["gg_ht"] == 0 and ("both" in name or "gg" in name):
-                    for x in b.get("values", []):
-                        if str(x.get("value") or "").strip().lower() in ["yes","si","oui"]:
-                            try: data["gg_ht"] = float(x.get("odd") or 0); break
-                            except: pass
-
+        
+        # Logica di uscita bilanciata per non perdere i segnali GATE/GG
         have_core = (data["q1"] > 0 and data["qx"] > 0 and data["q2"] > 0)
         have_over_pack = (data["o25"] > 0 and data["o05ht"] > 0)
         have_gate = (data["o15ht"] > 0 and data["gg_ht"] > 0)
-
         if have_core and have_over_pack and have_gate: break
-        if have_core and have_over_pack and ibm >= 3: break # Max 4 bookies
+        if have_core and have_over_pack and ibm >= 3: break
             
     return data
 
 # ============================
-# CORE ENGINE: ANALYTICAL (V16.50)
+# CORE ENGINE
 # ============================
 def execute_scan(session, fixtures, snap_mem, excluded, min_rating_val):
     results, pb = [], st.progress(0)
@@ -209,7 +189,7 @@ def execute_scan(session, fixtures, snap_mem, excluded, min_rating_val):
     return results
 
 # ============================
-# UI E RENDERING (Fix #2: Expander Nazioni ripristinato)
+# UI E RENDERING
 # ============================
 st.sidebar.header("👑 Configurazione Auditor")
 with st.sidebar.expander("🌍 Filtro Nazioni PRO", expanded=False):
@@ -226,11 +206,11 @@ with st.sidebar.expander("🌍 Filtro Nazioni PRO", expanded=False):
         with open(NAZIONI_FILE, "w") as f: json.dump({"excluded": st.session_state["excluded"]}, f)
         st.rerun()
 
-min_rating = st.sidebar.slider("Rating Minimo", 0, 85, 20)
+min_rating_ui = st.sidebar.slider("Rating Minimo", 0, 85, 20)
 st.session_state["only_gold"] = st.sidebar.toggle("🎯 SOLO SWEET SPOT FAV", value=False)
-st.session_state["only_o25_gold"] = st.sidebar.toggle("⚽ SOLO SWEET SPOT O2.5", value=False)
 
-st.markdown("<style>table { width: 100%; border-collapse: collapse; font-size: 0.82rem; } th { background-color: #1a1c23; color: #00e5ff; padding: 8px; } td { padding: 5px; border: 1px solid #ccc; text-align: center; font-weight: 600; }</style>", unsafe_allow_html=True)
+CUSTOM_CSS = "<style>table { width: 100%; border-collapse: collapse; font-size: 0.82rem; } th { background-color: #1a1c23; color: #00e5ff; padding: 8px; } td { padding: 5px; border: 1px solid #ccc; text-align: center; font-weight: 600; }</style>"
+st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
 
 col1, col2 = st.columns(2)
 def run_scan(is_snap):
@@ -247,7 +227,7 @@ def run_scan(is_snap):
                         new_snap[str(m["fixture"]["id"])] = {"fav_side": fs, "fav_odd": mk[fs]}
                 st.session_state["odds_memory"] = new_snap
                 with open(JSON_FILE, "w") as f: json.dump({"date": now_rome().strftime("%Y-%m-%d"), "odds": new_snap}, f)
-            st.session_state["scan_results"] = execute_scan(s, fixs, st.session_state["odds_memory"], st.session_state["excluded"], min_rating)
+            st.session_state["scan_results"] = execute_scan(s, fixs, st.session_state["odds_memory"], st.session_state["excluded"], min_rating_ui)
             st.rerun()
         except Exception as e: st.error(str(e))
 
@@ -257,12 +237,17 @@ if col2.button("🚀 SCAN TOTALE"): run_scan(False)
 if st.session_state["scan_results"]:
     df = pd.DataFrame(st.session_state["scan_results"])
     if st.session_state["only_gold"]: df = df[df["Is_Gold"]]
-    if st.session_state["only_o25_gold"]: df = df[df["O25_OK"] == 1]
     
     def style_row(row):
         if '🎯 GG-PT' in row['Info']: return ['background-color: #38003c; color: #00e5ff;' for _ in row]
         if '💣 O25-BOOST' in row['Info']: return ['background-color: #003300; color: #00ff00;' for _ in row] 
         return ['' for _ in row]
 
-    st.write(df[["Ora", "Lega", "Match", "1X2", "O2.5", "O0.5HT", "Info", "Rating"]].style.apply(style_row, axis=1).to_html(escape=False, index=False), unsafe_allow_html=True)
-    st.download_button("💾 DOWNLOAD AUDITOR (CSV)", df.to_csv(index=False).encode('utf-8'), "auditor_final.csv")
+    st_style = df[["Ora", "Lega", "Match", "1X2", "O2.5", "O0.5HT", "Info", "Rating"]].style.apply(style_row, axis=1)
+    st.write(st_style.to_html(escape=False, index=False), unsafe_allow_html=True)
+    
+    st.markdown("---")
+    c1, c2 = st.columns(2)
+    c1.download_button("💾 DOWNLOAD CSV", df.to_csv(index=False).encode('utf-8'), "auditor_V16_60.csv")
+    html_out = f"<html><head>{CUSTOM_CSS}</head><body>{st_style.to_html(escape=False, index=False)}</body></html>"
+    c2.download_button("🌐 REPORT HTML", html_out.encode('utf-8'), "report_V16_60.html")
