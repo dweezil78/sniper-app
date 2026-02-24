@@ -25,7 +25,7 @@ def now_rome():
 def get_snapshot_path(horizon):
     return str(BASE_DIR / f"arab_snapshot_{horizon}d.json")
 
-st.set_page_config(page_title="ARAB SNIPER V17.30 - MASTER CLEAN PLUS", layout="wide")
+st.set_page_config(page_title="ARAB SNIPER V17.40 - OPERATIONAL", layout="wide")
 
 # ============================
 # API CORE
@@ -154,7 +154,7 @@ def extract_markets(resp_json):
                         try: data["o25"] = float(x.get("odd") or 0); break
                         except: pass
             
-            # FIX GG HT: Ricerca testuale robusta + ID 71 (Ampliata)
+            # BTTS HT Robust Scan
             is_btts_ht = (("both" in name or "btts" in name or "gg" in name) and ("1st" in name or "first" in name or "1h" in name or "half" in name))
             if (bid == 71 or is_btts_ht) and data["gg_ht"] == 0:
                 for x in b.get("values", []):
@@ -166,13 +166,12 @@ def extract_markets(resp_json):
                 if data["o05ht"] == 0: data["o05ht"] = pick_o(b.get("values", []), "over0.5")
                 if data["o15ht"] == 0: data["o15ht"] = pick_o(b.get("values", []), "over1.5")
         
-        # FIX #1: Logica di break corretta (have_gate)
         have_core = (data["q1"] > 0 and data["qx"] > 0 and data["q2"] > 0)
         have_over = (data["o25"] > 0 and data["o05ht"] > 0)
         have_gate = (data["o15ht"] > 0 and data["gg_ht"] > 0)
 
         if have_core and have_over and have_gate: break
-        if ibm >= 4 and have_core and have_over: break # Cap massimo 5 bookies
+        if ibm >= 4 and have_core and have_over: break 
             
     return data
 
@@ -221,11 +220,10 @@ def execute_scan(session, fixtures, snap_mem, excluded, min_rating_val):
                 results.append({
                     "Data": match_date, "Ora": m["fixture"]["date"][11:16], 
                     "Lega": f"{m['league']['name']} ({m['league']['country']})", "Match": f"{m['teams']['home']['name']} - {m['teams']['away']['name']}",
-                    "1X2": f"{mk['q1']:.2f}|{mk['qx']:.2f}|{mk['q2']:.2f}", "O2.5": f"{mk['o25']:.2f}", "O0.5HT": f"{mk['o05ht']:.2f}",
+                    "1X2": f"{mk['q1']:.2f}|{mk['qx']:.2f}|{mk['q2']:.2f}", "O2.5": f"{mk['o25']:.2f}", 
+                    "O0.5HT": f"{mk['o05ht']:.2f}", "O1.5HT": f"{mk['o15ht']:.2f}", "GGPT": f"{mk['gg_ht']:.2f}",
                     "Info": f"[{'|'.join(det)}]", "Rating": rating, "Gold": "✅" if (1.40 <= min(mk["q1"], mk["q2"]) <= 2.10) else "❌",
-                    # Nascoste in UI ma nel CSV
-                    "Fixture_ID": fid_s, "O1.5HT_Raw": mk["o15ht"], "GGHT_Raw": mk["gg_ht"], 
-                    "HTR_H": s_h["ht_ratio"], "HTR_A": s_a["ht_ratio"], "VUL_H": s_h["vulnerability"], "VUL_A": s_a["vulnerability"],
+                    "Fixture_ID": fid_s, "HTR_H": s_h["ht_ratio"], "HTR_A": s_a["ht_ratio"], "VUL_H": s_h["vulnerability"], "VUL_A": s_a["vulnerability"],
                     "HT_OK": HT_OK, "O25_OK": O25_OK, "GATE_11": GATE_11, "HAS_DROP": HAS_DROP, "SIG_GG_PT": SIG_GG_PT, "SIG_OVER_PRO": SIG_OVER_PRO, "SIG_O25_BOOST": SIG_O25_BOOST, "Is_Gold_Bool": (1.40 <= min(mk["q1"], mk["q2"]) <= 2.10)
                 })
         except: continue
@@ -268,10 +266,7 @@ def run_scan(is_snap):
                 new_snap = {}
                 pb_s = st.progress(0)
                 total_s = len(all_fixs)
-                # FIX #2: Progress Bar Snapshot Safe
-                if total_s == 0:
-                    pb_s.progress(1.0)
-                else:
+                if total_s > 0:
                     for i, m in enumerate(all_fixs):
                         pb_s.progress((i+1)/total_s)
                         mk = extract_markets(api_get(s, "odds", {"fixture": m["fixture"]["id"]}))
@@ -292,24 +287,22 @@ if col2.button("🚀 SCAN TOTALE"): run_scan(False)
 
 if st.session_state["scan_results"] is not None:
     df = pd.DataFrame(st.session_state["scan_results"])
-    
-    # FIX #3: Filtri su bool veri prima del check empty
     if not df.empty:
-        if only_fav_gold and "Is_Gold_Bool" in df.columns:
-            df = df[df["Is_Gold_Bool"]]
-        if only_o25_gold and "O25_OK" in df.columns:
-            df = df[df["O25_OK"] == 1]
+        if only_fav_gold: df = df[df["Is_Gold_Bool"] == True]
+        if only_o25_gold: df = df[df["O25_OK"] == 1]
 
     if df.empty:
-        st.warning("Nessun match trovato con i filtri attuali. Prova ad abbassare il Rating.")
+        st.warning("Nessun match trovato con i filtri attuali.")
     else:
         def style_row(row):
             if '🎯 GG-PT' in row['Info']: return ['background-color: #38003c; color: #00e5ff;' for _ in row]
             if '💣 O25-BOOST' in row['Info']: return ['background-color: #003300; color: #00ff00;' for _ in row] 
             return ['' for _ in row]
 
-        DISPLAY_COLS = ["Data", "Ora", "Lega", "Match", "1X2", "O2.5", "O0.5HT", "Info", "Rating", "Gold"]
-        st_style = df[DISPLAY_COLS].sort_values(["Data", "Ora"]).style.apply(style_row, axis=1)
+        DISPLAY_COLS = ["Data", "Ora", "Lega", "Match", "1X2", "O2.5", "O0.5HT", "O1.5HT", "GGPT", "Info", "Rating", "Gold"]
+        df_display = df[DISPLAY_COLS].sort_values(["Data", "Ora"])
+        
+        st_style = df_display.style.apply(style_row, axis=1)
         st.write(st_style.to_html(escape=False, index=False), unsafe_allow_html=True)
         
         st.markdown("---")
