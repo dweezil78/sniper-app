@@ -1,3 +1,17 @@
+def check_password():
+    if "password_correct" not in st.session_state:
+        st.session_state["password_correct"] = False
+
+    if not st.session_state["password_correct"]:
+        pwd = st.sidebar.text_input("Inserisci Password Accesso", type="password")
+        if pwd == st.secrets["passwords"]["amico1"]:
+            st.session_state["password_correct"] = True
+            st.rerun()
+        else:
+            st.sidebar.error("Password errata")
+            st.stop() # Blocca l'esecuzione del resto dello script
+
+check_password()
 import streamlit as st
 import requests
 import pandas as pd
