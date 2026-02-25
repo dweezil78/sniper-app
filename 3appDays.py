@@ -25,11 +25,10 @@ def now_rome():
 def get_snapshot_path(horizon):
     return str(BASE_DIR / f"arab_snapshot_{horizon}d.json")
 
-# Nuovo path per i risultati persistenti
 def get_results_path(horizon):
     return str(BASE_DIR / f"last_results_{horizon}d.json")
 
-st.set_page_config(page_title="ARAB SNIPER V17.60 - FULL PERSISTENCE", layout="wide")
+st.set_page_config(page_title="ARAB SNIPER V17.60 - MASTER GOLD", layout="wide")
 
 # ============================
 # API CORE
@@ -67,27 +66,25 @@ if "scan_results" not in st.session_state: st.session_state["scan_results"] = No
 if "available_countries" not in st.session_state: st.session_state["available_countries"] = []
 if "current_horizon" not in st.session_state: st.session_state["current_horizon"] = HORIZON
 
-# Reset se cambia orizzonte
 if st.session_state["current_horizon"] != HORIZON:
     st.session_state["odds_memory"] = {}
-    st.session_state["scan_results"] = None # Reset risultati per caricare quelli dell'orizzonte nuovo
+    st.session_state["scan_results"] = None
     st.session_state["current_horizon"] = HORIZON
     st.session_state["available_countries"] = []
     team_stats_cache.clear()
 
-# --- CARICAMENTO RISULTATI PERSISTENTI ---
+# Caricamento automatico ultimi risultati (Persistence)
 RES_FILE = get_results_path(HORIZON)
 if st.session_state["scan_results"] is None and os.path.exists(RES_FILE):
     try:
         with open(RES_FILE, "r") as f:
             saved_res = json.load(f)
-            # Verifica che i risultati siano ancora validi per la data odierna
             if saved_res.get("base_date") == now_rome().strftime("%Y-%m-%d"):
                 st.session_state["scan_results"] = saved_res.get("results", [])
     except:
         st.session_state["scan_results"] = None
 
-# --- GESTIONE SNAPSHOT ---
+# Gestione Snapshot Info
 SNAP_FILE = get_snapshot_path(HORIZON)
 snapshot_info = None
 if os.path.exists(SNAP_FILE):
@@ -181,7 +178,6 @@ def execute_scan(session, fixtures, snap_mem, excluded, min_rating_val):
     results, pb = [], st.progress(0)
     filtered = [f for f in fixtures if f["league"]["country"] not in excluded]
     if not filtered: pb.progress(1.0); return []
-
     target_dates = [(now_rome().date() + timedelta(days=i)).strftime("%Y-%m-%d") for i in range(HORIZON)]
 
     for i, m in enumerate(filtered):
@@ -189,23 +185,19 @@ def execute_scan(session, fixtures, snap_mem, excluded, min_rating_val):
         try:
             mk = extract_markets(api_get(session, "odds", {"fixture": m["fixture"]["id"]}))
             if not mk or mk["q1"] <= 0: continue
-            
             fid_s = str(m["fixture"]["id"])
             match_date = m["fixture"]["date"][:10]
             s_h, s_a = get_stats(session, m["teams"]["home"]["id"]), get_stats(session, m["teams"]["away"]["id"])
             fav_side = "q1" if mk["q1"] < mk["q2"] else "q2"
             f_s, d_s = (s_h, s_a) if fav_side == "q1" else (s_a, s_h)
-
             HT_OK = 1 if (s_h["ht_ratio"] >= 0.6 and s_a["ht_ratio"] >= 0.6) else 0
             O25_OK = 1 if (1.70 <= mk["o25"] < 2.00) else 0
             GATE_11 = 1 if ((2.20 <= mk["o15ht"] <= 2.80) and (4.20 <= mk["gg_ht"] <= 5.50) and HT_OK) else 0
             HAS_DROP = 1 if (fid_s in snap_mem and (snap_mem[fid_s].get("fav_odd", 0) - mk[snap_mem[fid_s].get("fav_side", "q1")]) >= 0.15) else 0
-
             SIG_GG_PT = 1 if (GATE_11 and f_s["vulnerability"] >= 0.8) else 0
             avg_vul = (s_h["vulnerability"] + s_a["vulnerability"]) / 2
             SIG_O25_BOOST = 1 if (HT_OK and (1.70 <= mk["o25"] <= 2.10) and (1.18 <= mk["o05ht"] <= 1.40) and (avg_vul >= 0.6 or f_s["vulnerability"] >= 0.8)) else 0
             SIG_OVER_PRO = 1 if (O25_OK and (1.30 <= mk["o05ht"] <= 1.55) and HT_OK) else 0
-
             det = []
             if HT_OK: det.append("HT-OK")
             if O25_OK: det.append("O25-OK")
@@ -214,21 +206,11 @@ def execute_scan(session, fixtures, snap_mem, excluded, min_rating_val):
             if SIG_GG_PT: det.append("🎯 GG-PT")
             if SIG_O25_BOOST: det.append("💣 O25-BOOST")
             if SIG_OVER_PRO: det.append("🔥 OVER-PRO")
-
             rating = min(100, 45 + max((25 if SIG_GG_PT else 0), (30 if SIG_O25_BOOST else (20 if SIG_OVER_PRO else 0))) + (30 if HAS_DROP else 0))
-
             if rating >= min_rating_val:
-                # Determina label giorno
-                if match_date == target_dates[0]: day_label = "OGGI"
-                elif HORIZON > 1 and match_date == target_dates[1]: day_label = "DOMANI"
-                elif HORIZON > 2 and match_date == target_dates[2]: day_label = "DOPODOMANI"
-                else: day_label = match_date
-
                 results.append({
-                    "Data": match_date, "Day": day_label, "Ora": m["fixture"]["date"][11:16], 
-                    "Lega": f"{m['league']['name']} ({m['league']['country']})", "Match": f"{m['teams']['home']['name']} - {m['teams']['away']['name']}",
-                    "1X2": f"{mk['q1']:.2f}|{mk['qx']:.2f}|{mk['q2']:.2f}", "O2.5": f"{mk['o25']:.2f}", 
-                    "O0.5HT": f"{mk['o05ht']:.2f}", "O1.5HT": f"{mk['o15ht']:.2f}", "GGPT": f"{mk['gg_ht']:.2f}",
+                    "Data": match_date, "Ora": m["fixture"]["date"][11:16], "Lega": f"{m['league']['name']} ({m['league']['country']})", "Match": f"{m['teams']['home']['name']} - {m['teams']['away']['name']}",
+                    "1X2": f"{mk['q1']:.2f}|{mk['qx']:.2f}|{mk['q2']:.2f}", "O2.5": f"{mk['o25']:.2f}", "O0.5HT": f"{mk['o05ht']:.2f}", "O1.5HT": f"{mk['o15ht']:.2f}", "GGPT": f"{mk['gg_ht']:.2f}",
                     "Info": f"[{'|'.join(det)}]", "Rating": rating, "Gold": "✅" if (1.40 <= min(mk["q1"], mk["q2"]) <= 2.10) else "❌",
                     "Is_Gold_Bool": (1.40 <= min(mk["q1"], mk["q2"]) <= 2.10), "O25_OK": O25_OK
                 })
@@ -244,7 +226,18 @@ only_fav_gold = st.sidebar.toggle("🎯 SOLO SWEET SPOT FAV", value=False)
 only_o25_gold = st.sidebar.toggle("⚽ SOLO SWEET SPOT O2.5", value=False)
 min_rating_ui = st.sidebar.slider("Rating Minimo", 0, 85, 20)
 
-CUSTOM_CSS = "<style>table { width: 100%; border-collapse: collapse; font-size: 0.82rem; } th { background-color: #1a1c23; color: #00e5ff; padding: 8px; } td { padding: 5px; border: 1px solid #ccc; text-align: center; font-weight: 600; }</style>"
+# FIX MOBILE: white-space nowrap blocca le celle su una riga
+CUSTOM_CSS = """
+<style>
+    .stTableContainer { overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+    th { background-color: #1a1c23; color: #00e5ff; padding: 8px; white-space: nowrap; }
+    td { 
+        padding: 5px; border: 1px solid #ccc; text-align: center; font-weight: 600; 
+        white-space: nowrap; /* Blocca il testo su singola riga */
+    }
+</style>
+"""
 st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
 
 target_dates = [(now_rome().date() + timedelta(days=i)).strftime("%Y-%m-%d") for i in range(HORIZON)]
@@ -258,16 +251,13 @@ def run_scan(is_snap):
                 all_fixs.extend([f for f in data.get("response", []) if f["fixture"]["status"]["short"] == "NS" and not any(t in f["league"]["name"].lower() for t in ["women","u19","u20","u21","u23","youth","friendly"])])
             
             if is_snap:
-                # Snapshot incrementale
                 existing_snap = {}
                 if os.path.exists(SNAP_FILE):
                     try:
                         with open(SNAP_FILE, "r") as f:
                             saved = json.load(f)
-                            if saved.get("base_date") == target_dates[0]:
-                                existing_snap = saved.get("odds", {})
+                            if saved.get("base_date") == target_dates[0]: existing_snap = saved.get("odds", {})
                     except: pass
-                
                 new_snap = dict(existing_snap)
                 pb_s = st.progress(0)
                 total_s = len(all_fixs)
@@ -280,20 +270,16 @@ def run_scan(is_snap):
                         if mk and mk["q1"] > 0:
                             fs = "q1" if mk["q1"] < mk["q2"] else "q2"
                             new_snap[fid] = {"fav_side": fs, "fav_odd": mk[fs], "q1": mk["q1"], "q2": mk["q2"]}
-                
                 st.session_state["odds_memory"] = new_snap
                 ts = now_rome().strftime("%d/%m/%Y %H:%M")
                 with open(get_snapshot_path(HORIZON), "w") as f:
                     json.dump({"base_date": target_dates[0], "horizon": HORIZON, "dates": target_dates, "odds": new_snap, "timestamp": ts}, f)
             
-            # Esecuzione Scan
             results = execute_scan(s, all_fixs, st.session_state["odds_memory"], [], min_rating_ui)
             st.session_state["scan_results"] = results
-            
-            # --- SALVATAGGIO RISULTATI PERSISTENTI (RICHIESTA UTENTE) ---
+            # Salvataggio persistente risultati
             with open(get_results_path(HORIZON), "w") as f:
                 json.dump({"base_date": target_dates[0], "results": results}, f)
-            
             st.rerun()
         except Exception as e: st.error(str(e))
 
@@ -301,7 +287,6 @@ col1, col2 = st.columns(2)
 if col1.button("📌 SNAPSHOT + SCAN"): run_scan(True)
 if col2.button("🚀 SCAN TOTALE"): run_scan(False)
 
-# Visualizzazione Risultati
 if st.session_state["scan_results"]:
     df = pd.DataFrame(st.session_state["scan_results"])
     if not df.empty:
@@ -315,18 +300,12 @@ if st.session_state["scan_results"]:
             if '🎯 GG-PT' in row['Info']: return ['background-color: #38003c; color: #00e5ff;' for _ in row]
             if '💣 O25-BOOST' in row['Info']: return ['background-color: #003300; color: #00ff00;' for _ in row] 
             return ['' for _ in row]
-        
         DISPLAY_COLS = ["Data", "Ora", "Lega", "Match", "1X2", "O2.5", "O0.5HT", "O1.5HT", "GGPT", "Info", "Rating", "Gold"]
         st_style = df[DISPLAY_COLS].sort_values(["Data", "Ora"]).style.apply(style_row, axis=1)
         st.write(st_style.to_html(escape=False, index=False), unsafe_allow_html=True)
         
         with st.expander("📖 GUIDA OPERATIVA SEGNALI"):
-            st.markdown("""
-            * **💣 O25-BOOST:** Segnale top Over 2.5 (Ritmo + Vulnerabilità).
-            * **🎯 GG-PT:** Strategia Gol Entrambe 1° Tempo.
-            * **📉 Drop:** Crollo quota favorita rispetto all'apertura (Snapshot).
-            * **✅ Gold:** Quota favorita nel range premium (1.40-2.10).
-            """)
+            st.markdown("* **💣 O25-BOOST:** Over 2.5 Top. * **🎯 GG-PT:** Gol Entrambe 1T. * **📉 Drop:** Crollo quota. * **✅ Gold:** Range 1.40-2.10.")
 
         st.markdown("---")
         c1, c2 = st.columns(2)
