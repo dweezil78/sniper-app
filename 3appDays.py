@@ -13,11 +13,12 @@ from pathlib import Path
 BASE_DIR = Path(__file__).resolve().parent
 NAZIONI_FILE = str(BASE_DIR / "nazioni_config.json")
 
-# Lista nazioni escluse di default (Ottimizzazione API V18)
+# Lista nazioni escluse di default (Aggiornata V18.20)
 DEFAULT_EXCLUDED = [
     "Thailand", "Indonesia", "India", "Kenya", "Morocco", "Rwanda", 
     "Macedonia", "Nigeria", "Ivory-Coast", "Oman", "El-Salvador", 
-    "Ethiopia", "Cameroon", "Jordan", "Algeria", "South-Africa"
+    "Ethiopia", "Cameroon", "Jordan", "Algeria", "South-Africa",
+    "Tanzania", "Montenegro", "UAE", "Guatemala", "Costa-Rica"
 ]
 
 try:
@@ -35,7 +36,7 @@ def get_snapshot_path(horizon):
 def get_results_path(horizon):
     return str(BASE_DIR / f"last_results_{horizon}d.json")
 
-st.set_page_config(page_title="ARAB SNIPER V18.10 - ANALYTICAL PRO", layout="wide")
+st.set_page_config(page_title="ARAB SNIPER V18.20 - MASTER INTEGRITY", layout="wide")
 
 # ============================
 # API CORE
@@ -90,12 +91,28 @@ def load_excluded():
 if "excluded" not in st.session_state:
     st.session_state["excluded"] = load_excluded()
 
+target_dates = [(now_rome().date() + timedelta(days=i)).strftime("%Y-%m-%d") for i in range(HORIZON)]
+
+# FIX 2: Popolamento available_countries
+if not st.session_state["available_countries"]:
+    try:
+        with requests.Session() as s_fix:
+            all_c = set()
+            for d_fix in target_dates:
+                data_fix = api_get(s_fix, "fixtures", {"date": d_fix, "timezone": "Europe/Rome"})
+                for f_fix in data_fix.get("response", []):
+                    all_c.add(f_fix["league"]["country"])
+            st.session_state["available_countries"] = sorted(list(all_c))
+    except:
+        st.session_state["available_countries"] = []
+
+# FIX 3: Recupero Risultati coerente con target_dates[0]
 RES_FILE = get_results_path(HORIZON)
 if st.session_state["scan_results"] is None and os.path.exists(RES_FILE):
     try:
         with open(RES_FILE, "r") as f:
             saved_res = json.load(f)
-            if saved_res.get("base_date") == now_rome().strftime("%Y-%m-%d"):
+            if saved_res.get("base_date") == target_dates[0]:
                 st.session_state["scan_results"] = saved_res.get("results", [])
     except: pass
 
@@ -107,7 +124,6 @@ if os.path.exists(SNAP_FILE):
             saved = json.load(f)
             snapshot_info = saved.get("timestamp", "N/D")
             if not st.session_state["odds_memory"]:
-                target_dates = [(now_rome().date() + timedelta(days=i)).strftime("%Y-%m-%d") for i in range(HORIZON)]
                 if saved.get("base_date") == target_dates[0]:
                     st.session_state["odds_memory"] = saved.get("odds", {})
     except: pass
@@ -132,7 +148,6 @@ def get_stats(session, tid):
         rx = api_get(session, "fixtures", {"team": tid, "last": 8, "status": "FT"})
         fx = rx.get("response", [])
         if not fx: return {"ht_ratio": 0.0, "vulnerability": 0.0, "o25_ratio": 0.0, "gg_ratio": 0.0}
-        
         ht, conc, o25, gg = 0, 0, 0, 0
         actual = len(fx)
         for f in fx:
@@ -141,7 +156,6 @@ def get_stats(session, tid):
             if ((f["goals"]["away"] if is_home else f["goals"]["home"]) or 0) > 0: conc += 1
             if ((f["goals"]["home"] or 0) + (f["goals"]["away"] or 0)) >= 3: o25 += 1
             if (f["goals"]["home"] or 0) > 0 and (f["goals"]["away"] or 0) > 0: gg += 1
-            
         res = {"ht_ratio": ht/actual, "vulnerability": conc/actual, "o25_ratio": o25/actual, "gg_ratio": gg/actual}
         team_stats_cache[tid] = res
         return res
@@ -182,9 +196,12 @@ def extract_markets(resp_json):
                 if data["o05ht"] == 0: data["o05ht"] = pick_o(b.get("values", []), "over0.5")
                 if data["o15ht"] == 0: data["o15ht"] = pick_o(b.get("values", []), "over1.5")
         
+        # FIX 4: Logica di break robusta per GGHT
         have_core = (data["q1"] > 0 and data["qx"] > 0 and data["q2"] > 0)
         have_over = (data["o25"] > 0 and data["o05ht"] > 0)
-        if have_core and have_over and ibm >= 4: break 
+        have_gate = (data["o15ht"] > 0 and data["gg_ht"] > 0)
+        if have_core and have_over and have_gate: break
+        if ibm >= 4 and have_core and have_over: break 
     return data
 
 # ============================
@@ -207,7 +224,6 @@ def execute_scan(session, fixtures, snap_mem, excluded, min_rating_val):
             fav_side = "q1" if mk["q1"] < mk["q2"] else "q2"
             f_s, d_s = (s_h, s_a) if fav_side == "q1" else (s_a, s_h)
 
-            # SOGLIA 5/8 (0.625)
             HT_OK = 1 if (s_h["ht_ratio"] >= 0.625 and s_a["ht_ratio"] >= 0.625) else 0
             O25_OK = 1 if (1.70 <= mk["o25"] < 2.00) else 0
             GATE_11 = 1 if ((2.20 <= mk["o15ht"] <= 2.80) and (4.20 <= mk["gg_ht"] <= 5.50) and HT_OK) else 0
@@ -218,7 +234,6 @@ def execute_scan(session, fixtures, snap_mem, excluded, min_rating_val):
             SIG_O25_BOOST = 1 if (HT_OK and (1.70 <= mk["o25"] <= 2.10) and (1.18 <= mk["o05ht"] <= 1.40) and (avg_vul >= 0.625 or f_s["vulnerability"] >= 0.75)) else 0
             SIG_OVER_PRO = 1 if (O25_OK and (1.30 <= mk["o05ht"] <= 1.55) and HT_OK) else 0
 
-            # STRATEGIA PESCI V18.10
             FISH_O = 1 if (1.40 <= min(mk["q1"], mk["q2"]) <= 1.80 and f_s["o25_ratio"] >= 0.625) else 0
             FISH_GG = 1 if (2.20 <= mk["q1"] <= 3.80 and 2.20 <= mk["q2"] <= 3.80 and s_h["gg_ratio"] >= 0.625 and s_a["gg_ratio"] >= 0.625) else 0
 
@@ -233,7 +248,6 @@ def execute_scan(session, fixtures, snap_mem, excluded, min_rating_val):
             if FISH_O: det.append("🐟O")
             if FISH_GG: det.append("🐟GG")
 
-            # RATING: Base 45 + Bonus Segnali + Bonus Drop + Bonus Pesci (+10)
             b_seg = max((25 if SIG_GG_PT else 0), (30 if SIG_O25_BOOST else (20 if SIG_OVER_PRO else 0)))
             b_drop = (30 if HAS_DROP else 0)
             b_fish = (10 if (FISH_O or FISH_GG) else 0)
@@ -258,6 +272,7 @@ only_fav_gold = st.sidebar.toggle("🎯 SOLO SWEET SPOT FAV", value=False)
 only_o25_gold = st.sidebar.toggle("⚽ SOLO SWEET SPOT O2.5", value=False)
 min_rating_ui = st.sidebar.slider("Rating Minimo", 0, 85, 20)
 
+# FIX 1: available_countries expander
 with st.sidebar.expander("🌍 Filtro Nazioni", expanded=False):
     sel = [c for c in st.session_state["available_countries"] if c not in st.session_state["excluded"]]
     to_ex = st.selectbox("Escludi:", ["-- seleziona --"] + sel)
@@ -280,8 +295,6 @@ CUSTOM_CSS = """
 </style>
 """
 st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
-
-target_dates = [(now_rome().date() + timedelta(days=i)).strftime("%Y-%m-%d") for i in range(HORIZON)]
 
 def run_scan(is_snap):
     with requests.Session() as s:
