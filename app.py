@@ -22,7 +22,7 @@ DEFAULT_EXCLUDED = [
 
 LEAGUE_KEYWORDS_BLACKLIST = [
     "regionalliga", "carioca", "paulista", "pernambucano", "gaucho", 
-    "mineiro", "youth", "friendly", "u19", "u20", "u21", "u23", "women", "cup"
+    "mineiro", "youth", "friendly", "u19", "u20", "u21", "u23", "women"
 ]
 
 try:
