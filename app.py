@@ -8,7 +8,7 @@ import time
 from pathlib import Path
 
 # ============================
-# CONFIGURAZIONE V19.50
+# CONFIGURAZIONE V19.60 - SECURITY & PRECISION
 # ============================
 BASE_DIR = Path(__file__).resolve().parent
 NAZIONI_FILE = str(BASE_DIR / "nazioni_config.json")
@@ -20,7 +20,6 @@ DEFAULT_EXCLUDED = [
     "Tanzania", "Montenegro", "UAE", "Guatemala", "Costa-Rica"
 ]
 
-# Blacklist leghe minori (Punto 3 della richiesta)
 LEAGUE_KEYWORDS_BLACKLIST = [
     "regionalliga", "carioca", "paulista", "pernambucano", "gaucho", 
     "mineiro", "youth", "friendly", "u19", "u20", "u21", "u23", "women"
@@ -41,12 +40,16 @@ def get_snapshot_path(horizon):
 def get_results_path(horizon):
     return str(BASE_DIR / f"last_results_{horizon}d.json")
 
-st.set_page_config(page_title="ARAB SNIPER V19.50 - WEEKEND READY", layout="wide")
+st.set_page_config(page_title="ARAB SNIPER V19.60 - SECURITY & PRECISION", layout="wide")
 
 # ============================
-# API CORE
+# API CORE & SECURITY CHECK (Fix Critico #1)
 # ============================
 API_KEY = st.secrets.get("API_SPORTS_KEY")
+if not API_KEY:
+    st.error("⚠️ Manca API_SPORTS_KEY nei Secrets di Streamlit Cloud. Controlla la configurazione.")
+    st.stop()
+
 HEADERS = {"x-apisports-key": API_KEY}
 
 def api_get(session, path, params, retries=2):
@@ -91,7 +94,6 @@ if "current_horizon" not in st.session_state or st.session_state["current_horizo
 
 target_dates = [(now_rome().date() + timedelta(days=i)).strftime("%Y-%m-%d") for i in range(HORIZON)]
 
-# Logica Sliding Window: recupera i dati se la base_date combacia (Punto 2)
 def load_sliding_data():
     res_path = get_results_path(HORIZON)
     if os.path.exists(res_path):
@@ -117,7 +119,6 @@ snap_info = load_sliding_data()
 if snap_info:
     st.sidebar.success(f"📦 Dati caricati: {target_dates[0]}\nSnapshot: {snap_info}")
 
-# Popolamento nazioni (solo se lista vuota)
 if not st.session_state["available_countries"]:
     try:
         with requests.Session() as s_init:
@@ -129,7 +130,7 @@ if not st.session_state["available_countries"]:
     except: pass
 
 # ============================
-# LOGICA IBRIDA STATS (Punto 1)
+# LOGICA IBRIDA STATS
 # ============================
 team_stats_cache = {}
 
@@ -140,7 +141,6 @@ def get_stats(session, tid):
         fx = rx.get("response", [])
         if not fx: return {"ht5":0.0, "vul5":0.0, "o25_8":0.0, "gg8":0.0}
         
-        # 5 MATCH (Standard)
         fx5 = fx[:5]
         ht5 = sum(1 for f in fx5 if ((f["score"]["halftime"]["home"] or 0) + (f["score"]["halftime"]["away"] or 0)) >= 1) / len(fx5)
         
@@ -149,7 +149,6 @@ def get_stats(session, tid):
             return 1 if ((f["goals"]["away"] if is_h else f["goals"]["home"]) or 0) > 0 else 0
         vul5 = sum(1 for f in fx5 if is_conc(f, tid)) / len(fx5)
         
-        # 8 MATCH (Pesci)
         act8 = len(fx)
         o25_8 = sum(1 for f in fx if ((f["goals"]["home"] or 0) + (f["goals"]["away"] or 0)) >= 3) / act8
         gg8 = sum(1 for f in fx if (f["goals"]["home"] or 0) > 0 and (f["goals"]["away"] or 0) > 0) / act8
@@ -177,12 +176,15 @@ def extract_markets(resp_json):
                         elif "draw" in vn: data["qx"] = float(vo["odd"])
                         elif "away" in vn: data["q2"] = float(vo["odd"])
                     if data["q1"] == 0: data["q1"], data["qx"], data["q2"] = float(v[0]["odd"]), float(v[1]["odd"]), float(v[2]["odd"])
+            
             if bid == 5 and data["o25"] == 0:
                 for x in b.get("values", []):
                     if "over2.5" in clean(x.get("value")): data["o25"] = float(x.get("odd") or 0); break
             
             is_btts = any(k in name for k in ["btts", "both", "gg"])
-            is_1h = any(k in name for k in ["1st", "1h", "first", "half"])
+            # Fix Critico #2: "first" rimosso per evitare mercati non-HT
+            is_1h = any(k in name for k in ["1st", "1h", "firsthalf", "half"])
+            
             if (bid == 71 or (is_btts and is_1h)) and data["gg_ht"] == 0:
                 for x in b.get("values", []):
                     vn = clean(x.get("value"))
@@ -213,7 +215,6 @@ def execute_scan(session, fixtures, snap_mem, excluded, min_rating_val):
             fid_s = str(m["fixture"]["id"])
             s_h, s_a = get_stats(session, m["teams"]["home"]["id"]), get_stats(session, m["teams"]["away"]["id"])
             
-            # SOGLIA 5 MATCH (Punto 1)
             HT_OK = 1 if ((s_h["ht5"] + s_a["ht5"]) / 2 >= 0.6) else 0
             
             HAS_DROP = 0
@@ -232,7 +233,6 @@ def execute_scan(session, fixtures, snap_mem, excluded, min_rating_val):
             SIG_O25_BOOST = 1 if (HT_OK and (1.70 <= mk["o25"] <= 2.10) and (1.18 <= mk["o05ht"] <= 1.40) and (avg_vul >= 0.6 or f_stats["vul5"] >= 0.8)) else 0
             SIG_OVER_PRO = 1 if (O25_OK and (1.30 <= mk["o05ht"] <= 1.55) and HT_OK) else 0
 
-            # SOGLIA 8 MATCH (Punto 1)
             FISH_O = 1 if (1.40 <= min(mk["q1"], mk["q2"]) <= 1.80 and f_stats["o25_8"] >= 0.75) else 0
             FISH_GG = 1 if (2.20 <= mk["q1"] <= 3.80 and 2.20 <= mk["q2"] <= 3.80 and s_h["gg8"] >= 0.75 and s_a["gg8"] >= 0.75) else 0
 
@@ -254,7 +254,7 @@ def execute_scan(session, fixtures, snap_mem, excluded, min_rating_val):
                     "Fixture_ID": m["fixture"]["id"], "Data": m["fixture"]["date"][:10], "Ora": m["fixture"]["date"][11:16], 
                     "Lega": f"{m['league']['name']} ({m['league']['country']})", "Match": f"{m['teams']['home']['name']} - {m['teams']['away']['name']}",
                     "1X2": f"{mk['q1']:.2f}|{mk['qx']:.2f}|{mk['q2']:.2f}", "O2.5": f"{mk['o25']:.2f}", "O0.5HT": f"{mk['o05ht']:.2f}", "O1.5HT": f"{mk['o15ht']:.2f}", 
-                    "GGPT": "🎯" if SIG_GG_PT else "", "Quota GG1T": f"{mk['gg_ht']:.2f}", 
+                    "Quota GG1T": f"{mk['gg_ht']:.2f}", 
                     "Info": f"[{'|'.join(det)}]", "Rating": rating, "Gold": "✅" if (1.40 <= min(mk["q1"], mk["q2"]) <= 2.10) else "❌",
                     "Is_Gold_Bool": (1.40 <= min(mk["q1"], mk["q2"]) <= 2.10), "O25_OK": O25_OK
                 })
@@ -267,7 +267,7 @@ def execute_scan(session, fixtures, snap_mem, excluded, min_rating_val):
 st.sidebar.subheader("🛡️ Audit Config")
 only_fav_gold = st.sidebar.toggle("🎯 SOLO SWEET SPOT FAV")
 only_o25_gold = st.sidebar.toggle("⚽ SOLO SWEET SPOT O2.5")
-min_rating_ui = st.sidebar.slider("Rating Minimo", 0, 85, 30)
+min_rating_ui = st.sidebar.slider("Rating Minimo", 0, 85, 30) # Default 30 come richiesto
 
 with st.sidebar.expander("🌍 Filtro Nazioni", expanded=False):
     sel_countries = [c for c in st.session_state["available_countries"] if c not in st.session_state["excluded"]]
@@ -323,7 +323,6 @@ if st.session_state["scan_results"]:
         if ('🐟O' in row['Info'] or '🐟GG' in row['Info']) and row['Rating'] >= 55: return ['background-color: #004d4d; color: #00ffff;' for _ in row]
         return ['' for _ in row]
     
-    # Rimozione colonna GGPT dalla visualizzazione come richiesto
     DISPLAY_COLS = ["Data", "Ora", "Lega", "Match", "1X2", "O2.5", "O0.5HT", "O1.5HT", "Quota GG1T", "Info", "Rating", "Gold"]
     st_style = df[DISPLAY_COLS].sort_values(["Data", "Ora"]).style.apply(style_row, axis=1)
     st.write(st_style.to_html(escape=False, index=False), unsafe_allow_html=True)
