@@ -8,7 +8,7 @@ import time
 from pathlib import Path
 
 # ============================
-# CONFIGURAZIONE V19.50 - WEEKEND READY
+# CONFIGURAZIONE V19.50
 # ============================
 BASE_DIR = Path(__file__).resolve().parent
 NAZIONI_FILE = str(BASE_DIR / "nazioni_config.json")
@@ -20,7 +20,7 @@ DEFAULT_EXCLUDED = [
     "Tanzania", "Montenegro", "UAE", "Guatemala", "Costa-Rica"
 ]
 
-# Blacklist leghe minori (Punto 3 della tua richiesta)
+# Blacklist leghe minori (Punto 3 della richiesta)
 LEAGUE_KEYWORDS_BLACKLIST = [
     "regionalliga", "carioca", "paulista", "pernambucano", "gaucho", 
     "mineiro", "youth", "friendly", "u19", "u20", "u21", "u23", "women"
@@ -65,65 +65,74 @@ def api_get(session, path, params, retries=2):
             time.sleep(1)
 
 # ============================
-# INITIALIZATION & ROTAZIONE (Punto 2)
+# INITIALIZATION & SLIDING WINDOW
 # ============================
-team_stats_cache = {} 
+if "excluded" not in st.session_state:
+    if os.path.exists(NAZIONI_FILE):
+        try:
+            with open(NAZIONI_FILE, "r") as f:
+                st.session_state["excluded"] = list(json.load(f).get("excluded", DEFAULT_EXCLUDED))
+        except: st.session_state["excluded"] = DEFAULT_EXCLUDED
+    else:
+        st.session_state["excluded"] = DEFAULT_EXCLUDED
+
+if "available_countries" not in st.session_state: st.session_state["available_countries"] = []
+if "odds_memory" not in st.session_state: st.session_state["odds_memory"] = {}
+if "scan_results" not in st.session_state: st.session_state["scan_results"] = None
+
 st.sidebar.header("👑 Arab Sniper Console")
 st.sidebar.markdown("---")
 HORIZON = st.sidebar.selectbox("Orizzonte Scan:", options=[1, 2, 3], index=0)
 
-if "odds_memory" not in st.session_state: st.session_state["odds_memory"] = {}
-if "scan_results" not in st.session_state: st.session_state["scan_results"] = None
-if "available_countries" not in st.session_state: st.session_state["available_countries"] = []
-if "current_horizon" not in st.session_state: st.session_state["current_horizon"] = HORIZON
-
-if st.session_state["current_horizon"] != HORIZON:
+if "current_horizon" not in st.session_state or st.session_state["current_horizon"] != HORIZON:
     st.session_state["odds_memory"] = {}
     st.session_state["scan_results"] = None
     st.session_state["current_horizon"] = HORIZON
-    st.session_state["available_countries"] = []
-    team_stats_cache.clear()
 
 target_dates = [(now_rome().date() + timedelta(days=i)).strftime("%Y-%m-%d") for i in range(HORIZON)]
 
-# Logica di caricamento con rotazione automatica (Sliding Window)
-def load_persisted_data():
-    # Cerca il file più pertinente per la data odierna
-    for h in [1, 2, 3]:
-        path = get_results_path(h)
-        if os.path.exists(path):
-            try:
-                with open(path, "r") as f:
-                    data = json.load(f)
-                    # Se la base_date salvata è nel nostro range target, la carichiamo
-                    if data.get("base_date") == target_dates[0]:
-                        st.session_state["scan_results"] = data.get("results", [])
-                        break
-            except: pass
+# Logica Sliding Window: recupera i dati se la base_date combacia (Punto 2)
+def load_sliding_data():
+    res_path = get_results_path(HORIZON)
+    if os.path.exists(res_path):
+        try:
+            with open(res_path, "r") as f:
+                data = json.load(f)
+                if data.get("base_date") == target_dates[0]:
+                    st.session_state["scan_results"] = data.get("results", [])
+        except: pass
 
-    # Stessa cosa per gli snapshot (Drop)
-    for h in [1, 2, 3]:
-        path = get_snapshot_path(h)
-        if os.path.exists(path):
-            try:
-                with open(path, "r") as f:
-                    data = json.load(f)
-                    if data.get("base_date") == target_dates[0]:
-                        st.session_state["odds_memory"] = data.get("odds", {})
-                        return data.get("timestamp", "N/D")
-            except: pass
+    snap_path = get_snapshot_path(HORIZON)
+    if os.path.exists(snap_path):
+        try:
+            with open(snap_path, "r") as f:
+                data = json.load(f)
+                if data.get("base_date") == target_dates[0]:
+                    st.session_state["odds_memory"] = data.get("odds", {})
+                    return data.get("timestamp", "N/D")
+        except: pass
     return None
 
-snapshot_info = load_persisted_data()
+snap_info = load_sliding_data()
+if snap_info:
+    st.sidebar.success(f"📦 Dati caricati: {target_dates[0]}\nSnapshot: {snap_info}")
 
-if snapshot_info:
-    st.sidebar.success(f"📦 Dati caricati per: {target_dates[0]}\nSnapshot: {snapshot_info}")
-else:
-    st.sidebar.warning(f"⚠️ Nessun dato per: {target_dates[0]}")
+# Popolamento nazioni (solo se lista vuota)
+if not st.session_state["available_countries"]:
+    try:
+        with requests.Session() as s_init:
+            all_c = set()
+            d_init = target_dates[0]
+            data_init = api_get(s_init, "fixtures", {"date": d_init, "timezone": "Europe/Rome"})
+            for f_init in data_init.get("response", []): all_c.add(f_init["league"]["country"])
+            st.session_state["available_countries"] = sorted(list(all_c))
+    except: pass
 
 # ============================
 # LOGICA IBRIDA STATS (Punto 1)
 # ============================
+team_stats_cache = {}
+
 def get_stats(session, tid):
     if tid in team_stats_cache: return team_stats_cache[tid]
     try:
@@ -131,7 +140,7 @@ def get_stats(session, tid):
         fx = rx.get("response", [])
         if not fx: return {"ht5":0.0, "vul5":0.0, "o25_8":0.0, "gg8":0.0}
         
-        # Ultime 5 (Standard)
+        # 5 MATCH (Standard)
         fx5 = fx[:5]
         ht5 = sum(1 for f in fx5 if ((f["score"]["halftime"]["home"] or 0) + (f["score"]["halftime"]["away"] or 0)) >= 1) / len(fx5)
         
@@ -140,7 +149,7 @@ def get_stats(session, tid):
             return 1 if ((f["goals"]["away"] if is_h else f["goals"]["home"]) or 0) > 0 else 0
         vul5 = sum(1 for f in fx5 if is_conc(f, tid)) / len(fx5)
         
-        # Ultime 8 (Pesci)
+        # 8 MATCH (Pesci)
         act8 = len(fx)
         o25_8 = sum(1 for f in fx if ((f["goals"]["home"] or 0) + (f["goals"]["away"] or 0)) >= 3) / act8
         gg8 = sum(1 for f in fx if (f["goals"]["home"] or 0) > 0 and (f["goals"]["away"] or 0) > 0) / act8
@@ -194,7 +203,6 @@ def extract_markets(resp_json):
 # ============================
 def execute_scan(session, fixtures, snap_mem, excluded, min_rating_val):
     results, pb = [], st.progress(0)
-    # Filtro unico (Punto 3)
     filtered = [f for f in fixtures if f["league"]["country"] not in excluded and not any(k in f["league"]["name"].lower() for k in LEAGUE_KEYWORDS_BLACKLIST)]
     
     for i, m in enumerate(filtered):
@@ -205,7 +213,7 @@ def execute_scan(session, fixtures, snap_mem, excluded, min_rating_val):
             fid_s = str(m["fixture"]["id"])
             s_h, s_a = get_stats(session, m["teams"]["home"]["id"]), get_stats(session, m["teams"]["away"]["id"])
             
-            # Punto 1: Soglia 5 match (3/5)
+            # SOGLIA 5 MATCH (Punto 1)
             HT_OK = 1 if ((s_h["ht5"] + s_a["ht5"]) / 2 >= 0.6) else 0
             
             HAS_DROP = 0
@@ -224,7 +232,7 @@ def execute_scan(session, fixtures, snap_mem, excluded, min_rating_val):
             SIG_O25_BOOST = 1 if (HT_OK and (1.70 <= mk["o25"] <= 2.10) and (1.18 <= mk["o05ht"] <= 1.40) and (avg_vul >= 0.6 or f_stats["vul5"] >= 0.8)) else 0
             SIG_OVER_PRO = 1 if (O25_OK and (1.30 <= mk["o05ht"] <= 1.55) and HT_OK) else 0
 
-            # Punto 1: Soglia 8 match (6/8 = 0.75)
+            # SOGLIA 8 MATCH (Punto 1)
             FISH_O = 1 if (1.40 <= min(mk["q1"], mk["q2"]) <= 1.80 and f_stats["o25_8"] >= 0.75) else 0
             FISH_GG = 1 if (2.20 <= mk["q1"] <= 3.80 and 2.20 <= mk["q2"] <= 3.80 and s_h["gg8"] >= 0.75 and s_a["gg8"] >= 0.75) else 0
 
@@ -254,7 +262,7 @@ def execute_scan(session, fixtures, snap_mem, excluded, min_rating_val):
     return results
 
 # ============================
-# UI E RENDERING (Invariata come richiesto)
+# UI E RENDERING
 # ============================
 st.sidebar.subheader("🛡️ Audit Config")
 only_fav_gold = st.sidebar.toggle("🎯 SWEET SPOT FAV")
@@ -293,11 +301,13 @@ def run_scan(is_snap):
                     mk = extract_markets(api_get(s, "odds", {"fixture": m["fixture"]["id"]}))
                     if mk and mk["q1"] > 0: new_snap[str(m["fixture"]["id"])] = {"q1": mk["q1"], "q2": mk["q2"]}
                 st.session_state["odds_memory"] = new_snap
-                with open(get_snapshot_path(HORIZON), "w") as f: json.dump({"base_date": target_dates[0], "odds": new_snap, "timestamp": now_rome().strftime("%d/%m/%Y %H:%M")}, f)
+                with open(get_snapshot_path(HORIZON), "w") as f: 
+                    json.dump({"base_date": target_dates[0], "odds": new_snap, "timestamp": now_rome().strftime("%d/%m/%Y %H:%M")}, f)
             
             res = execute_scan(s, all_fixs, st.session_state["odds_memory"], st.session_state["excluded"], min_rating_ui)
             st.session_state["scan_results"] = res
-            with open(get_results_path(HORIZON), "w") as f: json.dump({"base_date": target_dates[0], "results": res}, f)
+            with open(get_results_path(HORIZON), "w") as f: 
+                json.dump({"base_date": target_dates[0], "results": res}, f)
             st.rerun()
         except Exception as e: st.error(str(e))
 
@@ -319,5 +329,5 @@ if st.session_state["scan_results"]:
     
     st.markdown("---")
     c1, c2 = st.columns(2)
-    c1.download_button("💾 CSV Audit", df.to_csv(index=False).encode('utf-8'), "audit.csv")
-    c2.download_button("🌐 HTML Report", f"<html><head>{CUSTOM_CSS}</head><body>{st_style.to_html(escape=False, index=False)}</body></html>".encode('utf-8'), "report.html")
+    c1.download_button("💾 CSV Audit", df.to_csv(index=False).encode('utf-8'), f"audit_{target_dates[0]}.csv")
+    c2.download_button("🌐 HTML Report", f"<html><head>{CUSTOM_CSS}</head><body>{st_style.to_html(escape=False, index=False)}</body></html>".encode('utf-8'), f"report_{target_dates[0]}.html")
