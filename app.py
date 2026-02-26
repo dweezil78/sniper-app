@@ -47,7 +47,7 @@ st.set_page_config(page_title="ARAB SNIPER V19.20 - TOTAL INTEGRITY", layout="wi
 # ============================
 API_KEY = st.secrets.get("API_SPORTS_KEY")
 if not API_KEY:
-    st.error("❌ API_SPORTS_KEY mancante!")
+    st.error("❌ API_SPORTS_KEY mancante nei Secrets!")
     st.stop()
 
 HEADERS = {"x-apisports-key": API_KEY}
@@ -68,7 +68,7 @@ def api_get(session, path, params, retries=2):
             time.sleep(1)
 
 # ============================
-# PERSISTENZA & INITIALIZATION
+# INITIALIZATION & PERSISTENZA
 # ============================
 team_stats_cache = {} 
 st.sidebar.header("👑 Arab Sniper Console")
@@ -100,6 +100,7 @@ if "excluded" not in st.session_state:
 
 target_dates = [(now_rome().date() + timedelta(days=i)).strftime("%Y-%m-%d") for i in range(HORIZON)]
 
+# Popolamento automatico nazioni per sidebar
 if not st.session_state["available_countries"]:
     try:
         with requests.Session() as s_init:
@@ -110,6 +111,7 @@ if not st.session_state["available_countries"]:
             st.session_state["available_countries"] = sorted(list(all_c))
     except: pass
 
+# Recupero automatico risultati
 RES_FILE = get_results_path(HORIZON)
 if st.session_state["scan_results"] is None and os.path.exists(RES_FILE):
     try:
@@ -150,21 +152,24 @@ def get_stats(session, tid):
         rx = api_get(session, "fixtures", {"team": tid, "last": 8, "status": "FT"})
         fx = rx.get("response", [])
         if not fx: return {"ht5":0.0, "vul5":0.0, "o25_8":0.0, "gg8":0.0}
+        
         fx5 = fx[:5]
         ht5 = sum(1 for f in fx5 if ((f["score"]["halftime"]["home"] or 0) + (f["score"]["halftime"]["away"] or 0)) >= 1) / len(fx5)
+        
         def is_conc(f, team_id):
             is_h = (f["teams"]["home"]["id"] == team_id)
             return 1 if ((f["goals"]["away"] if is_h else f["goals"]["home"]) or 0) > 0 else 0
+        
         vul5 = sum(1 for f in fx5 if is_conc(f, tid)) / len(fx5)
         act8 = len(fx)
         o25_8 = sum(1 for f in fx if ((f["goals"]["home"] or 0) + (f["goals"]["away"] or 0)) >= 3) / act8
         gg8 = sum(1 for f in fx if (f["goals"]["home"] or 0) > 0 and (f["goals"]["away"] or 0) > 0) / act8
+        
         res = {"ht5": ht5, "vul5": vul5, "o25_8": o25_8, "gg8": gg8}
         team_stats_cache[tid] = res
         return res
     except: return {"ht5":0.0, "vul5":0.0, "o25_8":0.0, "gg8":0.0}
 
-# FIX 5 & 3: Normalizzazione stringhe e verifica 1X2 robusta
 def extract_markets(resp_json):
     resp = resp_json.get("response", [])
     if not resp: return None
@@ -172,7 +177,7 @@ def extract_markets(resp_json):
     
     def pick_o(values, key_fragment):
         for x in values or []:
-            # Normalizzazione estrema: via spazi, parentesi e virgole
+            # Normalizzazione estrema (Patch #5): via spazi, parentesi e virgole
             v_norm = str(x.get("value") or "").lower().replace(" ", "").replace("(", "").replace(")", "").replace(",", ".")
             if key_fragment in v_norm:
                 try: return float(x.get("odd") or 0)
@@ -186,13 +191,11 @@ def extract_markets(resp_json):
             if bid == 1 and data["q1"] == 0:
                 v = b.get("values", [])
                 if len(v) >= 3:
-                    # Verifica Home/Draw/Away se possibile, altrimenti ordine standard
                     for val_obj in v:
                         v_name = str(val_obj.get("value") or "").lower()
                         if "home" in v_name: data["q1"] = float(val_obj["odd"])
                         elif "draw" in v_name: data["qx"] = float(val_obj["odd"])
                         elif "away" in v_name: data["q2"] = float(val_obj["odd"])
-                    # Fallback ordine se i nomi mancano
                     if data["q1"] == 0:
                         data["q1"], data["qx"], data["q2"] = float(v[0]["odd"]), float(v[1]["odd"]), float(v[2]["odd"])
             
@@ -211,16 +214,17 @@ def extract_markets(resp_json):
                 if data["o05ht"] == 0: data["o05ht"] = pick_o(b.get("values", []), "over0.5")
                 if data["o15ht"] == 0: data["o15ht"] = pick_o(b.get("values", []), "over1.5")
         
+        # Logica di uscita anticipata (Sbloccata per weekend)
         if data["q1"]>0 and data["o25"]>0 and data["o05ht"]>0 and (data["o15ht"]>0 or data["gg_ht"]>0): break
         if ibm >= 4 and data["q1"]>0 and data["o25"]>0: break 
     return data
 
 # ============================
-# CORE ENGINE: PATCHED LOGIC
+# CORE ENGINE: PATCHED INTEGRITY
 # ============================
 def execute_scan(session, fixtures, snap_mem, excluded, min_rating_val):
     results, pb = [], st.progress(0)
-    # FIX 4: Filtro unico centralizzato
+    # Filtro centralizzato blacklist leghe (Patch #4)
     filtered = [f for f in fixtures if f["league"]["country"] not in excluded and not any(k in f["league"]["name"].lower() for k in LEAGUE_KEYWORDS_BLACKLIST)]
     
     for i, m in enumerate(filtered):
@@ -235,23 +239,21 @@ def execute_scan(session, fixtures, snap_mem, excluded, min_rating_val):
             
             HT_OK = 1 if ((s_h["ht5"] + s_a["ht5"]) / 2 >= 0.55) else 0
             
-            # FIX 1: Drop a due vie (Max Drop)
+            # --- PATCH #1: DROP DINAMICO A DUE VIE ---
             HAS_DROP = 0
             if fid_s in snap_mem:
-                snap_q1 = snap_mem[fid_s].get("q1", 0)
-                snap_q2 = snap_mem[fid_s].get("q2", 0)
-                if snap_q1 > 0 and snap_q2 > 0:
-                    drop_q1 = snap_q1 - mk["q1"]
-                    drop_q2 = snap_q2 - mk["q2"]
-                    if max(drop_q1, drop_q2) >= 0.15:
-                        HAS_DROP = 1
+                old_q1 = float(snap_mem[fid_s].get("q1") or 0)
+                old_q2 = float(snap_mem[fid_s].get("q2") or 0)
+                drop_q1 = old_q1 - mk["q1"] if old_q1 > 0 else 0
+                drop_q2 = old_q2 - mk["q2"] if old_q2 > 0 else 0
+                HAS_DROP = 1 if max(drop_q1, drop_q2) >= 0.15 else 0
 
             O25_OK = 1 if (1.70 <= mk["o25"] < 2.00) else 0
             
-            # FIX 2: GATE_11 Flessibile (A due vie)
-            cond_o15 = (2.20 <= mk["o15ht"] <= 2.80)
-            cond_gg = (4.20 <= mk["gg_ht"] <= 5.50)
-            GATE_11 = 1 if (HT_OK and (cond_o15 or cond_gg)) else 0
+            # --- PATCH #2: GATE_11 FLESSIBILE ---
+            gate_o15 = (2.20 <= mk["o15ht"] <= 2.80)
+            gate_gg  = (4.20 <= mk["gg_ht"]  <= 5.50)
+            GATE_11 = 1 if (HT_OK and (gate_o15 or gate_gg)) else 0
             
             fav_side = "q1" if mk["q1"] < mk["q2"] else "q2"
             fav_stats = s_h if fav_side == "q1" else s_a
@@ -322,7 +324,6 @@ def run_scan(is_snap):
             all_fixs = []
             for d_run in target_dates:
                 data_run = api_get(s_run, "fixtures", {"date": d_run, "timezone": "Europe/Rome"})
-                # Filtro blacklist qui rimosso per centralizzare in execute_scan come richiesto
                 all_fixs.extend([f for f in data_run.get("response", []) if f["fixture"]["status"]["short"] == "NS"])
             
             if is_snap:
