@@ -13,11 +13,18 @@ from pathlib import Path
 BASE_DIR = Path(__file__).resolve().parent
 NAZIONI_FILE = str(BASE_DIR / "nazioni_config.json")
 
+# Nazioni escluse di default
 DEFAULT_EXCLUDED = [
     "Thailand", "Indonesia", "India", "Kenya", "Morocco", "Rwanda", 
     "Macedonia", "Nigeria", "Ivory-Coast", "Oman", "El-Salvador", 
     "Ethiopia", "Cameroon", "Jordan", "Algeria", "South-Africa",
     "Tanzania", "Montenegro", "UAE", "Guatemala", "Costa-Rica"
+]
+
+# Parole chiave per escludere leghe minori o non idonee
+LEAGUE_KEYWORDS_BLACKSLIST = [
+    "regionalliga", "carioca", "paulista", "pernambucano", "gaucho", 
+    "mineiro", "youth", "friendly", "u19", "u20", "u21", "u23", "women", "cup"
 ]
 
 try:
@@ -35,7 +42,7 @@ def get_snapshot_path(horizon):
 def get_results_path(horizon):
     return str(BASE_DIR / f"last_results_{horizon}d.json")
 
-st.set_page_config(page_title="ARAB SNIPER V18.40 - AUDITOR LINK", layout="wide")
+st.set_page_config(page_title="ARAB SNIPER V19.00 - WEEKEND MANAGER", layout="wide")
 
 # ============================
 # API CORE
@@ -62,7 +69,6 @@ def api_get(session, path, params, retries=2):
 # INITIALIZATION & PERSISTENZA
 # ============================
 team_stats_cache = {} 
-
 st.sidebar.header("👑 Arab Sniper Console")
 st.sidebar.markdown("---")
 HORIZON = st.sidebar.selectbox("Orizzonte Scan:", options=[1, 2, 3], index=0)
@@ -92,7 +98,7 @@ if "excluded" not in st.session_state:
 
 target_dates = [(now_rome().date() + timedelta(days=i)).strftime("%Y-%m-%d") for i in range(HORIZON)]
 
-# Caricamento nazioni per filtro
+# Auto-popolamento nazioni per filtro sidebar
 if not st.session_state["available_countries"]:
     try:
         with requests.Session() as s_fix:
@@ -120,9 +126,8 @@ if os.path.exists(SNAP_FILE):
         with open(SNAP_FILE, "r") as f:
             saved = json.load(f)
             snapshot_info = saved.get("timestamp", "N/D")
-            if not st.session_state["odds_memory"]:
-                if saved.get("base_date") == target_dates[0]:
-                    st.session_state["odds_memory"] = saved.get("odds", {})
+            if not st.session_state["odds_memory"] and saved.get("base_date") == target_dates[0]:
+                st.session_state["odds_memory"] = saved.get("odds", {})
     except: pass
 
 if snapshot_info:
@@ -137,26 +142,35 @@ if st.sidebar.button(f"🧹 Reset Snapshot ({HORIZON}d)"):
     st.rerun()
 
 # ============================
-# LOGICA STATISTICHE (8 MATCH)
+# LOGICA IBRIDA STATS (5 vs 8 Match)
 # ============================
 def get_stats(session, tid):
     if tid in team_stats_cache: return team_stats_cache[tid]
     try:
+        # Chiediamo 8 per avere entrambi i dati (5 e 8) con una sola chiamata
         rx = api_get(session, "fixtures", {"team": tid, "last": 8, "status": "FT"})
         fx = rx.get("response", [])
-        if not fx: return {"ht_ratio": 0.0, "vulnerability": 0.0, "o25_ratio": 0.0, "gg_ratio": 0.0}
-        ht, conc, o25, gg = 0, 0, 0, 0
-        actual = len(fx)
-        for f in fx:
-            if ((f.get("score",{}).get("halftime",{}).get("home") or 0) + (f.get("score",{}).get("halftime",{}).get("away") or 0)) >= 1: ht += 1
-            is_home = (f["teams"]["home"]["id"] == tid)
-            if ((f["goals"]["away"] if is_home else f["goals"]["home"]) or 0) > 0: conc += 1
-            if ((f["goals"]["home"] or 0) + (f["goals"]["away"] or 0)) >= 3: o25 += 1
-            if (f["goals"]["home"] or 0) > 0 and (f["goals"]["away"] or 0) > 0: gg += 1
-        res = {"ht_ratio": ht/actual, "vulnerability": conc/actual, "o25_ratio": o25/actual, "gg_ratio": gg/actual}
+        if not fx: return {"ht5":0.0, "vul5":0.0, "o25_8":0.0, "gg8":0.0}
+        
+        # Sottogruppo ultime 5 per segnali standard
+        fx5 = fx[:5]
+        ht5 = sum(1 for f in fx5 if ((f["score"]["halftime"]["home"] or 0) + (f["score"]["halftime"]["away"] or 0)) >= 1) / len(fx5)
+        
+        def is_conc(f, team_id):
+            is_h = (f["teams"]["home"]["id"] == team_id)
+            return 1 if ((f["goals"]["away"] if is_h else f["goals"]["home"]) or 0) > 0 else 0
+        
+        vul5 = sum(1 for f in fx5 if is_conc(f, tid)) / len(fx5)
+        
+        # Gruppo totale ultime 8 per Pesci
+        actual8 = len(fx)
+        o25_8 = sum(1 for f in fx if ((f["goals"]["home"] or 0) + (f["goals"]["away"] or 0)) >= 3) / actual8
+        gg8 = sum(1 for f in fx if (f["goals"]["home"] or 0) > 0 and (f["goals"]["away"] or 0) > 0) / actual8
+        
+        res = {"ht5": ht5, "vul5": vul5, "o25_8": o25_8, "gg8": gg8}
         team_stats_cache[tid] = res
         return res
-    except: return {"ht_ratio": 0.0, "vulnerability": 0.0, "o25_ratio": 0.0, "gg_ratio": 0.0}
+    except: return {"ht5":0.0, "vul5":0.0, "o25_8":0.0, "gg8":0.0}
 
 def extract_markets(resp_json):
     resp = resp_json.get("response", [])
@@ -199,11 +213,13 @@ def extract_markets(resp_json):
     return data
 
 # ============================
-# CORE ENGINE: PRO LOGIC
+# CORE ENGINE: HYBRID LOGIC
 # ============================
 def execute_scan(session, fixtures, snap_mem, excluded, min_rating_val):
     results, pb = [], st.progress(0)
-    filtered = [f for f in fixtures if f["league"]["country"] not in excluded]
+    # Filtro nazioni + Filtro Deep Blacklist Leghe
+    filtered = [f for f in fixtures if f["league"]["country"] not in excluded and not any(k in f["league"]["name"].lower() for k in LEAGUE_KEYWORDS_BLACKSLIST)]
+    
     if not filtered: pb.progress(1.0); return []
 
     for i, m in enumerate(filtered):
@@ -218,20 +234,19 @@ def execute_scan(session, fixtures, snap_mem, excluded, min_rating_val):
             fav_side = "q1" if mk["q1"] < mk["q2"] else "q2"
             f_s, d_s = (s_h, s_a) if fav_side == "q1" else (s_a, s_h)
 
-            # SOGLIA 5/8 (0.625)
-            HT_OK = 1 if (s_h["ht_ratio"] >= 0.625 and s_a["ht_ratio"] >= 0.625) else 0
+            # --- LOGICA 5 MATCH (STANDARD) ---
+            HT_OK = 1 if (s_h["ht5"] >= 0.6 and s_a["ht5"] >= 0.6) else 0
             O25_OK = 1 if (1.70 <= mk["o25"] < 2.00) else 0
             GATE_11 = 1 if ((2.20 <= mk["o15ht"] <= 2.80) and (4.20 <= mk["gg_ht"] <= 5.50) and HT_OK) else 0
             HAS_DROP = 1 if (fid_s in snap_mem and (snap_mem[fid_s].get("fav_odd", 0) - mk[snap_mem[fid_s].get("fav_side", "q1")]) >= 0.15) else 0
-
-            SIG_GG_PT = 1 if (GATE_11 and f_s["vulnerability"] >= 0.625) else 0
-            avg_vul = (s_h["vulnerability"] + s_a["vulnerability"]) / 2
-            SIG_O25_BOOST = 1 if (HT_OK and (1.70 <= mk["o25"] <= 2.10) and (1.18 <= mk["o05ht"] <= 1.40) and (avg_vul >= 0.625 or f_s["vulnerability"] >= 0.75)) else 0
+            SIG_GG_PT = 1 if (GATE_11 and f_s["vul5"] >= 0.6) else 0
+            avg_vul = (s_h["vul5"] + s_a["vul5"]) / 2
+            SIG_O25_BOOST = 1 if (HT_OK and (1.70 <= mk["o25"] <= 2.10) and (1.18 <= mk["o05ht"] <= 1.40) and (avg_vul >= 0.6 or f_s["vul5"] >= 0.8)) else 0
             SIG_OVER_PRO = 1 if (O25_OK and (1.30 <= mk["o05ht"] <= 1.55) and HT_OK) else 0
 
-            # STRATEGIA PESCI
-            FISH_O = 1 if (1.40 <= min(mk["q1"], mk["q2"]) <= 1.80 and f_s["o25_ratio"] >= 0.625) else 0
-            FISH_GG = 1 if (2.20 <= mk["q1"] <= 3.80 and 2.20 <= mk["q2"] <= 3.80 and s_h["gg_ratio"] >= 0.625 and s_a["gg_ratio"] >= 0.625) else 0
+            # --- LOGICA 8 MATCH (PESCI - SOGLIA 6/8=0.75) ---
+            FISH_O = 1 if (1.40 <= min(mk["q1"], mk["q2"]) <= 1.80 and f_s["o25_8"] >= 0.75) else 0
+            FISH_GG = 1 if (2.20 <= mk["q1"] <= 3.80 and 2.20 <= mk["q2"] <= 3.80 and s_h["gg8"] >= 0.75 and s_a["gg8"] >= 0.75) else 0
 
             det = []
             if HT_OK: det.append("HT-OK")
@@ -244,7 +259,6 @@ def execute_scan(session, fixtures, snap_mem, excluded, min_rating_val):
             if FISH_O: det.append("🐟O")
             if FISH_GG: det.append("🐟GG")
 
-            # RATING
             b_seg = max((25 if SIG_GG_PT else 0), (30 if SIG_O25_BOOST else (20 if SIG_OVER_PRO else 0)))
             b_drop = (30 if HAS_DROP else 0)
             b_fish = (10 if (FISH_O or FISH_GG) else 0)
@@ -252,8 +266,8 @@ def execute_scan(session, fixtures, snap_mem, excluded, min_rating_val):
 
             if rating >= min_rating_val:
                 results.append({
-                    "Fixture_ID": m["fixture"]["id"], # INDISPENSABILE PER AUDITOR
-                    "Data": match_date, "Ora": m["fixture"]["date"][11:16], "Lega": f"{m['league']['name']} ({m['league']['country']})", "Match": f"{m['teams']['home']['name']} - {m['teams']['away']['name']}",
+                    "Fixture_ID": m["fixture"]["id"], "Data": match_date, "Ora": m["fixture"]["date"][11:16], 
+                    "Lega": f"{m['league']['name']} ({m['league']['country']})", "Match": f"{m['teams']['home']['name']} - {m['teams']['away']['name']}",
                     "1X2": f"{mk['q1']:.2f}|{mk['qx']:.2f}|{mk['q2']:.2f}", "O2.5": f"{mk['o25']:.2f}", "O0.5HT": f"{mk['o05ht']:.2f}", "O1.5HT": f"{mk['o15ht']:.2f}", "GGPT": f"{mk['gg_ht']:.2f}",
                     "Info": f"[{'|'.join(det)}]", "Rating": rating, "Gold": "✅" if (1.40 <= min(mk["q1"], mk["q2"]) <= 2.10) else "❌",
                     "Is_Gold_Bool": (1.40 <= min(mk["q1"], mk["q2"]) <= 2.10), "O25_OK": O25_OK
@@ -318,6 +332,7 @@ def run_scan(is_snap):
                         if mk and mk["q1"] > 0:
                             fs = "q1" if mk["q1"] < mk["q2"] else "q2"
                             new_snap[fid] = {"fav_side": fs, "fav_odd": mk[fs], "q1": mk["q1"], "q2": mk["q2"]}
+                else: pb_s.progress(1.0)
                 st.session_state["odds_memory"] = new_snap
                 ts = now_rome().strftime("%d/%m/%Y %H:%M")
                 with open(get_snapshot_path(HORIZON), "w") as f:
@@ -341,22 +356,23 @@ if st.session_state["scan_results"]:
         if only_o25_gold: df = df[df["O25_OK"] == 1]
     
     if df.empty:
-        st.warning("Nessun match trovato.")
+        st.warning("Nessun match trovato con i filtri attuali.")
     else:
         def style_row(row):
             if '🎯 GG-PT' in row['Info']: return ['background-color: #38003c; color: #00e5ff;' for _ in row]
             if '💣 O25-BOOST' in row['Info']: return ['background-color: #003300; color: #00ff00;' for _ in row] 
             return ['' for _ in row]
         
-        # DISPLAY_COLS: ESCLUDE Fixture_ID dalla vista utente
         DISPLAY_COLS = ["Data", "Ora", "Lega", "Match", "1X2", "O2.5", "O0.5HT", "O1.5HT", "GGPT", "Info", "Rating", "Gold"]
         st_style = df[DISPLAY_COLS].sort_values(["Data", "Ora"]).style.apply(style_row, axis=1)
         st.write(st_style.to_html(escape=False, index=False), unsafe_allow_html=True)
         
+        with st.expander("📖 GUIDA"):
+            st.markdown("* **💣 BOOST:** Over 2.5 (5 match). * **🎯 GG-PT:** Gol 1T (5 match). * **🐟O:** Dominio (8 match). * **🐟GG:** Scambio (8 match).")
+
         st.markdown("---")
-        st.subheader("💾 Esporta Dati")
+        st.subheader("💾 Esporta Dati Audit")
         c1, c2 = st.columns(2)
-        # Il CSV scaricato conterrà TUTTE le colonne (incluso Fixture_ID) per l'Auditor
         c1.download_button(f"💾 CSV Audit ({HORIZON}d)", df.to_csv(index=False).encode('utf-8'), f"audit_{HORIZON}d.csv")
         h_out = f"<html><head>{CUSTOM_CSS}</head><body>{st_style.to_html(escape=False, index=False)}</body></html>"
         c2.download_button(f"🌐 HTML Report ({HORIZON}d)", h_out.encode('utf-8'), f"report_{HORIZON}d.html")
