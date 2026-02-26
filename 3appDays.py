@@ -8,8 +8,7 @@ import time
 from pathlib import Path
 
 # ============================
-# CONFIGURAZIONE V19.60 - SECURITY & PRECISION
-# (Integrata con fix mercati HT + safety)
+# CONFIGURAZIONE V20.00 - INCREMENTAL MASTER
 # ============================
 BASE_DIR = Path(__file__).resolve().parent
 NAZIONI_FILE = str(BASE_DIR / "nazioni_config.json")
@@ -45,14 +44,14 @@ def get_results_path(horizon):
     return str(BASE_DIR / f"last_results_{horizon}d.json")
 
 
-st.set_page_config(page_title="ARAB SNIPER V19.60 - SECURITY & PRECISION", layout="wide")
+st.set_page_config(page_title="ARAB SNIPER V20.00 - INCREMENTAL MASTER", layout="wide")
 
 # ============================
-# API CORE & SECURITY CHECK (Fix Critico #1)
+# API CORE & SECURITY
 # ============================
 API_KEY = st.secrets.get("API_SPORTS_KEY")
 if not API_KEY:
-    st.error("⚠️ Manca API_SPORTS_KEY nei Secrets di Streamlit Cloud. Controlla la configurazione.")
+    st.error("❌ API_SPORTS_KEY mancante nei Secrets!")
     st.stop()
 
 HEADERS = {"x-apisports-key": API_KEY}
@@ -61,45 +60,33 @@ HEADERS = {"x-apisports-key": API_KEY}
 def api_get(session, path, params, retries=2):
     for i in range(retries + 1):
         try:
-            r = session.get(
-                f"https://v3.football.api-sports.io/{path}",
-                headers=HEADERS,
-                params=params,
-                timeout=25
-            )
+            r = session.get(f"https://v3.football.api-sports.io/{path}", headers=HEADERS, params=params, timeout=25)
             if r.status_code == 429 and i < retries:
                 time.sleep(1.5 * (i + 1))
                 continue
             r.raise_for_status()
             js = r.json()
-            if js.get("errors"):
-                raise RuntimeError(f"API Errors: {js['errors']}")
+            if js.get("errors"): raise RuntimeError(f"API Errors: {js['errors']}")
             return js
         except Exception as e:
-            if i == retries:
-                raise e
+            if i == retries: raise e
             time.sleep(1)
 
-
 # ============================
-# INITIALIZATION & SLIDING WINDOW
+# INITIALIZATION & PERSISTENZA
 # ============================
 if "excluded" not in st.session_state:
     if os.path.exists(NAZIONI_FILE):
         try:
             with open(NAZIONI_FILE, "r") as f:
                 st.session_state["excluded"] = list(json.load(f).get("excluded", DEFAULT_EXCLUDED))
-        except Exception:
-            st.session_state["excluded"] = DEFAULT_EXCLUDED
+        except: st.session_state["excluded"] = DEFAULT_EXCLUDED
     else:
         st.session_state["excluded"] = DEFAULT_EXCLUDED
 
-if "available_countries" not in st.session_state:
-    st.session_state["available_countries"] = []
-if "odds_memory" not in st.session_state:
-    st.session_state["odds_memory"] = {}
-if "scan_results" not in st.session_state:
-    st.session_state["scan_results"] = None
+if "available_countries" not in st.session_state: st.session_state["available_countries"] = []
+if "odds_memory" not in st.session_state: st.session_state["odds_memory"] = {}
+if "scan_results" not in st.session_state: st.session_state["scan_results"] = None
 
 st.sidebar.header("👑 Arab Sniper Console")
 st.sidebar.markdown("---")
@@ -110,8 +97,7 @@ if "current_horizon" not in st.session_state or st.session_state["current_horizo
     st.session_state["scan_results"] = None
     st.session_state["current_horizon"] = HORIZON
 
-target_dates = [(now_rome().date() + timedelta(days=i)).strftime("%Y-%m-%d") for i in range(HORIZON)]
-
+target_dates = [(now_rome().date() + timedelta(days=i)).strftime("%Y-%m-%d") for i in range(3)]
 
 def load_sliding_data():
     res_path = get_results_path(HORIZON)
@@ -121,8 +107,7 @@ def load_sliding_data():
                 data = json.load(f)
                 if data.get("base_date") == target_dates[0]:
                     st.session_state["scan_results"] = data.get("results", [])
-        except Exception:
-            pass
+        except: pass
 
     snap_path = get_snapshot_path(HORIZON)
     if os.path.exists(snap_path):
@@ -132,415 +117,251 @@ def load_sliding_data():
                 if data.get("base_date") == target_dates[0]:
                     st.session_state["odds_memory"] = data.get("odds", {})
                     return data.get("timestamp", "N/D")
-        except Exception:
-            pass
+        except: pass
     return None
 
-
-snap_info = load_sliding_data()
-if snap_info:
-    st.sidebar.success(f"📦 Dati caricati: {target_dates[0]}\nSnapshot: {snap_info}")
+snapshot_info = load_sliding_data()
+if snapshot_info:
+    st.sidebar.success(f"📦 Dati caricati: {target_dates[0]}\nSnapshot: {snapshot_info}")
 
 if not st.session_state["available_countries"]:
     try:
         with requests.Session() as s_init:
             all_c = set()
-            d_init = target_dates[0]
-            data_init = api_get(s_init, "fixtures", {"date": d_init, "timezone": "Europe/Rome"})
-            for f_init in data_init.get("response", []):
-                all_c.add(f_init["league"]["country"])
+            data_init = api_get(s_init, "fixtures", {"date": target_dates[0], "timezone": "Europe/Rome"})
+            for f_init in data_init.get("response", []): all_c.add(f_init["league"]["country"])
             st.session_state["available_countries"] = sorted(list(all_c))
-    except Exception:
-        pass
+    except: pass
+
+if st.sidebar.button(f"🧹 Reset Snapshot ({HORIZON}d)"):
+    try: os.remove(get_snapshot_path(HORIZON))
+    except: pass
+    st.session_state["odds_memory"] = {}
+    st.rerun()
 
 # ============================
-# LOGICA IBRIDA STATS
+# LOGICA STATISTICHE (8 MATCH)
 # ============================
 team_stats_cache = {}
 
-
 def get_stats(session, tid):
-    if tid in team_stats_cache:
-        return team_stats_cache[tid]
+    if tid in team_stats_cache: return team_stats_cache[tid]
     try:
         rx = api_get(session, "fixtures", {"team": tid, "last": 8, "status": "FT"})
         fx = rx.get("response", [])
-        if not fx:
-            return {"ht5": 0.0, "vul5": 0.0, "o25_8": 0.0, "gg8": 0.0}
-
-        fx5 = fx[:5]
-        ht5 = sum(
-            1 for f in fx5
-            if ((f["score"]["halftime"]["home"] or 0) + (f["score"]["halftime"]["away"] or 0)) >= 1
-        ) / len(fx5)
-
-        def is_conc(f, team_id):
-            is_h = (f["teams"]["home"]["id"] == team_id)
-            return 1 if ((f["goals"]["away"] if is_h else f["goals"]["home"]) or 0) > 0 else 0
-
-        vul5 = sum(1 for f in fx5 if is_conc(f, tid)) / len(fx5)
-
-        act8 = len(fx)
-        o25_8 = sum(
-            1 for f in fx
-            if ((f["goals"]["home"] or 0) + (f["goals"]["away"] or 0)) >= 3
-        ) / act8
-
-        gg8 = sum(
-            1 for f in fx
-            if (f["goals"]["home"] or 0) > 0 and (f["goals"]["away"] or 0) > 0
-        ) / act8
-
-        res = {"ht5": ht5, "vul5": vul5, "o25_8": o25_8, "gg8": gg8}
+        if not fx: return {"ht_ratio": 0.0, "vulnerability": 0.0, "o25_ratio": 0.0, "gg_ratio": 0.0}
+        ht, conc, o25, gg = 0, 0, 0, 0
+        actual = len(fx)
+        for f in fx:
+            if ((f.get("score",{}).get("halftime",{}).get("home") or 0) + (f.get("score",{}).get("halftime",{}).get("away") or 0)) >= 1: ht += 1
+            is_home = (f["teams"]["home"]["id"] == tid)
+            if ((f["goals"]["away"] if is_home else f["goals"]["home"]) or 0) > 0: conc += 1
+            if ((f["goals"]["home"] or 0) + (f["goals"]["away"] or 0)) >= 3: o25 += 1
+            if (f["goals"]["home"] or 0) > 0 and (f["goals"]["away"] or 0) > 0: gg += 1
+        res = {"ht_ratio": ht/actual, "vulnerability": conc/actual, "o25_ratio": o25/actual, "gg_ratio": gg/actual}
         team_stats_cache[tid] = res
         return res
-    except Exception:
-        return {"ht5": 0.0, "vul5": 0.0, "o25_8": 0.0, "gg8": 0.0}
+    except: return {"ht_ratio": 0.0, "vulnerability": 0.0, "o25_ratio": 0.0, "gg_ratio": 0.0}
 
-
-# ============================
-# FIX MERCATI HT (O0.5PT / GGPT) - VERSIONE INCOLLA TUTTO
-# ============================
 def extract_markets(resp_json):
     resp = resp_json.get("response", [])
-    if not resp:
-        return None
+    if not resp: return None
+    data = {"q1":0.0, "qx":0.0, "q2":0.0, "o25":0.0, "o05ht":0.0, "o15ht":0.0, "gg_ht":0.0}
+    def clean(s): return str(s or "").lower().replace(" ", "").replace("(", "").replace(")", "").replace("-", "").replace(",", ".")
 
-    data = {
-        "q1": 0.0, "qx": 0.0, "q2": 0.0,
-        "o25": 0.0, "o05ht": 0.0, "o15ht": 0.0,
-        "gg_ht": 0.0
-    }
-
-    def clean(s: str) -> str:
-        return (
-            str(s or "")
-            .lower()
-            .replace(" ", "")
-            .replace("(", "")
-            .replace(")", "")
-            .replace("-", "")
-            .replace("/", "")
-            .replace(",", ".")
-        )
-
-    def map_1x2_values(values):
-        nonlocal data
-        if not values or len(values) < 3:
-            return
-
-        # mapping per label quando disponibile
-        for vo in values:
-            vn = clean(vo.get("value"))
-            odd = float(vo.get("odd") or 0)
-            if odd <= 0:
-                continue
-            if "home" in vn or vn in ["1", "team1"]:
-                data["q1"] = data["q1"] or odd
-            elif "draw" in vn or vn in ["x"]:
-                data["qx"] = data["qx"] or odd
-            elif "away" in vn or vn in ["2", "team2"]:
-                data["q2"] = data["q2"] or odd
-
-        # fallback su ordine
-        if data["q1"] == 0 and data["qx"] == 0 and data["q2"] == 0:
-            data["q1"], data["qx"], data["q2"] = (
-                float(values[0].get("odd") or 0),
-                float(values[1].get("odd") or 0),
-                float(values[2].get("odd") or 0),
-            )
-
-    bookmakers = resp[0].get("bookmakers", [])
-    if not bookmakers:
-        return data
-
-    for ibm, bm in enumerate(bookmakers):
+    for ibm, bm in enumerate(resp[0].get("bookmakers", [])):
         for b in bm.get("bets", []):
-            bid = b.get("id")
-            name = clean(b.get("name"))
-
-            # --- 1X2 ---
+            bid, name_raw = b.get("id"), str(b.get("name") or "").lower()
+            name_clean = clean(name_raw)
+            
             if bid == 1 and data["q1"] == 0:
-                map_1x2_values(b.get("values", []))
-
-            # --- Over 2.5 FT ---
+                v = b.get("values", [])
+                if len(v) >= 3:
+                    for vo in v:
+                        vn = clean(vo.get("value"))
+                        if "home" in vn: data["q1"] = float(vo["odd"])
+                        elif "draw" in vn: data["qx"] = float(vo["odd"])
+                        elif "away" in vn: data["q2"] = float(vo["odd"])
+            
             if bid == 5 and data["o25"] == 0:
                 for x in b.get("values", []):
-                    vn = clean(x.get("value"))
-                    if "over2.5" in vn:
-                        data["o25"] = float(x.get("odd") or 0)
-                        break
-
-            # --- 1° TEMPO: SOLO se esplicito (evita 2nd half) ---
-            is_first_half = (
-                ("1st" in name) or
-                ("firsthalf" in name) or
-                (("first" in name) and ("half" in name))
-            )
-            is_second_half = (
-                ("2nd" in name) or
-                ("secondhalf" in name) or
-                (("second" in name) and ("half" in name))
-            )
+                    if clean(x.get("value")) == "over2.5":
+                        data["o25"] = float(x.get("odd") or 0); break
+            
+            is_btts = any(k in name_raw for k in ["btts", "both", "gg"])
+            is_first_half = (("1st" in name_raw) or ("firsthalf" in name_clean) or (("first" in name_raw) and ("half" in name_raw)))
+            is_second_half = ("2nd" in name_raw) or ("secondhalf" in name_clean) or (("second" in name_raw) and ("half" in name_raw))
             is_1h = is_first_half and not is_second_half
-
-            # --- BTTS 1° tempo (GG1T) ---
-            is_btts = any(k in name for k in ["btts", "both", "gg"])
+            
             if (bid == 71 or (is_btts and is_1h)) and data["gg_ht"] == 0:
                 for x in b.get("values", []):
                     vn = clean(x.get("value"))
-                    if vn.startswith("yes") or vn.startswith("si") or vn.startswith("oui"):
-                        data["gg_ht"] = float(x.get("odd") or 0)
-                        break
-
-            # --- Over/Under 1° tempo ---
-            if is_1h and any(k in name for k in ["overunder", "total", "goals"]):
+                    if vn in ["yes", "si", "oui"]: data["gg_ht"] = float(x.get("odd") or 0); break
+            
+            if is_1h and any(k in name_raw for k in ["over/under", "total"]):
                 for x in b.get("values", []):
                     vn = clean(x.get("value"))
-                    odd = float(x.get("odd") or 0)
-                    if odd <= 0:
-                        continue
-                    if "over0.5" in vn and data["o05ht"] == 0:
-                        data["o05ht"] = odd
-                    elif "over1.5" in vn and data["o15ht"] == 0:
-                        data["o15ht"] = odd
-
-        # Break “intelligente”: non uscire prima di prendere almeno o15ht o gg_ht
-        if (
-            data["q1"] > 0 and data["o25"] > 0 and data["o05ht"] > 0
-            and (data["o15ht"] > 0 or data["gg_ht"] > 0)
-        ):
-            break
-
-        if ibm >= 5:
-            break
-
+                    odd_val = float(x.get("odd") or 0)
+                    if vn == "over0.5" and data["o05ht"] == 0:
+                        if odd_val < 1.75: data["o05ht"] = odd_val
+                    if vn == "over1.5" and data["o15ht"] == 0: data["o15ht"] = odd_val
+        
+        if data["q1"]>0 and data["o25"]>0 and data["o05ht"]>0 and (data["o15ht"]>0 or data["gg_ht"]>0): break
     return data
-
 
 # ============================
 # CORE ENGINE
 # ============================
 def execute_scan(session, fixtures, snap_mem, excluded, min_rating_val):
-    results = []
-
-    filtered = [
-        f for f in fixtures
-        if f["league"]["country"] not in excluded
-        and not any(k in f["league"]["name"].lower() for k in LEAGUE_KEYWORDS_BLACKLIST)
-    ]
-
-    # Fix safety: evita divisione per zero / progress su lista vuota
-    if not filtered:
-        return []
-
-    pb = st.progress(0)
-
+    results, pb = [], st.progress(0)
+    filtered = [f for f in fixtures if f["league"]["country"] not in excluded and not any(k in f["league"]["name"].lower() for k in LEAGUE_KEYWORDS_BLACKLIST)]
+    
     for i, m in enumerate(filtered):
-        pb.progress((i + 1) / len(filtered))
+        pb.progress((i+1)/len(filtered))
         try:
             mk = extract_markets(api_get(session, "odds", {"fixture": m["fixture"]["id"]}))
-            if not mk or mk["q1"] <= 0:
-                continue
-
+            if not mk or mk["q1"] <= 0: continue
             fid_s = str(m["fixture"]["id"])
-            s_h = get_stats(session, m["teams"]["home"]["id"])
-            s_a = get_stats(session, m["teams"]["away"]["id"])
-
-            HT_OK = 1 if ((s_h["ht5"] + s_a["ht5"]) / 2 >= 0.6) else 0
-
+            s_h, s_a = get_stats(session, m["teams"]["home"]["id"]), get_stats(session, m["teams"]["away"]["id"])
+            
+            HT_OK = 1 if (s_h["ht_ratio"] >= 0.625 and s_a["ht_ratio"] >= 0.625) else 0
+            
             HAS_DROP = 0
             if fid_s in snap_mem:
-                sq1 = float(snap_mem[fid_s].get("q1", 0))
-                sq2 = float(snap_mem[fid_s].get("q2", 0))
-                if max(sq1 - mk["q1"], sq2 - mk["q2"]) >= 0.15:
-                    HAS_DROP = 1
+                sq1, sq2 = float(snap_mem[fid_s].get("q1", 0)), float(snap_mem[fid_s].get("q2", 0))
+                if max(sq1 - mk["q1"], sq2 - mk["q2"]) >= 0.15: HAS_DROP = 1
 
             O25_OK = 1 if (1.70 <= mk["o25"] < 2.00) else 0
-            gate_o15 = (2.20 <= mk["o15ht"] <= 2.80)
-            gate_gg = (4.20 <= mk["gg_ht"] <= 5.50)
+            gate_o15, gate_gg = (2.20 <= mk["o15ht"] <= 2.80), (4.20 <= mk["gg_ht"] <= 5.50)
             GATE_11 = 1 if (HT_OK and (gate_o15 or gate_gg)) else 0
-
+            
             fav_side = "q1" if mk["q1"] < mk["q2"] else "q2"
             f_stats = s_h if fav_side == "q1" else s_a
+            
+            SIG_GG_PT = 1 if (GATE_11 and f_stats["vulnerability"] >= 0.6) else 0
+            avg_vul = (s_h["vulnerability"] + s_a["vulnerability"]) / 2
+            
+            SIG_O25_BOOST = 1 if (HT_OK and (1.60 <= mk["o25"] <= 2.15) and (1.20 <= mk["o05ht"] <= 1.55) and (avg_vul >= 0.6 or f_stats["vulnerability"] >= 0.75)) else 0
+            SIG_OVER_PRO = 1 if (O25_OK and (1.20 <= mk["o05ht"] <= 1.55) and HT_OK) else 0
 
-            SIG_GG_PT = 1 if (GATE_11 and f_stats["vul5"] >= 0.6) else 0
-            avg_vul = (s_h["vul5"] + s_a["vul5"]) / 2
-
-            SIG_O25_BOOST = 1 if (
-                HT_OK
-                and (1.70 <= mk["o25"] <= 2.10)
-                and (1.18 <= mk["o05ht"] <= 1.40)
-                and (avg_vul >= 0.6 or f_stats["vul5"] >= 0.8)
-            ) else 0
-
-            SIG_OVER_PRO = 1 if (
-                O25_OK
-                and (1.30 <= mk["o05ht"] <= 1.55)
-                and HT_OK
-            ) else 0
-
-            FISH_O = 1 if (
-                1.40 <= min(mk["q1"], mk["q2"]) <= 1.80
-                and f_stats["o25_8"] >= 0.75
-            ) else 0
-
-            FISH_GG = 1 if (
-                2.20 <= mk["q1"] <= 3.80
-                and 2.20 <= mk["q2"] <= 3.80
-                and s_h["gg8"] >= 0.75
-                and s_a["gg8"] >= 0.75
-            ) else 0
+            FISH_O = 1 if (1.40 <= min(mk["q1"], mk["q2"]) <= 1.80 and f_stats["o25_ratio"] >= 0.625) else 0
+            FISH_GG = 1 if (2.20 <= mk["q1"] <= 3.80 and 2.20 <= mk["q2"] <= 3.80 and s_h["gg_ratio"] >= 0.625 and s_a["gg_ratio"] >= 0.625) else 0
 
             det = []
-            if HT_OK:
-                det.append("HT-OK")
-            if O25_OK:
-                det.append("O25-OK")
-            if GATE_11:
-                det.append("GATE-11")
-            if HAS_DROP:
-                det.append("Drop")
-            if SIG_GG_PT:
-                det.append("🎯 GG-PT")
-            if SIG_O25_BOOST:
-                det.append("💣 O25-BOOST")
-            if SIG_OVER_PRO:
-                det.append("🔥 OVER-PRO")
-            if FISH_O:
-                det.append("🐟O")
-            if FISH_GG:
-                det.append("🐟GG")
+            if HT_OK: det.append("HT-OK")
+            if O25_OK: det.append("O25-OK")
+            if GATE_11: det.append("GATE-11")
+            if HAS_DROP: det.append("Drop")
+            if SIG_GG_PT: det.append("🎯 GG-PT")
+            if SIG_O25_BOOST: det.append("💣 O25-BOOST")
+            if SIG_OVER_PRO: det.append("🔥 OVER-PRO")
+            if FISH_O: det.append("🐟O")
+            if FISH_GG: det.append("🐟GG")
 
-            rating = min(
-                100,
-                40
-                + max(
-                    (25 if SIG_GG_PT else 0),
-                    (30 if SIG_O25_BOOST else (20 if SIG_OVER_PRO else 0))
-                )
-                + (30 if HAS_DROP else 0)
-                + (15 if (FISH_O or FISH_GG) else 0)
-            )
+            rating = min(100, 45 + max((25 if SIG_GG_PT else 0), (30 if SIG_O25_BOOST else (20 if SIG_OVER_PRO else 0))) + (30 if HAS_DROP else 0) + (10 if (FISH_O or FISH_GG) else 0))
 
             if rating >= min_rating_val:
                 results.append({
-                    "Fixture_ID": m["fixture"]["id"],
-                    "Data": m["fixture"]["date"][:10],
-                    "Ora": m["fixture"]["date"][11:16],
-                    "Lega": f"{m['league']['name']} ({m['league']['country']})",
-                    "Match": f"{m['teams']['home']['name']} - {m['teams']['away']['name']}",
-                    "1X2": f"{mk['q1']:.2f}|{mk['qx']:.2f}|{mk['q2']:.2f}",
-                    "O2.5": f"{mk['o25']:.2f}",
-                    "O0.5HT": f"{mk['o05ht']:.2f}",
-                    "O1.5HT": f"{mk['o15ht']:.2f}",
-                    "Quota GG1T": f"{mk['gg_ht']:.2f}",
-                    "Info": f"[{'|'.join(det)}]",
-                    "Rating": rating,
-                    "Gold": "✅" if (1.40 <= min(mk["q1"], mk["q2"]) <= 2.10) else "❌",
-                    "Is_Gold_Bool": (1.40 <= min(mk["q1"], mk["q2"]) <= 2.10),
-                    "O25_OK": O25_OK
+                    "Fixture_ID": m["fixture"]["id"], "Data": m["fixture"]["date"][:10], "Ora": m["fixture"]["date"][11:16], 
+                    "Lega": f"{m['league']['name']} ({m['league']['country']})", "Match": f"{m['teams']['home']['name']} - {m['teams']['away']['name']}",
+                    "1X2": f"{mk['q1']:.2f}|{mk['qx']:.2f}|{mk['q2']:.2f}", "O2.5": f"{mk['o25']:.2f}", "O0.5HT": f"{mk['o05ht']:.2f}", "O1.5HT": f"{mk['o15ht']:.2f}", 
+                    "Quota GG1T": f"{mk['gg_ht']:.2f}", "Info": f"[{'|'.join(det)}]", "Rating": rating, "Gold": "✅" if (1.40 <= min(mk["q1"], mk["q2"]) <= 2.10) else "❌",
+                    "Is_Gold_Bool": (1.40 <= min(mk["q1"], mk["q2"]) <= 2.10), "O25_OK": O25_OK
                 })
-        except Exception:
-            continue
-
+        except: continue
     return results
-
 
 # ============================
 # UI E RENDERING
 # ============================
 st.sidebar.subheader("🛡️ Audit Config")
-only_fav_gold = st.sidebar.toggle("🎯 SOLO SWEET SPOT FAV")
-only_o25_gold = st.sidebar.toggle("⚽ SOLO SWEET SPOT O2.5")
-min_rating_ui = st.sidebar.slider("Rating Minimo", 0, 85, 30)  # Default 30 come richiesto
+only_fav_gold = st.sidebar.toggle("🎯 SOLO SWEET SPOT FAV", value=False)
+only_o25_gold = st.sidebar.toggle("⚽ SOLO SWEET SPOT O2.5", value=False)
+min_rating_ui = st.sidebar.slider("Rating Minimo", 0, 85, 30)
 
 with st.sidebar.expander("🌍 Filtro Nazioni", expanded=False):
     sel_countries = [c for c in st.session_state["available_countries"] if c not in st.session_state["excluded"]]
     to_ex = st.selectbox("Escludi:", ["-- seleziona --"] + sel_countries)
     if to_ex != "-- seleziona --":
         st.session_state["excluded"].append(to_ex)
-        with open(NAZIONI_FILE, "w") as f:
-            json.dump({"excluded": st.session_state["excluded"]}, f)
+        with open(NAZIONI_FILE, "w") as f: json.dump({"excluded": st.session_state["excluded"]}, f)
         st.rerun()
-
     to_in = st.selectbox("Ripristina:", ["-- seleziona --"] + st.session_state["excluded"])
     if to_in != "-- seleziona --":
         st.session_state["excluded"].remove(to_in)
-        with open(NAZIONI_FILE, "w") as f:
-            json.dump({"excluded": st.session_state["excluded"]}, f)
+        with open(NAZIONI_FILE, "w") as f: json.dump({"excluded": st.session_state["excluded"]}, f)
         st.rerun()
 
-CUSTOM_CSS = """
-<style>
-.stTableContainer { overflow-x: auto; }
-table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
-th { background-color: #1a1c23; color: #00e5ff; padding: 8px; white-space: nowrap; }
-td { padding: 5px; border: 1px solid #ccc; text-align: center; font-weight: 600; white-space: nowrap; }
-</style>
-"""
+CUSTOM_CSS = """<style>.stTableContainer { overflow-x: auto; } table { width: 100%; border-collapse: collapse; font-size: 0.82rem; } th { background-color: #1a1c23; color: #00e5ff; padding: 8px; white-space: nowrap; } td { padding: 5px; border: 1px solid #ccc; text-align: center; font-weight: 600; white-space: nowrap; }</style>"""
 st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
 
-
+# --- FUNZIONE SCAN INCREMENTALE ---
 def run_scan(is_snap):
     with requests.Session() as s:
         try:
-            all_fixs = []
-            for d in target_dates:
-                data = api_get(s, "fixtures", {"date": d, "timezone": "Europe/Rome"})
-                all_fixs.extend([f for f in data.get("response", []) if f["fixture"]["status"]["short"] == "NS"])
-
+            # Seleziona la data specifica in base all'orizzonte
+            specific_date = target_dates[HORIZON - 1]
+            st.info(f"Avvio scan incrementale per il giorno: {specific_date}")
+            
+            data = api_get(s, "fixtures", {"date": specific_date, "timezone": "Europe/Rome"})
+            day_fixtures = [f for f in data.get("response", []) if f["fixture"]["status"]["short"] == "NS"]
+            
             if is_snap:
-                new_snap = {}
+                current_snap = st.session_state["odds_memory"]
                 pb_s = st.progress(0)
-                for i, m in enumerate(all_fixs):
-                    pb_s.progress((i + 1) / len(all_fixs) if all_fixs else 1.0)
+                for i, m in enumerate(day_fixtures):
+                    pb_s.progress((i+1)/len(day_fixtures))
                     mk = extract_markets(api_get(s, "odds", {"fixture": m["fixture"]["id"]}))
                     if mk and mk["q1"] > 0:
-                        new_snap[str(m["fixture"]["id"])] = {"q1": mk["q1"], "q2": mk["q2"]}
-                st.session_state["odds_memory"] = new_snap
-                with open(get_snapshot_path(HORIZON), "w") as f:
-                    json.dump(
-                        {"base_date": target_dates[0], "odds": new_snap, "timestamp": now_rome().strftime("%d/%m/%Y %H:%M")},
-                        f
-                    )
-
-            res = execute_scan(s, all_fixs, st.session_state["odds_memory"], st.session_state["excluded"], min_rating_ui)
-            st.session_state["scan_results"] = res
-            with open(get_results_path(HORIZON), "w") as f:
-                json.dump({"base_date": target_dates[0], "results": res}, f)
+                        current_snap[str(m["fixture"]["id"])] = {"q1": mk["q1"], "q2": mk["q2"]}
+                
+                st.session_state["odds_memory"] = current_snap
+                with open(get_snapshot_path(HORIZON), "w") as f: 
+                    json.dump({"base_date": target_dates[0], "odds": current_snap, "timestamp": now_rome().strftime("%d/%m/%Y %H:%M")}, f)
+            
+            new_results = execute_scan(s, day_fixtures, st.session_state["odds_memory"], st.session_state["excluded"], min_rating_ui)
+            
+            # Unione incrementale dei risultati
+            if st.session_state["scan_results"]:
+                existing_ids = [r["Fixture_ID"] for r in st.session_state["scan_results"]]
+                filtered_new = [r for r in new_results if r["Fixture_ID"] not in existing_ids]
+                st.session_state["scan_results"].extend(filtered_new)
+            else:
+                st.session_state["scan_results"] = new_results
+                
+            with open(get_results_path(HORIZON), "w") as f: 
+                json.dump({"base_date": target_dates[0], "results": st.session_state["scan_results"]}, f)
+            
+            st.success(f"Scan del giorno {specific_date} completato!")
             st.rerun()
         except Exception as e:
             st.error(str(e))
 
-
 col1, col2 = st.columns(2)
-if col1.button("📌 SNAPSHOT + SCAN"):
-    run_scan(True)
-if col2.button("🚀 SCAN TOTALE"):
-    run_scan(False)
+if col1.button("📌 SNAPSHOT + SCAN"): run_scan(True)
+if col2.button("🚀 SCAN TOTALE"): run_scan(False)
 
 if st.session_state["scan_results"]:
     df = pd.DataFrame(st.session_state["scan_results"])
-
-    def style_row(row):
-        if '🎯 GG-PT' in row['Info']:
-            return ['background-color: #38003c; color: #00e5ff;' for _ in row]
-        if '💣 O25-BOOST' in row['Info']:
-            return ['background-color: #003300; color: #00ff00;' for _ in row]
-        if ('🐟O' in row['Info'] or '🐟GG' in row['Info']) and row['Rating'] >= 55:
-            return ['background-color: #004d4d; color: #00ffff;' for _ in row]
-        return ['' for _ in row]
-
-    DISPLAY_COLS = ["Data", "Ora", "Lega", "Match", "1X2", "O2.5", "O0.5HT", "O1.5HT", "Quota GG1T", "Info", "Rating", "Gold"]
-    st_style = df[DISPLAY_COLS].sort_values(["Data", "Ora"]).style.apply(style_row, axis=1)
-    st.write(st_style.to_html(escape=False, index=False), unsafe_allow_html=True)
-
-    st.markdown("---")
-    c1, c2 = st.columns(2)
-    c1.download_button("💾 CSV Audit", df.to_csv(index=False).encode('utf-8'), f"audit_{target_dates[0]}.csv")
-    c2.download_button(
-        "🌐 HTML Report",
-        f"<html><head>{CUSTOM_CSS}</head><body>{st_style.to_html(escape=False, index=False)}</body></html>".encode('utf-8'),
-        f"report_{target_dates[0]}.html"
-            )
+    if not df.empty:
+        if only_fav_gold: df = df[df["Is_Gold_Bool"]]
+        if only_o25_gold: df = df[df["O25_OK"] == 1]
+    
+    if df.empty:
+        st.warning("Nessun match trovato.")
+    else:
+        def style_row(row):
+            if '🎯 GG-PT' in row['Info']: return ['background-color: #38003c; color: #00e5ff;' for _ in row]
+            if '💣 O25-BOOST' in row['Info']: return ['background-color: #003300; color: #00ff00;' for _ in row] 
+            if ('🐟O' in row['Info'] or '🐟GG' in row['Info']) and row['Rating'] >= 55: return ['background-color: #004d4d; color: #00ffff;' for _ in row]
+            return ['' for _ in row]
+        
+        DISPLAY_COLS = ["Data", "Ora", "Lega", "Match", "1X2", "O2.5", "O0.5HT", "O1.5HT", "Quota GG1T", "Info", "Rating", "Gold"]
+        st_style = df[DISPLAY_COLS].sort_values(["Data", "Ora"]).style.apply(style_row, axis=1)
+        st.write(st_style.to_html(escape=False, index=False), unsafe_allow_html=True)
+        
+        st.markdown("---")
+        c1, c2 = st.columns(2)
+        c1.download_button("💾 CSV Audit", df.to_csv(index=False).encode('utf-8'), f"audit_{target_dates[0]}.csv")
+        h_rep = f"<html><head>{CUSTOM_CSS}</head><body>{st_style.to_html(escape=False, index=False)}</body></html>"
+        c2.download_button("🌐 HTML Report", h_rep.encode('utf-8'), f"report_{target_dates[0]}.html")
