@@ -35,7 +35,7 @@ def get_snapshot_path(horizon):
 def get_results_path(horizon):
     return str(BASE_DIR / f"last_results_{horizon}d.json")
 
-st.set_page_config(page_title="ARAB SNIPER V18.30 - PERMANENT AUDIT", layout="wide")
+st.set_page_config(page_title="ARAB SNIPER V18.40 - AUDITOR LINK", layout="wide")
 
 # ============================
 # API CORE
@@ -92,7 +92,7 @@ if "excluded" not in st.session_state:
 
 target_dates = [(now_rome().date() + timedelta(days=i)).strftime("%Y-%m-%d") for i in range(HORIZON)]
 
-# Caricamento automatico nazioni
+# Caricamento nazioni per filtro
 if not st.session_state["available_countries"]:
     try:
         with requests.Session() as s_fix:
@@ -193,7 +193,6 @@ def extract_markets(resp_json):
                 if data["o05ht"] == 0: data["o05ht"] = pick_o(b.get("values", []), "over0.5")
                 if data["o15ht"] == 0: data["o15ht"] = pick_o(b.get("values", []), "over1.5")
         
-        # Logica break per GGHT robusta
         h_core, h_over, h_gate = (data["q1"]>0 and data["qx"]>0 and data["q2"]>0), (data["o25"]>0 and data["o05ht"]>0), (data["o15ht"]>0 and data["gg_ht"]>0)
         if h_core and h_over and h_gate: break
         if ibm >= 4 and h_core and h_over: break 
@@ -219,6 +218,7 @@ def execute_scan(session, fixtures, snap_mem, excluded, min_rating_val):
             fav_side = "q1" if mk["q1"] < mk["q2"] else "q2"
             f_s, d_s = (s_h, s_a) if fav_side == "q1" else (s_a, s_h)
 
+            # SOGLIA 5/8 (0.625)
             HT_OK = 1 if (s_h["ht_ratio"] >= 0.625 and s_a["ht_ratio"] >= 0.625) else 0
             O25_OK = 1 if (1.70 <= mk["o25"] < 2.00) else 0
             GATE_11 = 1 if ((2.20 <= mk["o15ht"] <= 2.80) and (4.20 <= mk["gg_ht"] <= 5.50) and HT_OK) else 0
@@ -229,6 +229,7 @@ def execute_scan(session, fixtures, snap_mem, excluded, min_rating_val):
             SIG_O25_BOOST = 1 if (HT_OK and (1.70 <= mk["o25"] <= 2.10) and (1.18 <= mk["o05ht"] <= 1.40) and (avg_vul >= 0.625 or f_s["vulnerability"] >= 0.75)) else 0
             SIG_OVER_PRO = 1 if (O25_OK and (1.30 <= mk["o05ht"] <= 1.55) and HT_OK) else 0
 
+            # STRATEGIA PESCI
             FISH_O = 1 if (1.40 <= min(mk["q1"], mk["q2"]) <= 1.80 and f_s["o25_ratio"] >= 0.625) else 0
             FISH_GG = 1 if (2.20 <= mk["q1"] <= 3.80 and 2.20 <= mk["q2"] <= 3.80 and s_h["gg_ratio"] >= 0.625 and s_a["gg_ratio"] >= 0.625) else 0
 
@@ -243,6 +244,7 @@ def execute_scan(session, fixtures, snap_mem, excluded, min_rating_val):
             if FISH_O: det.append("🐟O")
             if FISH_GG: det.append("🐟GG")
 
+            # RATING
             b_seg = max((25 if SIG_GG_PT else 0), (30 if SIG_O25_BOOST else (20 if SIG_OVER_PRO else 0)))
             b_drop = (30 if HAS_DROP else 0)
             b_fish = (10 if (FISH_O or FISH_GG) else 0)
@@ -250,10 +252,11 @@ def execute_scan(session, fixtures, snap_mem, excluded, min_rating_val):
 
             if rating >= min_rating_val:
                 results.append({
+                    "Fixture_ID": m["fixture"]["id"], # INDISPENSABILE PER AUDITOR
                     "Data": match_date, "Ora": m["fixture"]["date"][11:16], "Lega": f"{m['league']['name']} ({m['league']['country']})", "Match": f"{m['teams']['home']['name']} - {m['teams']['away']['name']}",
                     "1X2": f"{mk['q1']:.2f}|{mk['qx']:.2f}|{mk['q2']:.2f}", "O2.5": f"{mk['o25']:.2f}", "O0.5HT": f"{mk['o05ht']:.2f}", "O1.5HT": f"{mk['o15ht']:.2f}", "GGPT": f"{mk['gg_ht']:.2f}",
                     "Info": f"[{'|'.join(det)}]", "Rating": rating, "Gold": "✅" if (1.40 <= min(mk["q1"], mk["q2"]) <= 2.10) else "❌",
-                    "Is_Gold_Bool": (1.40 <= min(mk["q1"], mk["q2"]) <= 2.10), "O25_OK": O25_OK, "Fixture_ID": fid_s
+                    "Is_Gold_Bool": (1.40 <= min(mk["q1"], mk["q2"]) <= 2.10), "O25_OK": O25_OK
                 })
         except: continue
     return results
@@ -303,8 +306,7 @@ def run_scan(is_snap):
                 if os.path.exists(get_snapshot_path(HORIZON)):
                     try:
                         with open(get_snapshot_path(HORIZON), "r") as f:
-                            sv = json.load(f)
-                            if sv.get("base_date") == target_dates[0]: existing_snap = sv.get("odds", {})
+                            saved = json.load(f); existing_snap = saved.get("odds", {})
                     except: pass
                 new_snap = dict(existing_snap)
                 pb_s = st.progress(0); total_s = len(all_fixs)
@@ -316,7 +318,6 @@ def run_scan(is_snap):
                         if mk and mk["q1"] > 0:
                             fs = "q1" if mk["q1"] < mk["q2"] else "q2"
                             new_snap[fid] = {"fav_side": fs, "fav_odd": mk[fs], "q1": mk["q1"], "q2": mk["q2"]}
-                else: pb_s.progress(1.0)
                 st.session_state["odds_memory"] = new_snap
                 ts = now_rome().strftime("%d/%m/%Y %H:%M")
                 with open(get_snapshot_path(HORIZON), "w") as f:
@@ -333,7 +334,6 @@ col1, col2 = st.columns(2)
 if col1.button("📌 SNAPSHOT + SCAN"): run_scan(True)
 if col2.button("🚀 SCAN TOTALE"): run_scan(False)
 
-# VISUALIZZAZIONE E TASTI DOWNLOAD PERMANENTI
 if st.session_state["scan_results"]:
     df = pd.DataFrame(st.session_state["scan_results"])
     if not df.empty:
@@ -341,26 +341,22 @@ if st.session_state["scan_results"]:
         if only_o25_gold: df = df[df["O25_OK"] == 1]
     
     if df.empty:
-        st.warning("Nessun match trovato con i filtri attuali.")
+        st.warning("Nessun match trovato.")
     else:
         def style_row(row):
             if '🎯 GG-PT' in row['Info']: return ['background-color: #38003c; color: #00e5ff;' for _ in row]
             if '💣 O25-BOOST' in row['Info']: return ['background-color: #003300; color: #00ff00;' for _ in row] 
             return ['' for _ in row]
         
+        # DISPLAY_COLS: ESCLUDE Fixture_ID dalla vista utente
         DISPLAY_COLS = ["Data", "Ora", "Lega", "Match", "1X2", "O2.5", "O0.5HT", "O1.5HT", "GGPT", "Info", "Rating", "Gold"]
         st_style = df[DISPLAY_COLS].sort_values(["Data", "Ora"]).style.apply(style_row, axis=1)
         st.write(st_style.to_html(escape=False, index=False), unsafe_allow_html=True)
         
-        with st.expander("📖 GUIDA"):
-            st.markdown("* **💣 O25-BOOST:** Over 2.5 Top. * **🎯 GG-PT:** Gol Entrambe 1T. * **🐟O:** Dominio. * **🐟GG:** Scambio.")
-
         st.markdown("---")
-        # TASTI DOWNLOAD SEMPRE PRESENTI
         st.subheader("💾 Esporta Dati")
         c1, c2 = st.columns(2)
-        # CSV per Audit (Contiene tutte le colonne inclusi Fixture_ID per facilitare l'import)
-        c1.download_button(f"💾 Scarica CSV Audit ({HORIZON}d)", df.to_csv(index=False).encode('utf-8'), f"audit_{target_dates[0]}_{HORIZON}d.csv")
-        # HTML Pulito
+        # Il CSV scaricato conterrà TUTTE le colonne (incluso Fixture_ID) per l'Auditor
+        c1.download_button(f"💾 CSV Audit ({HORIZON}d)", df.to_csv(index=False).encode('utf-8'), f"audit_{HORIZON}d.csv")
         h_out = f"<html><head>{CUSTOM_CSS}</head><body>{st_style.to_html(escape=False, index=False)}</body></html>"
-        c2.download_button(f"🌐 Scarica HTML Report ({HORIZON}d)", h_out.encode('utf-8'), f"report_{target_dates[0]}_{HORIZON}d.html")
+        c2.download_button(f"🌐 HTML Report ({HORIZON}d)", h_out.encode('utf-8'), f"report_{HORIZON}d.html")
