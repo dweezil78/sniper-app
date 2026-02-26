@@ -265,9 +265,9 @@ def execute_scan(session, fixtures, snap_mem, excluded, min_rating_val):
 # UI E RENDERING
 # ============================
 st.sidebar.subheader("🛡️ Audit Config")
-only_fav_gold = st.sidebar.toggle("🎯 SWEET SPOT FAV")
-only_o25_gold = st.sidebar.toggle("⚽ SWEET SPOT O2.5")
-min_rating_ui = st.sidebar.slider("Rating Minimo", 0, 85, 55)
+only_fav_gold = st.sidebar.toggle("🎯 SOLO SWEET SPOT FAV")
+only_o25_gold = st.sidebar.toggle("⚽ SOLO SWEET SPOT O2.5")
+min_rating_ui = st.sidebar.slider("Rating Minimo", 0, 85, 30)
 
 with st.sidebar.expander("🌍 Filtro Nazioni", expanded=False):
     sel_countries = [c for c in st.session_state["available_countries"] if c not in st.session_state["excluded"]]
@@ -323,7 +323,8 @@ if st.session_state["scan_results"]:
         if ('🐟O' in row['Info'] or '🐟GG' in row['Info']) and row['Rating'] >= 55: return ['background-color: #004d4d; color: #00ffff;' for _ in row]
         return ['' for _ in row]
     
-    DISPLAY_COLS = ["Data", "Ora", "Lega", "Match", "1X2", "O2.5", "O0.5HT", "O1.5HT", "GGPT", "Quota GG1T", "Info", "Rating", "Gold"]
+    # Rimozione colonna GGPT dalla visualizzazione come richiesto
+    DISPLAY_COLS = ["Data", "Ora", "Lega", "Match", "1X2", "O2.5", "O0.5HT", "O1.5HT", "Quota GG1T", "Info", "Rating", "Gold"]
     st_style = df[DISPLAY_COLS].sort_values(["Data", "Ora"]).style.apply(style_row, axis=1)
     st.write(st_style.to_html(escape=False, index=False), unsafe_allow_html=True)
     
