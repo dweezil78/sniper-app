@@ -8,7 +8,7 @@ import time
 from pathlib import Path
 
 # ============================
-# CONFIGURAZIONE V19.80 - PRECISION ENGINE
+# CONFIGURAZIONE V19.95 - PRECISION HYBRID
 # ============================
 BASE_DIR = Path(__file__).resolve().parent
 NAZIONI_FILE = str(BASE_DIR / "nazioni_config.json")
@@ -40,7 +40,7 @@ def get_snapshot_path(horizon):
 def get_results_path(horizon):
     return str(BASE_DIR / f"last_results_{horizon}d.json")
 
-st.set_page_config(page_title="ARAB SNIPER V19.80 - PRECISION ENGINE", layout="wide")
+st.set_page_config(page_title="ARAB SNIPER V19.95 - PRECISION HYBRID", layout="wide")
 
 # ============================
 # API CORE & SECURITY
@@ -68,7 +68,7 @@ def api_get(session, path, params, retries=2):
             time.sleep(1)
 
 # ============================
-# INITIALIZATION & PERSISTENZA
+# INITIALIZATION & SLIDING WINDOW
 # ============================
 if "excluded" not in st.session_state:
     if os.path.exists(NAZIONI_FILE):
@@ -116,6 +116,18 @@ def load_sliding_data():
     return None
 
 snap_info = load_sliding_data()
+if snap_info:
+    st.sidebar.success(f"📦 Dati caricati: {target_dates[0]}\nSnapshot: {snap_info}")
+
+if not st.session_state["available_countries"]:
+    try:
+        with requests.Session() as s_init:
+            all_c = set()
+            d_init = target_dates[0]
+            data_init = api_get(s_init, "fixtures", {"date": d_init, "timezone": "Europe/Rome"})
+            for f_init in data_init.get("response", []): all_c.add(f_init["league"]["country"])
+            st.session_state["available_countries"] = sorted(list(all_c))
+    except: pass
 
 # ============================
 # LOGICA IBRIDA STATS
@@ -128,25 +140,23 @@ def get_stats(session, tid):
         rx = api_get(session, "fixtures", {"team": tid, "last": 8, "status": "FT"})
         fx = rx.get("response", [])
         if not fx: return {"ht5":0.0, "vul5":0.0, "o25_8":0.0, "gg8":0.0}
-        
         fx5 = fx[:5]
         ht5 = sum(1 for f in fx5 if ((f["score"]["halftime"]["home"] or 0) + (f["score"]["halftime"]["away"] or 0)) >= 1) / len(fx5)
-        
         def is_conc(f, team_id):
             is_h = (f["teams"]["home"]["id"] == team_id)
             return 1 if ((f["goals"]["away"] if is_h else f["goals"]["home"]) or 0) > 0 else 0
         vul5 = sum(1 for f in fx5 if is_conc(f, tid)) / len(fx5)
-        
         act8 = len(fx)
         o25_8 = sum(1 for f in fx if ((f["goals"]["home"] or 0) + (f["goals"]["away"] or 0)) >= 3) / act8
         gg8 = sum(1 for f in fx if (f["goals"]["home"] or 0) > 0 and (f["goals"]["away"] or 0) > 0) / act8
-        
         res = {"ht5": ht5, "vul5": vul5, "o25_8": o25_8, "gg8": gg8}
         team_stats_cache[tid] = res
         return res
     except: return {"ht5":0.0, "vul5":0.0, "o25_8":0.0, "gg8":0.0}
 
-# --- NUOVA ESTRAZIONE MERCATI AD ALTA PRECISIONE ---
+# ============================
+# EXTRACT MARKETS (PATCHED)
+# ============================
 def extract_markets(resp_json):
     resp = resp_json.get("response", [])
     if not resp: return None
@@ -155,10 +165,8 @@ def extract_markets(resp_json):
 
     for ibm, bm in enumerate(resp[0].get("bookmakers", [])):
         for b in bm.get("bets", []):
-            bid, name_raw = b.get("id"), str(b.get("name") or "").lower()
-            name_clean = clean(name_raw)
+            bid, name = b.get("id"), clean(b.get("name"))
             
-            # 1X2
             if bid == 1 and data["q1"] == 0:
                 v = b.get("values", [])
                 if len(v) >= 3:
@@ -168,34 +176,36 @@ def extract_markets(resp_json):
                         elif "draw" in vn: data["qx"] = float(vo["odd"])
                         elif "away" in vn: data["q2"] = float(vo["odd"])
             
-            # OVER 2.5 FT
             if bid == 5 and data["o25"] == 0:
                 for x in b.get("values", []):
-                    if clean(x.get("value")) == "over2.5":
-                        data["o25"] = float(x.get("odd") or 0); break
+                    if "over2.5" in clean(x.get("value")): data["o25"] = float(x.get("odd") or 0); break
             
-            # GG 1T (BID 71 o matching testuale stretto)
-            is_btts = any(k in name_raw for k in ["btts", "both teams to score", "gg"])
-            is_1h = any(k in name_raw for k in ["1st", "1h", "first half", "half-time", "halftime"])
+            # PATCH: Logica BTTS e 1° Tempo Sicura (come richiesto)
+            is_btts = any(k in name for k in ["btts", "both", "gg"])
+            
+            is_first_half = (("1st" in name) or ("firsthalf" in name) or (("first" in name) and ("half" in name)))
+            is_second_half = ("2nd" in name) or ("secondhalf" in name) or (("second" in name) and ("half" in name))
+            is_1h = is_first_half and not is_second_half
+            
             if (bid == 71 or (is_btts and is_1h)) and data["gg_ht"] == 0:
                 for x in b.get("values", []):
                     vn = clean(x.get("value"))
-                    if vn in ["yes", "si", "oui"]: data["gg_ht"] = float(x.get("odd") or 0); break
+                    if any(vn.startswith(k) for k in ["yes", "si", "oui"]): data["gg_ht"] = float(x.get("odd") or 0); break
             
-            # OVER 0.5 / 1.5 HT (Matching rigoroso per evitare quote errate)
-            if is_1h and any(k in name_raw for k in ["over/under", "total"]):
+            if is_1h and any(k in name for k in ["overunder", "total"]):
                 for x in b.get("values", []):
                     vn = clean(x.get("value"))
-                    odd_val = float(x.get("odd") or 0)
-                    if vn == "over0.5" and data["o05ht"] == 0:
-                        if odd_val < 1.80: data["o05ht"] = odd_val # Filtro coerenza
-                    if vn == "over1.5" and data["o15ht"] == 0:
-                        data["o15ht"] = odd_val
+                    if "over0.5" in vn and data["o05ht"] == 0: data["o05ht"] = float(x.get("odd") or 0)
+                    if "over1.5" in vn and data["o15ht"] == 0: data["o15ht"] = float(x.get("odd") or 0)
         
-        # Se abbiamo i dati fondamentali, usciamo
-        if data["q1"]>0 and data["o25"]>0 and data["o05ht"]>0: break
+        # PATCH: Uscita ritardata per garantire o15ht / gg_ht
+        if data["q1"]>0 and data["o25"]>0 and data["o05ht"]>0 and (data["o15ht"]>0 or data["gg_ht"]>0): break
+        if ibm >= 5 and data["q1"]>0: break 
     return data
 
+# ============================
+# CORE ENGINE
+# ============================
 def execute_scan(session, fixtures, snap_mem, excluded, min_rating_val):
     results, pb = [], st.progress(0)
     filtered = [f for f in fixtures if f["league"]["country"] not in excluded and not any(k in f["league"]["name"].lower() for k in LEAGUE_KEYWORDS_BLACKLIST)]
@@ -224,7 +234,7 @@ def execute_scan(session, fixtures, snap_mem, excluded, min_rating_val):
             SIG_GG_PT = 1 if (GATE_11 and f_stats["vul5"] >= 0.6) else 0
             avg_vul = (s_h["vul5"] + s_a["vul5"]) / 2
             
-            # --- RANGE RICHIESTO 1.20 - 1.55 ---
+            # SBLOCCO BOOST e OVER-PRO (Range 1.20 - 1.55)
             SIG_O25_BOOST = 1 if (HT_OK and (1.60 <= mk["o25"] <= 2.15) and (1.20 <= mk["o05ht"] <= 1.55) and (avg_vul >= 0.6 or f_stats["vul5"] >= 0.8)) else 0
             SIG_OVER_PRO = 1 if (O25_OK and (1.20 <= mk["o05ht"] <= 1.55) and HT_OK) else 0
 
@@ -260,7 +270,22 @@ def execute_scan(session, fixtures, snap_mem, excluded, min_rating_val):
 # UI E RENDERING
 # ============================
 st.sidebar.subheader("🛡️ Audit Config")
+only_fav_gold = st.sidebar.toggle("🎯 SOLO SWEET SPOT FAV")
+only_o25_gold = st.sidebar.toggle("⚽ SOLO SWEET SPOT O2.5")
 min_rating_ui = st.sidebar.slider("Rating Minimo", 0, 85, 30)
+
+with st.sidebar.expander("🌍 Filtro Nazioni", expanded=False):
+    sel_countries = [c for c in st.session_state["available_countries"] if c not in st.session_state["excluded"]]
+    to_ex = st.selectbox("Escludi:", ["-- seleziona --"] + sel_countries)
+    if to_ex != "-- seleziona --":
+        st.session_state["excluded"].append(to_ex)
+        with open(NAZIONI_FILE, "w") as f: json.dump({"excluded": st.session_state["excluded"]}, f)
+        st.rerun()
+    to_in = st.selectbox("Ripristina:", ["-- seleziona --"] + st.session_state["excluded"])
+    if to_in != "-- seleziona --":
+        st.session_state["excluded"].remove(to_in)
+        with open(NAZIONI_FILE, "w") as f: json.dump({"excluded": st.session_state["excluded"]}, f)
+        st.rerun()
 
 CUSTOM_CSS = """<style>.stTableContainer { overflow-x: auto; } table { width: 100%; border-collapse: collapse; font-size: 0.82rem; } th { background-color: #1a1c23; color: #00e5ff; padding: 8px; white-space: nowrap; } td { padding: 5px; border: 1px solid #ccc; text-align: center; font-weight: 600; white-space: nowrap; }</style>"""
 st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
@@ -311,3 +336,4 @@ if st.session_state["scan_results"]:
     c1, c2 = st.columns(2)
     c1.download_button("💾 CSV Audit", df.to_csv(index=False).encode('utf-8'), f"audit_{target_dates[0]}.csv")
     c2.download_button("🌐 HTML Report", f"<html><head>{CUSTOM_CSS}</head><body>{st_style.to_html(escape=False, index=False)}</body></html>".encode('utf-8'), f"report_{target_dates[0]}.html")
+    
