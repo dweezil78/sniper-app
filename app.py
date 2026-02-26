@@ -8,7 +8,7 @@ import time
 from pathlib import Path
 
 # ============================
-# CONFIGURAZIONE V19.60 - SECURITY & PRECISION
+# CONFIGURAZIONE V19.70 - SIGNAL UNLOCK
 # ============================
 BASE_DIR = Path(__file__).resolve().parent
 NAZIONI_FILE = str(BASE_DIR / "nazioni_config.json")
@@ -40,14 +40,14 @@ def get_snapshot_path(horizon):
 def get_results_path(horizon):
     return str(BASE_DIR / f"last_results_{horizon}d.json")
 
-st.set_page_config(page_title="ARAB SNIPER V19.60 - SECURITY & PRECISION", layout="wide")
+st.set_page_config(page_title="ARAB SNIPER V19.70 - SIGNAL UNLOCK", layout="wide")
 
 # ============================
-# API CORE & SECURITY CHECK (Fix Critico #1)
+# API CORE & SECURITY
 # ============================
 API_KEY = st.secrets.get("API_SPORTS_KEY")
 if not API_KEY:
-    st.error("⚠️ Manca API_SPORTS_KEY nei Secrets di Streamlit Cloud. Controlla la configurazione.")
+    st.error("⚠️ Manca API_SPORTS_KEY nei Secrets!")
     st.stop()
 
 HEADERS = {"x-apisports-key": API_KEY}
@@ -182,7 +182,6 @@ def extract_markets(resp_json):
                     if "over2.5" in clean(x.get("value")): data["o25"] = float(x.get("odd") or 0); break
             
             is_btts = any(k in name for k in ["btts", "both", "gg"])
-            # Fix Critico #2: "first" rimosso per evitare mercati non-HT
             is_1h = any(k in name for k in ["1st", "1h", "firsthalf", "half"])
             
             if (bid == 71 or (is_btts and is_1h)) and data["gg_ht"] == 0:
@@ -222,7 +221,8 @@ def execute_scan(session, fixtures, snap_mem, excluded, min_rating_val):
                 sq1, sq2 = float(snap_mem[fid_s].get("q1", 0)), float(snap_mem[fid_s].get("q2", 0))
                 if max(sq1 - mk["q1"], sq2 - mk["q2"]) >= 0.15: HAS_DROP = 1
 
-            O25_OK = 1 if (1.70 <= mk["o25"] < 2.00) else 0
+            # FIX: Range quote più ampi per sbloccare i tag
+            O25_OK = 1 if (1.60 <= mk["o25"] < 2.10) else 0
             gate_o15, gate_gg = (2.20 <= mk["o15ht"] <= 2.80), (4.20 <= mk["gg_ht"] <= 5.50)
             GATE_11 = 1 if (HT_OK and (gate_o15 or gate_gg)) else 0
             fav_side = "q1" if mk["q1"] < mk["q2"] else "q2"
@@ -230,8 +230,10 @@ def execute_scan(session, fixtures, snap_mem, excluded, min_rating_val):
             
             SIG_GG_PT = 1 if (GATE_11 and f_stats["vul5"] >= 0.6) else 0
             avg_vul = (s_h["vul5"] + s_a["vul5"]) / 2
-            SIG_O25_BOOST = 1 if (HT_OK and (1.70 <= mk["o25"] <= 2.10) and (1.18 <= mk["o05ht"] <= 1.40) and (avg_vul >= 0.6 or f_stats["vul5"] >= 0.8)) else 0
-            SIG_OVER_PRO = 1 if (O25_OK and (1.30 <= mk["o05ht"] <= 1.55) and HT_OK) else 0
+            
+            # SBLOCCO BOOST e OVER-PRO
+            SIG_O25_BOOST = 1 if (HT_OK and (1.60 <= mk["o25"] <= 2.15) and (1.15 <= mk["o05ht"] <= 1.45) and (avg_vul >= 0.6 or f_stats["vul5"] >= 0.8)) else 0
+            SIG_OVER_PRO = 1 if (O25_OK and (1.25 <= mk["o05ht"] <= 1.60) and HT_OK) else 0
 
             FISH_O = 1 if (1.40 <= min(mk["q1"], mk["q2"]) <= 1.80 and f_stats["o25_8"] >= 0.75) else 0
             FISH_GG = 1 if (2.20 <= mk["q1"] <= 3.80 and 2.20 <= mk["q2"] <= 3.80 and s_h["gg8"] >= 0.75 and s_a["gg8"] >= 0.75) else 0
@@ -267,7 +269,7 @@ def execute_scan(session, fixtures, snap_mem, excluded, min_rating_val):
 st.sidebar.subheader("🛡️ Audit Config")
 only_fav_gold = st.sidebar.toggle("🎯 SOLO SWEET SPOT FAV")
 only_o25_gold = st.sidebar.toggle("⚽ SOLO SWEET SPOT O2.5")
-min_rating_ui = st.sidebar.slider("Rating Minimo", 0, 85, 30) # Default 30 come richiesto
+min_rating_ui = st.sidebar.slider("Rating Minimo", 0, 85, 30)
 
 with st.sidebar.expander("🌍 Filtro Nazioni", expanded=False):
     sel_countries = [c for c in st.session_state["available_countries"] if c not in st.session_state["excluded"]]
