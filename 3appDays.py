@@ -8,7 +8,7 @@ import time
 from pathlib import Path
 
 # ============================
-# CONFIGURAZIONE V20.75 - 8-MATCH PRECISION
+# CONFIGURAZIONE V20.80 - AGGRESSIVE HUNTER
 # ============================
 BASE_DIR = Path(__file__).resolve().parent
 NAZIONI_FILE = str(BASE_DIR / "nazioni_config.json")
@@ -40,7 +40,7 @@ def get_db_path():
 def get_snap_db_path():
     return str(BASE_DIR / "arab_snapshot_database.json")
 
-st.set_page_config(page_title="ARAB SNIPER V20.75 - 8-MATCH PRECISION", layout="wide")
+st.set_page_config(page_title="ARAB SNIPER V20.80 - AGGRESSIVE HUNTER", layout="wide")
 
 # ============================
 # API CORE
@@ -68,7 +68,7 @@ def api_get(session, path, params, retries=2):
             time.sleep(1)
 
 # ============================
-# INITIALIZATION & ROLLING LOGIC
+# LOGICA SLIDING DATABASE
 # ============================
 if "excluded" not in st.session_state:
     if os.path.exists(NAZIONI_FILE):
@@ -107,7 +107,7 @@ def load_and_slide_db():
 last_snap_ts = load_and_slide_db()
 
 # ============================
-# LOGICA STATISTICHE (HT-OK su 8 MATCH)
+# MOTORE STATISTICO (8 MATCH)
 # ============================
 team_stats_cache = {}
 
@@ -119,71 +119,79 @@ def get_stats(session, tid):
         if not fx: return {"ht_ok_bool": False, "vulnerability_5": 0.0, "o25_ratio_8": 0.0, "gg_ratio_8": 0.0}
         
         actual = len(fx)
-        ht_count = 0
-        o25_count = 0
-        gg_count = 0
-        vul_count_5 = 0
+        ht_count, o25_count, gg_count, vul_count_5 = 0, 0, 0, 0
         
         for idx, f in enumerate(fx):
-            # Conteggio HT (1° Tempo)
             if ((f.get("score",{}).get("halftime",{}).get("home") or 0) + (f.get("score",{}).get("halftime",{}).get("away") or 0)) >= 1: 
                 ht_count += 1
-            
-            # Conteggi su 8 match
             is_h = (f["teams"]["home"]["id"] == tid)
             if ((f["goals"]["home"] or 0) + (f["goals"]["away"] or 0)) >= 3: o25_count += 1
             if (f["goals"]["home"] or 0) > 0 and (f["goals"]["away"] or 0) > 0: gg_count += 1
-            
-            # Vulnerabilità solo su ultime 5
             if idx < 5:
                 if ((f["goals"]["away"] if is_h else f["goals"]["home"]) or 0) > 0: vul_count_5 += 1
         
-        # --- NUOVA LOGICA HT-OK (Soglie Dinamiche su 8 Match) ---
+        # LOGICA HT-OK DINAMICA (5/8, 4/7, 4/6, 3/5)
         ht_ok = False
-        if actual == 8 and ht_count >= 5: ht_ok = True
+        if actual >= 8 and ht_count >= 5: ht_ok = True
         elif actual == 7 and ht_count >= 4: ht_ok = True
         elif actual == 6 and ht_count >= 4: ht_ok = True
         elif actual == 5 and ht_count >= 3: ht_ok = True
-        elif actual < 5 and ht_count >= 2: ht_ok = True # Fallback per pochissimi dati
 
-        res = {
-            "ht_ok_bool": ht_ok,
-            "vulnerability_5": vul_count_5 / min(actual, 5),
-            "o25_ratio_8": o25_count / actual, 
-            "gg_ratio_8": gg_count / actual
-        }
+        res = {"ht_ok_bool": ht_ok, "vulnerability_5": vul_count_5/min(actual, 5), "o25_ratio_8": o25_count/actual, "gg_ratio_8": gg_count/actual}
         team_stats_cache[tid] = res
         return res
     except: return {"ht_ok_bool": False, "vulnerability_5": 0.0, "o25_ratio_8": 0.0, "gg_ratio_8": 0.0}
 
+# ============================
+# ESTRAZIONE MERCATI AGGRESSIVA
+# ============================
 def extract_markets(resp_json):
     resp = resp_json.get("response", [])
     if not resp: return None
     data = {"q1":0.0, "qx":0.0, "q2":0.0, "o25":0.0, "o05ht":0.0, "o15ht":0.0, "gg_ht":0.0}
+    
     def clean(s): return str(s or "").lower().replace(" ", "").replace("(", "").replace(")", "").replace("-", "").replace(",", ".")
+
+    # Iteriamo su TUTTI i bookmaker per trovare le quote mancanti (Hunter Mode)
     for bm in resp[0].get("bookmakers", []):
         for b in bm.get("bets", []):
             bid, name_raw = b.get("id"), str(b.get("name") or "").lower()
             name_clean = clean(name_raw)
+            
+            # 1X2
             if bid == 1 and data["q1"] == 0:
                 for vo in b.get("values", []):
                     vn = clean(vo.get("value"))
                     if "home" in vn: data["q1"] = float(vo["odd"])
                     elif "draw" in vn: data["qx"] = float(vo["odd"])
                     elif "away" in vn: data["q2"] = float(vo["odd"])
+            
+            # OVER 2.5 FT
             if bid == 5 and data["o25"] == 0:
                 for x in b.get("values", []):
                     if clean(x.get("value")) == "over2.5": data["o25"] = float(x.get("odd") or 0); break
-            is_1h = (("1st" in name_raw) or ("firsthalf" in name_clean) or (("first" in name_raw) and ("half" in name_raw))) and not (("2nd" in name_raw) or ("second" in name_raw))
-            if (bid == 71 or (("gg" in name_clean or "both" in name_clean) and is_1h)) and data["gg_ht"] == 0:
-                for x in b.get("values", []):
-                    if clean(x.get("value")) in ["yes", "si", "oui"]: data["gg_ht"] = float(x.get("odd") or 0); break
-            if is_1h and any(k in name_raw for k in ["over/under", "total"]):
-                for x in b.get("values", []):
-                    vn, odd_val = clean(x.get("value")), float(x.get("odd") or 0)
-                    if vn == "over0.5" and data["o05ht"] == 0 and odd_val < 1.75: data["o05ht"] = odd_val
-                    if vn == "over1.5" and data["o15ht"] == 0: data["o15ht"] = odd_val
-        if data["q1"]>0 and data["o05ht"]>0: break
+            
+            # FILTRO HT AGGRESSIVO (O0.5, O1.5, GGHT)
+            is_1h = (("1st" in name_raw) or ("firsthalf" in name_clean) or ("first" in name_raw and "half" in name_raw)) and not ("2nd" in name_raw or "second" in name_raw)
+            
+            if is_1h:
+                # GG HT (Keywords estese)
+                if (bid == 71 or any(k in name_clean for k in ["gg", "both", "btts", "goal"])) and data["gg_ht"] == 0:
+                    for x in b.get("values", []):
+                        if clean(x.get("value")) in ["yes", "si", "oui"]: 
+                            val = float(x.get("odd") or 0)
+                            if 3.00 <= val <= 7.50: data["gg_ht"] = val; break # Range allargato
+                
+                # OVER HT
+                if any(k in name_raw for k in ["over/under", "total"]):
+                    for x in b.get("values", []):
+                        vn, odd_val = clean(x.get("value")), float(x.get("odd") or 0)
+                        if vn == "over0.5" and data["o05ht"] == 0 and odd_val < 1.75: data["o05ht"] = odd_val
+                        if vn == "over1.5" and data["o15ht"] == 0: data["o15ht"] = odd_val
+
+        # Se abbiamo trovato tutto quello che ci serve, usciamo dal ciclo bookmaker
+        if data["q1"]>0 and data["o05ht"]>0 and data["gg_ht"]>0: break
+        
     return data
 
 # ============================
@@ -193,6 +201,7 @@ def execute_scan(session, fixtures, snap_mem, excluded, min_rating_val):
     results = []
     pb = st.progress(0)
     filtered = [f for f in fixtures if f["league"]["country"] not in excluded and not any(k in f["league"]["name"].lower() for k in LEAGUE_KEYWORDS_BLACKLIST)]
+    
     for i, m in enumerate(filtered):
         pb.progress((i+1)/len(filtered))
         try:
@@ -201,12 +210,12 @@ def execute_scan(session, fixtures, snap_mem, excluded, min_rating_val):
             fid_s = str(m["fixture"]["id"])
             s_h, s_a = get_stats(session, m["teams"]["home"]["id"]), get_stats(session, m["teams"]["away"]["id"])
             
-            # --- HT-OK Basato su 8 Match ---
             HT_OK = 1 if (s_h["ht_ok_bool"] and s_a["ht_ok_bool"]) else 0
-            
             HAS_DROP = 1 if (fid_s in snap_mem and max(float(snap_mem[fid_s].get("q1", 0)) - mk["q1"], float(snap_mem[fid_s].get("q2", 0)) - mk["q2"]) >= 0.15) else 0
-            gate_o15 = (2.00 <= mk["o15ht"] <= 2.60)
-            gate_gg = (3.90 <= mk["gg_ht"] <= 5.50)
+            
+            # NUOVI RANGE ALLARGATI
+            gate_o15 = (2.00 <= mk["o15ht"] <= 2.80)
+            gate_gg = (3.50 <= mk["gg_ht"] <= 6.50)
             GATE_11 = 1 if (HT_OK and (gate_o15 or gate_gg)) else 0
             
             fav_side = "q1" if mk["q1"] < mk["q2"] else "q2"
@@ -214,6 +223,7 @@ def execute_scan(session, fixtures, snap_mem, excluded, min_rating_val):
             f_stats = s_h if fav_side == "q1" else s_a
             avg_vul = (s_h["vulnerability_5"] + s_a["vulnerability_5"]) / 2
             
+            # BOOST & BOOST+
             is_boost = (HT_OK and (1.60 <= mk["o25"] <= 2.15) and (1.20 <= mk["o05ht"] <= 1.55) and (avg_vul >= 0.60 or f_stats["vulnerability_5"] >= 0.80) and f_stats["o25_ratio_8"] >= 0.625)
             boost_tag = ""
             if is_boost:
@@ -222,6 +232,8 @@ def execute_scan(session, fixtures, snap_mem, excluded, min_rating_val):
             SIG_GG_PT = 1 if (GATE_11 and f_stats["vulnerability_5"] >= 0.60) else 0
             FISH_O = 1 if (1.40 <= fav_odd <= 1.80 and f_stats["o25_ratio_8"] >= 0.75) else 0
             FISH_GG = 1 if (2.20 <= mk["q1"] <= 3.80 and 2.20 <= mk["q2"] <= 3.80 and s_h["gg_ratio_8"] >= 0.75 and s_a["gg_ratio_8"] >= 0.75) else 0
+            
+            # SUPER RED: BOOST+ E ALMENO UN PESCE
             is_super_red = 1 if (boost_tag == "💣 O25-BOOST+" and (FISH_O or FISH_GG)) else 0
 
             det = []
@@ -324,8 +336,11 @@ if st.session_state["scan_results"]:
         if only_o25_gold: df_view = df_view[df_view["O25_OK"] == 1]
         
         def style_row(row):
+            # PRIORITÀ 1: SUPER-RED (BOOST+ & PESCE)
             if row.get('Is_Super_Red'): return ['background-color: #8b0000; color: #ffffff;' for _ in row]
+            # PRIORITÀ 2: VIOLA (GG-PT)
             if '🎯 GG-PT' in row['Info']: return ['background-color: #38003c; color: #00e5ff;' for _ in row]
+            # PRIORITÀ 3: VERDE (BOOST)
             if '💣 O25-BOOST' in row['Info']: return ['background-color: #003300; color: #00ff00;' for _ in row] 
             return ['' for _ in row]
         
