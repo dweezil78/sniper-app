@@ -8,7 +8,7 @@ import time
 from pathlib import Path
 
 # ============================
-# CONFIGURAZIONE V20.61 - BARRA DI CARICAMENTO RIPRISTINATA
+# CONFIGURAZIONE V20.65 - MASTER FINAL
 # ============================
 BASE_DIR = Path(__file__).resolve().parent
 NAZIONI_FILE = str(BASE_DIR / "nazioni_config.json")
@@ -40,7 +40,7 @@ def get_db_path():
 def get_snap_db_path():
     return str(BASE_DIR / "arab_snapshot_database.json")
 
-st.set_page_config(page_title="ARAB SNIPER V20.61 - PROGRESS BAR FIX", layout="wide")
+st.set_page_config(page_title="ARAB SNIPER V20.65 - MASTER FINAL", layout="wide")
 
 # ============================
 # API CORE
@@ -179,12 +179,10 @@ def extract_markets(resp_json):
 # ============================
 def execute_scan(session, fixtures, snap_mem, excluded, min_rating_val):
     results = []
-    # --- RIPRISTINO BARRA DI CARICAMENTO ---
     pb = st.progress(0)
     filtered = [f for f in fixtures if f["league"]["country"] not in excluded and not any(k in f["league"]["name"].lower() for k in LEAGUE_KEYWORDS_BLACKLIST)]
     
     for i, m in enumerate(filtered):
-        # --- AGGIORNAMENTO BARRA ---
         pb.progress((i+1)/len(filtered))
         try:
             mk = extract_markets(api_get(session, "odds", {"fixture": m["fixture"]["id"]}))
@@ -192,7 +190,7 @@ def execute_scan(session, fixtures, snap_mem, excluded, min_rating_val):
             fid_s = str(m["fixture"]["id"])
             s_h, s_a = get_stats(session, m["teams"]["home"]["id"]), get_stats(session, m["teams"]["away"]["id"])
             
-            # SOGLIA HT-OK: 3 su 5 netti (0.60)
+            # HT-OK: 3 su 5 netti (0.60)
             HT_OK = 1 if (s_h["ht_ratio"] >= 0.60 and s_a["ht_ratio"] >= 0.60) else 0
             HAS_DROP = 1 if (fid_s in snap_mem and max(float(snap_mem[fid_s].get("q1", 0)) - mk["q1"], float(snap_mem[fid_s].get("q2", 0)) - mk["q2"]) >= 0.15) else 0
             
@@ -206,13 +204,12 @@ def execute_scan(session, fixtures, snap_mem, excluded, min_rating_val):
             f_stats = s_h if fav_side == "q1" else s_a
             avg_vul = (s_h["vulnerability"] + s_a["vulnerability"]) / 2
             
-            # UNIFICATO 💣 O25-BOOST (VUL >= 55%)
+            # BOOST & BOOST+
             boost_tag = ""
             is_boost = (HT_OK and (1.60 <= mk["o25"] <= 2.15) and (1.20 <= mk["o05ht"] <= 1.55) and (avg_vul >= 0.55 or f_stats["vulnerability"] >= 0.75))
             if is_boost:
                 boost_tag = "💣 O25-BOOST+" if (1.40 <= fav_odd <= 1.75) else "💣 O25-BOOST"
 
-            # GG-PT (VUL FAV >= 60%)
             SIG_GG_PT = 1 if (GATE_11 and f_stats["vulnerability"] >= 0.60) else 0
             
             # PESCI (No rating)
@@ -262,7 +259,7 @@ with st.sidebar.expander("🌍 Filtro Nazioni", expanded=False):
         st.rerun()
 
 # ============================
-# SCAN & RENDERING
+# RENDERING & EXPORT
 # ============================
 CUSTOM_CSS = """<style>.stTableContainer { overflow-x: auto; } table { width: 100%; border-collapse: collapse; font-size: 0.82rem; } th { background-color: #1a1c23; color: #00e5ff; padding: 8px; white-space: nowrap; } td { padding: 5px; border: 1px solid #ccc; text-align: center; font-weight: 600; white-space: nowrap; }</style>"""
 st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
@@ -275,7 +272,6 @@ def run_scan(is_snap):
             day_fixtures = [f for f in data.get("response", []) if f["fixture"]["status"]["short"] == "NS"]
             if is_snap:
                 current_snap = st.session_state["odds_memory"]
-                # Aggiunta barra anche per snapshot
                 pb_s = st.progress(0)
                 for idx, m in enumerate(day_fixtures):
                     pb_s.progress((idx+1)/len(day_fixtures))
@@ -312,3 +308,10 @@ if st.session_state["scan_results"]:
         DISPLAY_COLS = ["Data", "Ora", "Lega", "Match", "1X2", "O2.5", "O0.5HT", "O1.5HT", "Quota GG1T", "Info", "Rating", "Gold"]
         st_style = df_view[DISPLAY_COLS].sort_values(["Ora"]).style.apply(style_row, axis=1)
         st.write(st_style.to_html(escape=False, index=False), unsafe_allow_html=True)
+        
+        st.markdown("---")
+        # --- TASTI DI DOWNLOAD ---
+        c1, c2 = st.columns(2)
+        c1.download_button("💾 CSV AUDITOR (DB COMPLETO)", df.to_csv(index=False).encode('utf-8'), f"audit_full_{target_dates[0]}.csv")
+        h_rep = f"<html><head>{CUSTOM_CSS}</head><body>{st_style.to_html(escape=False, index=False)}</body></html>"
+        c2.download_button("🌐 HTML REPORT (VISTA ATTUALE)", h_rep.encode('utf-8'), f"report_{target_dates[HORIZON-1]}.html")
