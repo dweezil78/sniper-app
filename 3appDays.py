@@ -8,7 +8,7 @@ import time
 from pathlib import Path
 
 # ============================
-# CONFIGURAZIONE V20.50 - ROLLING DATABASE
+# CONFIGURAZIONE V20.61 - BARRA DI CARICAMENTO RIPRISTINATA
 # ============================
 BASE_DIR = Path(__file__).resolve().parent
 NAZIONI_FILE = str(BASE_DIR / "nazioni_config.json")
@@ -34,17 +34,16 @@ except Exception:
 def now_rome():
     return datetime.now(ROME_TZ) if ROME_TZ else datetime.now()
 
-# Usiamo un percorso unico per il Database per favorire lo sliding automatico
 def get_db_path():
     return str(BASE_DIR / "arab_sniper_database.json")
 
 def get_snap_db_path():
     return str(BASE_DIR / "arab_snapshot_database.json")
 
-st.set_page_config(page_title="ARAB SNIPER V20.50 - ROLLING DB", layout="wide")
+st.set_page_config(page_title="ARAB SNIPER V20.61 - PROGRESS BAR FIX", layout="wide")
 
 # ============================
-# API CORE & SECURITY
+# API CORE
 # ============================
 API_KEY = st.secrets.get("API_SPORTS_KEY")
 if not API_KEY:
@@ -77,8 +76,7 @@ if "excluded" not in st.session_state:
             with open(NAZIONI_FILE, "r") as f:
                 st.session_state["excluded"] = list(json.load(f).get("excluded", DEFAULT_EXCLUDED))
         except: st.session_state["excluded"] = DEFAULT_EXCLUDED
-    else:
-        st.session_state["excluded"] = DEFAULT_EXCLUDED
+    else: st.session_state["excluded"] = DEFAULT_EXCLUDED
 
 if "available_countries" not in st.session_state: st.session_state["available_countries"] = []
 if "odds_memory" not in st.session_state: st.session_state["odds_memory"] = {}
@@ -87,21 +85,16 @@ if "scan_results" not in st.session_state: st.session_state["scan_results"] = []
 target_dates = [(now_rome().date() + timedelta(days=i)).strftime("%Y-%m-%d") for i in range(3)]
 
 def load_and_slide_db():
-    """Carica il database e rimuove i match dei giorni passati (Sliding Window)"""
     db_path = get_db_path()
     snap_path = get_snap_db_path()
     today_str = target_dates[0]
-
     if os.path.exists(db_path):
         try:
             with open(db_path, "r") as f:
                 data = json.load(f)
                 all_results = data.get("results", [])
-                # SLIDING: Teniamo solo i match da oggi in poi
-                valid_results = [r for r in all_results if r["Data"] >= today_str]
-                st.session_state["scan_results"] = valid_results
+                st.session_state["scan_results"] = [r for r in all_results if r["Data"] >= today_str]
         except: pass
-
     if os.path.exists(snap_path):
         try:
             with open(snap_path, "r") as f:
@@ -114,13 +107,8 @@ def load_and_slide_db():
 last_snap_ts = load_and_slide_db()
 
 st.sidebar.header("👑 Arab Sniper Console")
-st.sidebar.markdown(f"📅 **Oggi:** {target_dates[0]}")
 HORIZON = st.sidebar.selectbox("Orizzonte Scan (Giorno):", options=[1, 2, 3], index=0)
 
-if last_snap_ts:
-    st.sidebar.success(f"📦 DB Sincronizzato ({last_snap_ts})")
-
-# Popolamento nazioni (invariato)
 if not st.session_state["available_countries"]:
     try:
         with requests.Session() as s_init:
@@ -175,7 +163,6 @@ def extract_markets(resp_json):
                     if clean(x.get("value")) == "over2.5": data["o25"] = float(x.get("odd") or 0); break
             
             is_1h = (("1st" in name_raw) or ("firsthalf" in name_clean) or (("first" in name_raw) and ("half" in name_raw))) and not (("2nd" in name_raw) or ("second" in name_raw))
-            
             if (bid == 71 or (("gg" in name_clean or "both" in name_clean) and is_1h)) and data["gg_ht"] == 0:
                 for x in b.get("values", []):
                     if clean(x.get("value")) in ["yes", "si", "oui"]: data["gg_ht"] = float(x.get("odd") or 0); break
@@ -188,13 +175,16 @@ def extract_markets(resp_json):
     return data
 
 # ============================
-# CORE SCAN ENGINE
+# CORE ENGINE
 # ============================
 def execute_scan(session, fixtures, snap_mem, excluded, min_rating_val):
-    results, pb = [], st.progress(0)
+    results = []
+    # --- RIPRISTINO BARRA DI CARICAMENTO ---
+    pb = st.progress(0)
     filtered = [f for f in fixtures if f["league"]["country"] not in excluded and not any(k in f["league"]["name"].lower() for k in LEAGUE_KEYWORDS_BLACKLIST)]
     
     for i, m in enumerate(filtered):
+        # --- AGGIORNAMENTO BARRA ---
         pb.progress((i+1)/len(filtered))
         try:
             mk = extract_markets(api_get(session, "odds", {"fixture": m["fixture"]["id"]}))
@@ -202,38 +192,42 @@ def execute_scan(session, fixtures, snap_mem, excluded, min_rating_val):
             fid_s = str(m["fixture"]["id"])
             s_h, s_a = get_stats(session, m["teams"]["home"]["id"]), get_stats(session, m["teams"]["away"]["id"])
             
-            HT_OK = 1 if (s_h["ht_ratio"] >= 0.625 and s_a["ht_ratio"] >= 0.625) else 0
+            # SOGLIA HT-OK: 3 su 5 netti (0.60)
+            HT_OK = 1 if (s_h["ht_ratio"] >= 0.60 and s_a["ht_ratio"] >= 0.60) else 0
+            HAS_DROP = 1 if (fid_s in snap_mem and max(float(snap_mem[fid_s].get("q1", 0)) - mk["q1"], float(snap_mem[fid_s].get("q2", 0)) - mk["q2"]) >= 0.15) else 0
             
-            HAS_DROP = 0
-            if fid_s in snap_mem:
-                sq1, sq2 = float(snap_mem[fid_s].get("q1", 0)), float(snap_mem[fid_s].get("q2", 0))
-                if max(sq1 - mk["q1"], sq2 - mk["q2"]) >= 0.15: HAS_DROP = 1
-
-            O25_OK = 1 if (1.70 <= mk["o25"] < 2.00) else 0
-            gate_o15, gate_gg = (2.20 <= mk["o15ht"] <= 2.80), (4.20 <= mk["gg_ht"] <= 5.50)
+            # RANGE GG-PT RIVISTO
+            gate_o15 = (2.00 <= mk["o15ht"] <= 2.60)
+            gate_gg = (3.90 <= mk["gg_ht"] <= 5.50)
             GATE_11 = 1 if (HT_OK and (gate_o15 or gate_gg)) else 0
-            fav_side = "q1" if mk["q1"] < mk["q2"] else "q2"
-            f_stats = s_h if fav_side == "q1" else s_a
             
-            SIG_GG_PT = 1 if (GATE_11 and f_stats["vulnerability"] >= 0.6) else 0
+            fav_side = "q1" if mk["q1"] < mk["q2"] else "q2"
+            fav_odd = mk[fav_side]
+            f_stats = s_h if fav_side == "q1" else s_a
             avg_vul = (s_h["vulnerability"] + s_a["vulnerability"]) / 2
             
-            SIG_O25_BOOST = 1 if (HT_OK and (1.60 <= mk["o25"] <= 2.15) and (1.20 <= mk["o05ht"] <= 1.55) and (avg_vul >= 0.6 or f_stats["vulnerability"] >= 0.75)) else 0
-            SIG_OVER_PRO = 1 if (O25_OK and (1.20 <= mk["o05ht"] <= 1.55) and HT_OK) else 0
+            # UNIFICATO 💣 O25-BOOST (VUL >= 55%)
+            boost_tag = ""
+            is_boost = (HT_OK and (1.60 <= mk["o25"] <= 2.15) and (1.20 <= mk["o05ht"] <= 1.55) and (avg_vul >= 0.55 or f_stats["vulnerability"] >= 0.75))
+            if is_boost:
+                boost_tag = "💣 O25-BOOST+" if (1.40 <= fav_odd <= 1.75) else "💣 O25-BOOST"
 
-            FISH_O = 1 if (1.40 <= min(mk["q1"], mk["q2"]) <= 1.80 and f_stats["o25_ratio"] >= 0.625) else 0
-            FISH_GG = 1 if (2.20 <= mk["q1"] <= 3.80 and 2.20 <= mk["q2"] <= 3.80 and s_h["gg_ratio"] >= 0.625 and s_a["gg_ratio"] >= 0.625) else 0
+            # GG-PT (VUL FAV >= 60%)
+            SIG_GG_PT = 1 if (GATE_11 and f_stats["vulnerability"] >= 0.60) else 0
+            
+            # PESCI (No rating)
+            FISH_O = 1 if (1.40 <= min(mk["q1"], mk["q2"]) <= 1.80 and f_stats["o25_ratio"] >= 0.75) else 0
+            FISH_GG = 1 if (2.20 <= mk["q1"] <= 3.80 and 2.20 <= mk["q2"] <= 3.80 and s_h["gg_ratio"] >= 0.75 and s_a["gg_ratio"] >= 0.75) else 0
 
             det = []
             if HT_OK: det.append("HT-OK")
             if SIG_GG_PT: det.append("🎯 GG-PT")
-            if SIG_O25_BOOST: det.append("💣 O25-BOOST")
-            if SIG_OVER_PRO: det.append("🔥 OVER-PRO")
+            if boost_tag: det.append(boost_tag)
             if FISH_O: det.append("🐟O")
             if FISH_GG: det.append("🐟GG")
             if HAS_DROP: det.append("Drop")
 
-            rating = min(100, 45 + max((25 if SIG_GG_PT else 0), (30 if SIG_O25_BOOST else (20 if SIG_OVER_PRO else 0))) + (30 if HAS_DROP else 0) + (10 if (FISH_O or FISH_GG) else 0))
+            rating = min(100, 45 + max((25 if SIG_GG_PT else 0), (30 if is_boost else 0)) + (30 if HAS_DROP else 0))
 
             if rating >= min_rating_val:
                 results.append({
@@ -241,13 +235,13 @@ def execute_scan(session, fixtures, snap_mem, excluded, min_rating_val):
                     "Lega": f"{m['league']['name']} ({m['league']['country']})", "Match": f"{m['teams']['home']['name']} - {m['teams']['away']['name']}",
                     "1X2": f"{mk['q1']:.2f}|{mk['qx']:.2f}|{mk['q2']:.2f}", "O2.5": f"{mk['o25']:.2f}", "O0.5HT": f"{mk['o05ht']:.2f}", "O1.5HT": f"{mk['o15ht']:.2f}", 
                     "Quota GG1T": f"{mk['gg_ht']:.2f}", "Info": f"[{'|'.join(det)}]", "Rating": rating, "Gold": "✅" if (1.40 <= min(mk["q1"], mk["q2"]) <= 2.10) else "❌",
-                    "Is_Gold_Bool": (1.40 <= min(mk["q1"], mk["q2"]) <= 2.10), "O25_OK": O25_OK
+                    "Is_Gold_Bool": (1.40 <= min(mk["q1"], mk["q2"]) <= 2.10), "O25_OK": (1.70 <= mk["o25"] < 2.10)
                 })
         except: continue
     return results
 
 # ============================
-# UI SIDEBAR (Tua Struttura Originale)
+# UI SIDEBAR
 # ============================
 st.sidebar.subheader("🛡️ Audit Config")
 only_fav_gold = st.sidebar.toggle("🎯 SOLO SWEET SPOT FAV", value=False)
@@ -268,7 +262,7 @@ with st.sidebar.expander("🌍 Filtro Nazioni", expanded=False):
         st.rerun()
 
 # ============================
-# RENDERING & INCREMENTAL SCAN
+# SCAN & RENDERING
 # ============================
 CUSTOM_CSS = """<style>.stTableContainer { overflow-x: auto; } table { width: 100%; border-collapse: collapse; font-size: 0.82rem; } th { background-color: #1a1c23; color: #00e5ff; padding: 8px; white-space: nowrap; } td { padding: 5px; border: 1px solid #ccc; text-align: center; font-weight: 600; white-space: nowrap; }</style>"""
 st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
@@ -277,38 +271,27 @@ def run_scan(is_snap):
     with requests.Session() as s:
         try:
             target_date = target_dates[HORIZON - 1]
-            st.info(f"Avvio scan incrementale per il giorno: {target_date}")
-            
             data = api_get(s, "fixtures", {"date": target_date, "timezone": "Europe/Rome"})
             day_fixtures = [f for f in data.get("response", []) if f["fixture"]["status"]["short"] == "NS"]
-            
             if is_snap:
                 current_snap = st.session_state["odds_memory"]
+                # Aggiunta barra anche per snapshot
                 pb_s = st.progress(0)
-                for i, m in enumerate(day_fixtures):
-                    pb_s.progress((i+1)/len(day_fixtures))
+                for idx, m in enumerate(day_fixtures):
+                    pb_s.progress((idx+1)/len(day_fixtures))
                     mk = extract_markets(api_get(s, "odds", {"fixture": m["fixture"]["id"]}))
                     if mk and mk["q1"] > 0: current_snap[str(m["fixture"]["id"])] = {"q1": mk["q1"], "q2": mk["q2"]}
-                
-                st.session_state["odds_memory"] = current_snap
-                with open(get_snap_db_path(), "w") as f_s: 
-                    json.dump({"odds": current_snap, "timestamp": now_rome().strftime("%d/%m/%Y %H:%M")}, f_s)
+                with open(get_snap_db_path(), "w") as f_s: json.dump({"odds": current_snap, "timestamp": now_rome().strftime("%d/%m/%Y %H:%M")}, f_s)
             
             new_results = execute_scan(s, day_fixtures, st.session_state["odds_memory"], st.session_state["excluded"], min_rating_ui)
-            
-            # UNIONE NEL DATABASE UNICO
             existing = st.session_state["scan_results"]
             existing_ids = [r["Fixture_ID"] for r in existing]
             filtered_new = [r for r in new_results if r["Fixture_ID"] not in existing_ids]
             all_res = existing + filtered_new
-            
             st.session_state["scan_results"] = all_res
-            with open(get_db_path(), "w") as f_db: 
-                json.dump({"results": all_res}, f_db)
-            
-            st.success(f"Giorno {target_date} sincronizzato nel database!"); time.sleep(1); st.rerun()
-        except Exception as e:
-            st.error(str(e))
+            with open(get_db_path(), "w") as f_db: json.dump({"results": all_res}, f_db)
+            st.rerun()
+        except Exception as e: st.error(str(e))
 
 col1, col2 = st.columns(2)
 if col1.button("📌 SNAPSHOT + SCAN (MIRATO)"): run_scan(True)
@@ -316,9 +299,7 @@ if col2.button("🚀 SCAN VELOCE (NO SNAP)"): run_scan(False)
 
 if st.session_state["scan_results"]:
     df = pd.DataFrame(st.session_state["scan_results"])
-    # Mostriamo solo i match del giorno selezionato in sidebar
     df_view = df[df["Data"] == target_dates[HORIZON-1]]
-    
     if not df_view.empty:
         if only_fav_gold: df_view = df_view[df_view["Is_Gold_Bool"]]
         if only_o25_gold: df_view = df_view[df_view["O25_OK"] == 1]
@@ -326,13 +307,8 @@ if st.session_state["scan_results"]:
         def style_row(row):
             if '🎯 GG-PT' in row['Info']: return ['background-color: #38003c; color: #00e5ff;' for _ in row]
             if '💣 O25-BOOST' in row['Info']: return ['background-color: #003300; color: #00ff00;' for _ in row] 
-            if ('🐟O' in row['Info'] or '🐟GG' in row['Info']) and row['Rating'] >= 55: return ['background-color: #004d4d; color: #00ffff;' for _ in row]
             return ['' for _ in row]
         
         DISPLAY_COLS = ["Data", "Ora", "Lega", "Match", "1X2", "O2.5", "O0.5HT", "O1.5HT", "Quota GG1T", "Info", "Rating", "Gold"]
         st_style = df_view[DISPLAY_COLS].sort_values(["Ora"]).style.apply(style_row, axis=1)
         st.write(st_style.to_html(escape=False, index=False), unsafe_allow_html=True)
-        
-        st.markdown("---")
-        # Il download esporta SEMPRE tutto il database (3 giorni) per l'Auditor
-        st.download_button("💾 Esporta Database Completo (3gg)", df.to_csv(index=False).encode('utf-8'), f"audit_full_{target_dates[0]}.csv")
