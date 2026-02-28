@@ -8,7 +8,7 @@ import time
 from pathlib import Path
 
 # ============================
-# CONFIGURAZIONE V20.60 - UNIFIED BOOST & PRECISION
+# CONFIGURAZIONE V20.61 - BARRA DI CARICAMENTO RIPRISTINATA
 # ============================
 BASE_DIR = Path(__file__).resolve().parent
 NAZIONI_FILE = str(BASE_DIR / "nazioni_config.json")
@@ -40,7 +40,7 @@ def get_db_path():
 def get_snap_db_path():
     return str(BASE_DIR / "arab_snapshot_database.json")
 
-st.set_page_config(page_title="ARAB SNIPER V20.60 - UNIFIED BOOST", layout="wide")
+st.set_page_config(page_title="ARAB SNIPER V20.61 - PROGRESS BAR FIX", layout="wide")
 
 # ============================
 # API CORE
@@ -178,10 +178,13 @@ def extract_markets(resp_json):
 # CORE ENGINE
 # ============================
 def execute_scan(session, fixtures, snap_mem, excluded, min_rating_val):
-    results, pb = [], st.progress(0)
+    results = []
+    # --- RIPRISTINO BARRA DI CARICAMENTO ---
+    pb = st.progress(0)
     filtered = [f for f in fixtures if f["league"]["country"] not in excluded and not any(k in f["league"]["name"].lower() for k in LEAGUE_KEYWORDS_BLACKLIST)]
     
     for i, m in enumerate(filtered):
+        # --- AGGIORNAMENTO BARRA ---
         pb.progress((i+1)/len(filtered))
         try:
             mk = extract_markets(api_get(session, "odds", {"fixture": m["fixture"]["id"]}))
@@ -189,7 +192,7 @@ def execute_scan(session, fixtures, snap_mem, excluded, min_rating_val):
             fid_s = str(m["fixture"]["id"])
             s_h, s_a = get_stats(session, m["teams"]["home"]["id"]), get_stats(session, m["teams"]["away"]["id"])
             
-            # NUOVA SOGLIA HT-OK: 3 su 5 netti (0.60)
+            # SOGLIA HT-OK: 3 su 5 netti (0.60)
             HT_OK = 1 if (s_h["ht_ratio"] >= 0.60 and s_a["ht_ratio"] >= 0.60) else 0
             HAS_DROP = 1 if (fid_s in snap_mem and max(float(snap_mem[fid_s].get("q1", 0)) - mk["q1"], float(snap_mem[fid_s].get("q2", 0)) - mk["q2"]) >= 0.15) else 0
             
@@ -203,7 +206,7 @@ def execute_scan(session, fixtures, snap_mem, excluded, min_rating_val):
             f_stats = s_h if fav_side == "q1" else s_a
             avg_vul = (s_h["vulnerability"] + s_a["vulnerability"]) / 2
             
-            # NUOVO 💣 O25-BOOST (VUL >= 55% e UNIFICAZIONE)
+            # UNIFICATO 💣 O25-BOOST (VUL >= 55%)
             boost_tag = ""
             is_boost = (HT_OK and (1.60 <= mk["o25"] <= 2.15) and (1.20 <= mk["o05ht"] <= 1.55) and (avg_vul >= 0.55 or f_stats["vulnerability"] >= 0.75))
             if is_boost:
@@ -212,7 +215,7 @@ def execute_scan(session, fixtures, snap_mem, excluded, min_rating_val):
             # GG-PT (VUL FAV >= 60%)
             SIG_GG_PT = 1 if (GATE_11 and f_stats["vulnerability"] >= 0.60) else 0
             
-            # PESCI (Rating azzerato come richiesto)
+            # PESCI (No rating)
             FISH_O = 1 if (1.40 <= min(mk["q1"], mk["q2"]) <= 1.80 and f_stats["o25_ratio"] >= 0.75) else 0
             FISH_GG = 1 if (2.20 <= mk["q1"] <= 3.80 and 2.20 <= mk["q2"] <= 3.80 and s_h["gg_ratio"] >= 0.75 and s_a["gg_ratio"] >= 0.75) else 0
 
@@ -224,7 +227,6 @@ def execute_scan(session, fixtures, snap_mem, excluded, min_rating_val):
             if FISH_GG: det.append("🐟GG")
             if HAS_DROP: det.append("Drop")
 
-            # CALCOLO RATING (PESCE = 0 PUNTI)
             rating = min(100, 45 + max((25 if SIG_GG_PT else 0), (30 if is_boost else 0)) + (30 if HAS_DROP else 0))
 
             if rating >= min_rating_val:
@@ -273,7 +275,10 @@ def run_scan(is_snap):
             day_fixtures = [f for f in data.get("response", []) if f["fixture"]["status"]["short"] == "NS"]
             if is_snap:
                 current_snap = st.session_state["odds_memory"]
-                for m in day_fixtures:
+                # Aggiunta barra anche per snapshot
+                pb_s = st.progress(0)
+                for idx, m in enumerate(day_fixtures):
+                    pb_s.progress((idx+1)/len(day_fixtures))
                     mk = extract_markets(api_get(s, "odds", {"fixture": m["fixture"]["id"]}))
                     if mk and mk["q1"] > 0: current_snap[str(m["fixture"]["id"])] = {"q1": mk["q1"], "q2": mk["q2"]}
                 with open(get_snap_db_path(), "w") as f_s: json.dump({"odds": current_snap, "timestamp": now_rome().strftime("%d/%m/%Y %H:%M")}, f_s)
