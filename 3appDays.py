@@ -335,4 +335,4 @@ if st.session_state["scan_results"]:
         
         st.markdown("---")
         # Il download esporta SEMPRE tutto il database (3 giorni) per l'Auditor
-        st.download_button("💾 Esporta D
+        st.download_button("💾 Esporta Database Completo (3gg)", df.to_csv(index=False).encode('utf-8'), f"audit_full_{target_dates[0]}.csv")
