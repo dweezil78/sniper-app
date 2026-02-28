@@ -8,7 +8,7 @@ import time
 from pathlib import Path
 
 # ============================
-# CONFIGURAZIONE V20.85 - TACTICAL SYNERGY
+# CONFIGURAZIONE V20.90 - HUNGER EXCEPTION
 # ============================
 BASE_DIR = Path(__file__).resolve().parent
 NAZIONI_FILE = str(BASE_DIR / "nazioni_config.json")
@@ -40,7 +40,7 @@ def get_db_path():
 def get_snap_db_path():
     return str(BASE_DIR / "arab_snapshot_database.json")
 
-st.set_page_config(page_title="ARAB SNIPER V20.85 - TACTICAL SYNERGY", layout="wide")
+st.set_page_config(page_title="ARAB SNIPER V20.90 - HUNGER EXCEPTION", layout="wide")
 
 # ============================
 # API CORE
@@ -68,7 +68,7 @@ def api_get(session, path, params, retries=2):
             time.sleep(1)
 
 # ============================
-# INITIALIZATION & ROLLING LOGIC
+# INITIALIZATION & ROLLING
 # ============================
 if "excluded" not in st.session_state:
     if os.path.exists(NAZIONI_FILE):
@@ -107,7 +107,7 @@ def load_and_slide_db():
 last_snap_ts = load_and_slide_db()
 
 # ============================
-# MOTORE STATISTICO (GG-HT TREND)
+# STATS ENGINE (HUNGER LOGIC)
 # ============================
 team_stats_cache = {}
 
@@ -116,44 +116,37 @@ def get_stats(session, tid):
     try:
         rx = api_get(session, "fixtures", {"team": tid, "last": 8, "status": "FT"})
         fx = rx.get("response", [])
-        if not fx: return {"ht_ok_bool": False, "vulnerability_5": 0.0, "o25_ratio_8": 0.0, "gg_ratio_8": 0.0, "gght_stat_ok": False}
+        if not fx: return {"ht_score": 0, "is_elite": False, "vul_5": 0.0, "o25_8": 0.0, "gg_8": 0.0, "actual": 0}
         
         actual = len(fx)
-        ht_count, o25_count, gg_count, vul_count_5, gght_hist_count = 0, 0, 0, 0, 0
+        ht_count, o25_count, gg_count, vul_5 = 0, 0, 0, 0
         
         for idx, f in enumerate(fx):
             score_ht = f.get("score",{}).get("halftime",{})
-            gh_ht = score_ht.get("home") or 0
-            ga_ht = score_ht.get("away") or 0
-            
-            # Conteggio HT
-            if (gh_ht + ga_ht) >= 1: ht_count += 1
-            
-            # Conteggio GG HT (Entrambe a segno nel 1T)
-            if gh_ht > 0 and ga_ht > 0: gght_hist_count += 1
-            
+            if ((score_ht.get("home") or 0) + (score_ht.get("away") or 0)) >= 1: ht_count += 1
             is_h = (f["teams"]["home"]["id"] == tid)
             if ((f["goals"]["home"] or 0) + (f["goals"]["away"] or 0)) >= 3: o25_count += 1
             if (f["goals"]["home"] or 0) > 0 and (f["goals"]["away"] or 0) > 0: gg_count += 1
             if idx < 5:
-                if ((f["goals"]["away"] if is_h else f["goals"]["home"]) or 0) > 0: vul_count_5 += 1
+                if ((f["goals"]["away"] if is_h else f["goals"]["home"]) or 0) > 0: vul_5 += 1
         
-        # LOGICA HT-OK (5/8, 4/7, 4/6, 3/5)
-        ht_ok = (actual >= 8 and ht_count >= 5) or (actual == 7 and ht_count >= 4) or (actual == 6 and ht_count >= 4) or (actual == 5 and ht_count >= 3)
+        # SOGLIA STANDARD HT
+        ht_std = (actual >= 8 and ht_count >= 5) or (actual == 7 and ht_count >= 4) or (actual == 6 and ht_count >= 4) or (actual == 5 and ht_count >= 3)
         
-        # LOGICA GG-HT STATISTICA (3/8 o 2/5)
-        gght_stat_ok = (actual >= 8 and gght_hist_count >= 3) or (actual >= 5 and gght_hist_count >= 2)
+        # SOGLIA ELITE (L'ECCEZIONE CHE CONFERMA LA REGOLA)
+        is_elite = (actual >= 8 and ht_count >= 6) or (actual >= 6 and ht_count >= 5)
 
         res = {
-            "ht_ok_bool": ht_ok, 
-            "vulnerability_5": vul_count_5/min(actual, 5), 
-            "o25_ratio_8": o25_count/actual, 
-            "gg_ratio_8": gg_count/actual,
-            "gght_stat_ok": gght_stat_ok
+            "ht_std": ht_std,
+            "is_elite": is_elite,
+            "vul_5": vul_5/min(actual, 5),
+            "o25_8": o25_count/actual,
+            "gg_8": gg_count/actual,
+            "actual": actual
         }
         team_stats_cache[tid] = res
         return res
-    except: return {"ht_ok_bool": False, "vulnerability_5": 0.0, "o25_ratio_8": 0.0, "gg_ratio_8": 0.0, "gght_stat_ok": False}
+    except: return {"ht_score": 0, "is_elite": False, "vul_5": 0.0, "o25_8": 0.0, "gg_8": 0.0, "actual": 0}
 
 def extract_markets(session, fixture_id):
     try:
@@ -178,7 +171,7 @@ def extract_markets(session, fixture_id):
                         if clean(x.get("value")) == "over2.5": data["o25"] = float(x.get("odd") or 0); break
                 is_1h = (("1st" in name_raw) or ("firsthalf" in name_clean) or ("first" in name_raw and "half" in name_raw)) and not ("2nd" in name_raw or "second" in name_raw)
                 if is_1h:
-                    if (bid == 71 or any(k in name_clean for k in ["gg", "both", "btts", "goal"])) and data["gg_ht"] == 0:
+                    if (bid == 71 or any(k in name_clean for k in ["gg", "both", "btts"])) and data["gg_ht"] == 0:
                         for x in b.get("values", []):
                             if clean(x.get("value")) in ["yes", "si", "oui"]: 
                                 val = float(x.get("odd") or 0)
@@ -188,7 +181,7 @@ def extract_markets(session, fixture_id):
                             vn, odd_val = clean(x.get("value")), float(x.get("odd") or 0)
                             if vn == "over0.5" and data["o05ht"] == 0 and odd_val < 1.75: data["o05ht"] = odd_val
                             if vn == "over1.5" and data["o15ht"] == 0: data["o15ht"] = odd_val
-            if data["q1"]>0 and data["o05ht"]>0 and data["gg_ht"]>0: break
+            if data["q1"]>0 and data["o05ht"]>0: break
         return data
     except: return None
 
@@ -208,27 +201,22 @@ def execute_scan(session, fixtures, snap_mem, excluded, min_rating_val):
             fid_s = str(m["fixture"]["id"])
             s_h, s_a = get_stats(session, m["teams"]["home"]["id"]), get_stats(session, m["teams"]["away"]["id"])
             
-            HT_OK = 1 if (s_h["ht_ok_bool"] and s_a["ht_ok_bool"]) else 0
-            HAS_DROP = 1 if (fid_s in snap_mem and max(float(snap_mem[fid_s].get("q1", 0)) - mk["q1"], float(snap_mem[fid_s].get("q2", 0)) - mk["q2"]) >= 0.15) else 0
+            # --- NUOVA LOGICA HT-OK CON ECCEZIONE ---
+            # Passa se entrambe sono Standard OPPURE se almeno una è Elite
+            HT_OK = 1 if ((s_h["ht_std"] and s_a["ht_std"]) or (s_h["is_elite"] or s_a["is_elite"])) else 0
             
-            # GG-PT LOGICA INTEGRATA (Mercato + Vulnerabilità + Storia GG-HT)
-            gate_o15 = (2.00 <= mk["o15ht"] <= 2.80)
-            gate_gg = (3.50 <= mk["gg_ht"] <= 6.50)
+            HAS_DROP = 1 if (fid_s in snap_mem and max(float(snap_mem[fid_s].get("q1", 0)) - mk["q1"], float(snap_mem[fid_s].get("q2", 0)) - mk["q2"]) >= 0.15) else 0
             fav_side = "q1" if mk["q1"] < mk["q2"] else "q2"
             f_stats = s_h if fav_side == "q1" else s_a
             
-            # La nuova condizione GG-PT: Mercato + Fav subisce + Trend GGHT di entrambe
-            SIG_GG_PT = 1 if (HT_OK and (gate_o15 or gate_gg) and f_stats["vulnerability_5"] >= 0.60 and s_h["gght_stat_ok"] and s_a["gght_stat_ok"]) else 0
-            
-            avg_vul = (s_h["vulnerability_5"] + s_a["vulnerability_5"]) / 2
-            is_boost = (HT_OK and (1.60 <= mk["o25"] <= 2.15) and (1.20 <= mk["o05ht"] <= 1.55) and (avg_vul >= 0.60 or f_stats["vulnerability_5"] >= 0.80) and f_stats["o25_ratio_8"] >= 0.625)
-            
+            is_boost = (HT_OK and (1.60 <= mk["o25"] <= 2.15) and (1.20 <= mk["o05ht"] <= 1.55) and (f_stats["vul_5"] >= 0.60 or (s_h["vul_5"]+s_a["vul_5"])/2 >= 0.60) and f_stats["o25_8"] >= 0.625)
             boost_tag = ""
             if is_boost:
                 boost_tag = "💣 O25-BOOST+" if (1.40 <= mk[fav_side] <= 1.75) else "💣 O25-BOOST"
 
-            FISH_O = 1 if (1.40 <= mk[fav_side] <= 1.80 and f_stats["o25_ratio_8"] >= 0.75) else 0
-            FISH_GG = 1 if (2.20 <= mk["q1"] <= 3.80 and 2.20 <= mk["q2"] <= 3.80 and s_h["gg_ratio_8"] >= 0.75 and s_a["gg_ratio_8"] >= 0.75) else 0
+            SIG_GG_PT = 1 if (HT_OK and (2.00 <= mk["o15ht"] <= 2.80 or 3.50 <= mk["gg_ht"] <= 6.50) and f_stats["vul_5"] >= 0.60) else 0
+            FISH_O = 1 if (1.40 <= mk[fav_side] <= 1.80 and f_stats["o25_8"] >= 0.75) else 0
+            FISH_GG = 1 if (2.20 <= mk["q1"] <= 3.80 and 2.20 <= mk["q2"] <= 3.80 and s_h["gg_8"] >= 0.75 and s_a["gg_8"] >= 0.75) else 0
             is_super_red = 1 if (boost_tag == "💣 O25-BOOST+" and (FISH_O or FISH_GG)) else 0
 
             det = []
@@ -242,7 +230,7 @@ def execute_scan(session, fixtures, snap_mem, excluded, min_rating_val):
             rating = 45
             if is_boost: rating += 30
             if boost_tag == "💣 O25-BOOST+": rating += 10
-            if SIG_GG_PT: rating += 25 # Il GG-PT ora conferma l'analisi
+            if SIG_GG_PT: rating += 25
             if HAS_DROP: rating += 20
             rating = min(100, rating)
 
@@ -258,39 +246,14 @@ def execute_scan(session, fixtures, snap_mem, excluded, min_rating_val):
     return results
 
 # ============================
-# UI SIDEBAR
+# UI & RENDERING
 # ============================
 st.sidebar.header("👑 Arab Sniper Console")
 HORIZON = st.sidebar.selectbox("Orizzonte Scan (Giorno):", options=[1, 2, 3], index=0)
-st.sidebar.subheader("🛡️ Audit Config")
 only_fav_gold = st.sidebar.toggle("🎯 SOLO SWEET SPOT FAV", value=False)
 only_o25_gold = st.sidebar.toggle("⚽ SOLO SWEET SPOT O2.5", value=False)
 min_rating_ui = st.sidebar.slider("Rating Minimo", 0, 85, 30)
 
-with st.sidebar.expander("🌍 Filtro Nazioni", expanded=False):
-    if not st.session_state["available_countries"]:
-        try:
-            with requests.Session() as s_init:
-                all_c = set()
-                data_init = api_get(s_init, "fixtures", {"date": target_dates[0], "timezone": "Europe/Rome"})
-                for f_init in data_init.get("response", []): all_c.add(f_init["league"]["country"])
-                st.session_state["available_countries"] = sorted(list(all_c))
-        except: pass
-    sel_countries = [c for c in st.session_state["available_countries"] if c not in st.session_state["excluded"]]
-    to_ex = st.selectbox("Escludi:", ["-- seleziona --"] + sel_countries)
-    if to_ex != "-- seleziona --":
-        st.session_state["excluded"].append(to_ex)
-        with open(NAZIONI_FILE, "w") as f: json.dump({"excluded": st.session_state["excluded"]}, f)
-        st.rerun()
-    to_in = st.selectbox("Ripristina:", ["-- seleziona --"] + st.session_state["excluded"])
-    if to_in != "-- seleziona --":
-        st.session_state["excluded"].remove(to_in)
-        with open(NAZIONI_FILE, "w") as f: json.dump({"excluded": st.session_state["excluded"]}, f)
-        st.rerun()
-
-# ============================
-# SCAN & RENDERING
-# ============================
 CUSTOM_CSS = """<style>.stTableContainer { overflow-x: auto; } table { width: 100%; border-collapse: collapse; font-size: 0.82rem; } th { background-color: #1a1c23; color: #00e5ff; padding: 8px; white-space: nowrap; } td { padding: 5px; border: 1px solid #ccc; text-align: center; font-weight: 600; white-space: nowrap; }</style>"""
 st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
 
@@ -312,8 +275,7 @@ def run_scan(is_snap):
             new_results = execute_scan(s, day_fixtures, st.session_state["odds_memory"], st.session_state["excluded"], min_rating_ui)
             existing = st.session_state["scan_results"] or []
             existing_ids = [r["Fixture_ID"] for r in existing]
-            filtered_new = [r for r in new_results if r["Fixture_ID"] not in existing_ids]
-            all_res = existing + filtered_new
+            all_res = existing + [r for r in new_results if r["Fixture_ID"] not in existing_ids]
             st.session_state["scan_results"] = all_res
             with open(get_db_path(), "w") as f_db: json.dump({"results": all_res}, f_db)
             st.rerun()
@@ -329,19 +291,10 @@ if st.session_state["scan_results"]:
     if not df_view.empty:
         if only_fav_gold: df_view = df_view[df_view["Is_Gold_Bool"]]
         if only_o25_gold: df_view = df_view[df_view["O25_OK"] == 1]
-        
         def style_row(row):
             if row.get('Is_Super_Red'): return ['background-color: #8b0000; color: #ffffff;' for _ in row]
             if '🎯 GG-PT' in row['Info']: return ['background-color: #38003c; color: #00e5ff;' for _ in row]
             if '💣 O25-BOOST' in row['Info']: return ['background-color: #003300; color: #00ff00;' for _ in row] 
             return ['' for _ in row]
-        
-        DISPLAY_COLS = ["Data", "Ora", "Lega", "Match", "1X2", "O2.5", "O0.5HT", "O1.5HT", "Quota GG1T", "Info", "Rating", "Gold"]
-        st_style = df_view[DISPLAY_COLS].sort_values(["Ora"]).style.apply(style_row, axis=1)
-        st.write(st_style.to_html(escape=False, index=False), unsafe_allow_html=True)
-        
-        st.markdown("---")
-        c1, c2 = st.columns(2)
-        c1.download_button("💾 CSV AUDITOR", df.to_csv(index=False).encode('utf-8'), f"audit_full_{target_dates[0]}.csv")
-        h_rep = f"<html><head>{CUSTOM_CSS}</head><body>{st_style.to_html(escape=False, index=False)}</body></html>"
-        c2.download_button("🌐 HTML REPORT", h_rep.encode('utf-8'), f"report_{target_dates[HORIZON-1]}.html")
+        st.write(df_view.sort_values(["Ora"]).style.apply(style_row, axis=1).to_html(escape=False, index=False), unsafe_allow_html=True)
+        st.download_button("💾 CSV AUDITOR", df.to_csv(index=False).encode('utf-8'), f"audit_full.csv")
