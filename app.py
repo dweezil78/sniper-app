@@ -8,7 +8,7 @@ import time
 from pathlib import Path
 
 # ==========================================
-# CONFIGURAZIONE ARAB SNIPER V22.04.8 - ROBUST ODDS PARSING
+# CONFIGURAZIONE ARAB SNIPER V22.04.8 - FINAL ROBUST PARSING
 # ==========================================
 BASE_DIR = Path(__file__).resolve().parent
 DB_FILE = str(BASE_DIR / "arab_sniper_database.json")
@@ -76,60 +76,66 @@ def api_get(session, path, params):
     except: return None
 
 # ==========================================
-# NUOVO PARSING ROBUSTO (V22.04.8)
+# ESTRAZIONE QUOTE (COPIATA DA V22.04 DEFINITIVE)
 # ==========================================
-def normalize(text):
-    if not text: return ""
-    return str(text).lower().replace(" ", "").replace(",", ".")
+def _is_junk_market(name_lower: str) -> bool:
+    junk = ["corner", "card", "booking", "yellow", "red", "offside", "throw", "foul", "shot", "goal kick"]
+    return any(j in name_lower for j in junk)
 
-def extract_markets_robust(session, fid):
+def _is_team_total(name_lower: str) -> bool:
+    if "team total" in name_lower: return True
+    if "total" in name_lower and ("home" in name_lower or "away" in name_lower): return True
+    return False
+
+def extract_elite_markets(session, fid):
     res = api_get(session, "odds", {"fixture": fid})
     if not res or not res.get("response"): return None
-    
-    mk = {"q1":0.0, "qx":0.0, "q2":0.0, "o25":0.0, "o05ht":0.0, "gght":0.0}
-    
-    # Non usiamo break: iteriamo finché non riempiamo tutto il dizionario
+
+    mk = {"q1": 0.0, "qx": 0.0, "q2": 0.0, "o25": 0.0, "o05ht": 0.0, "gght": 0.0}
+
     for bm in res["response"][0].get("bookmakers", []):
         for b in bm.get("bets", []):
-            bet_name = normalize(b.get("name", ""))
-            
-            # 1X2 (ID 1)
-            if b.get("id") == 1:
-                for v in b.get("values", []):
-                    val_txt = normalize(v.get("value", ""))
-                    if "home" in val_txt and mk["q1"] == 0: mk["q1"] = float(v["odd"])
-                    elif "draw" in val_txt and mk["qx"] == 0: mk["qx"] = float(v["odd"])
-                    elif "away" in val_txt and mk["q2"] == 0: mk["q2"] = float(v["odd"])
-            
-            # OVER 2.5 FT (ID 5 o nome mercato)
-            elif b.get("id") == 5 or "goals" in bet_name and "total" in bet_name:
-                for v in b.get("values", []):
-                    val_txt = normalize(v.get("value", ""))
-                    if "over2.5" in val_txt and mk["o25"] == 0:
-                        mk["o25"] = float(v["odd"])
+            n = (b.get("name") or "").lower()
+            if not n: continue
 
-            # OVER 0.5 HT (ID 13 o mercato half)
-            elif b.get("id") == 13 or ("1st" in bet_name and "goals" in bet_name):
+            # 1X2 FT
+            if b.get("id") == 1 and mk["q1"] == 0:
                 for v in b.get("values", []):
-                    val_txt = normalize(v.get("value", ""))
-                    if "over0.5" in val_txt and mk["o05ht"] == 0:
-                        mk["o05ht"] = float(v["odd"])
+                    vl = (v.get("value") or "").lower()
+                    if vl == "home": mk["q1"] = float(v["odd"])
+                    elif vl == "draw": mk["qx"] = float(v["odd"])
+                    elif vl == "away": mk["q2"] = float(v["odd"])
 
-            # GG 1° TEMPO (BTTS 1st Half)
-            elif "btts" in bet_name and "1st" in bet_name or "both" in bet_name and "1st" in bet_name:
+            # O2.5 FT (evita corners/cards)
+            if b.get("id") == 5 and mk["o25"] == 0:
+                if _is_junk_market(n): continue
                 for v in b.get("values", []):
-                    val_txt = normalize(v.get("value", ""))
-                    if val_txt in ["yes", "si"] and mk["gght"] == 0:
-                        mk["gght"] = float(v["odd"])
+                    if (v.get("value") or "").lower() == "over 2.5": mk["o25"] = float(v["odd"])
 
-        # Se abbiamo tutto, usciamo dal loop bookmakers
-        if all(v > 0 for v in [mk["q1"], mk["o25"], mk["o05ht"]]):
-            break
-            
+            # Mercati 1H
+            is_1h = any(k in n for k in ["1st half", "first half", "1h", "1st", "half time", "halftime"])
+            if not is_1h or _is_junk_market(n): continue
+
+            # Over/Under 1H (no team total)
+            if mk["o05ht"] == 0 and any(k in n for k in ["total", "over/under", "ou"]):
+                if _is_team_total(n): continue
+                for v in b.get("values", []):
+                    if (v.get("value") or "").lower() == "over 0.5": mk["o05ht"] = float(v["odd"])
+
+            # BTTS / GG 1H (evita correct/exact)
+            if mk["gght"] == 0 and any(k in n for k in ["both teams to score", "btts", "gg", "both"]):
+                if any(x in n for x in ["exact", "correct"]): continue
+                for v in b.get("values", []):
+                    if (v.get("value") or "").lower() in ["yes", "si"]: mk["gght"] = float(v["odd"])
+
+        if mk["q1"] > 0 and mk["o25"] > 0 and (mk["o05ht"] > 0 or mk["gght"] > 0): break
+
+    if (1.01 <= mk["q1"] <= 1.10) or (1.01 <= mk["q2"] <= 1.10) or (1.01 <= mk["o25"] <= 1.30):
+        return "SKIP"
     return mk
 
 # ==========================================
-# ENGINE STATISTICHE & SCAN
+# ENGINE STATS & SCAN
 # ==========================================
 def get_team_performance(session, tid):
     if str(tid) in st.session_state.team_stats_cache: return st.session_state.team_stats_cache[str(tid)]
@@ -150,7 +156,7 @@ def get_team_performance(session, tid):
 
 def run_full_scan(snap=False):
     target_dates = [(now_rome().date() + timedelta(days=i)).strftime("%Y-%m-%d") for i in range(3)]
-    with st.spinner("🚀 Arab Sniper: Parsing mercati in corso..."):
+    with st.spinner("🚀 Arab Sniper: Analisi mercati con parsing blindato..."):
         with requests.Session() as s:
             target_date = target_dates[HORIZON - 1]
             res = api_get(s, "fixtures", {"date": target_date, "timezone": "Europe/Rome"})
@@ -161,8 +167,8 @@ def run_full_scan(snap=False):
             if snap:
                 csnap = {}
                 for f in day_fx:
-                    m = extract_markets_robust(s, f["fixture"]["id"])
-                    if m: csnap[str(f["fixture"]["id"])] = {"q1": m["q1"], "q2": m["q2"]}
+                    m = extract_elite_markets(s, f["fixture"]["id"])
+                    if m and m != "SKIP": csnap[str(f["fixture"]["id"])] = {"q1": m["q1"], "q2": m["q2"]}
                 st.session_state.odds_memory = csnap
                 with open(SNAP_FILE, "w") as f: json.dump({"odds": csnap, "timestamp": now_rome().strftime("%H:%M")}, f)
 
@@ -173,11 +179,10 @@ def run_full_scan(snap=False):
                 cnt = f["league"]["country"]
                 if cnt in st.session_state.config["excluded"]: continue
                 
-                mk = extract_markets_robust(s, f["fixture"]["id"])
-                if not mk or mk["q1"] == 0: continue
+                mk = extract_elite_markets(s, f["fixture"]["id"])
+                if not mk or mk == "SKIP": continue
                 
-                s_h = get_team_performance(s, f["teams"]["home"]["id"])
-                s_a = get_team_performance(s, f["teams"]["away"]["id"])
+                s_h, s_a = get_team_performance(s, f["teams"]["home"]["id"]), get_team_performance(s, f["teams"]["away"]["id"])
                 if not s_h or not s_a: continue
 
                 # LOGICA SEGNALI
