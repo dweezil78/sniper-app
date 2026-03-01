@@ -8,7 +8,7 @@ import time
 from pathlib import Path
 
 # ============================
-# CONFIGURAZIONE V22.03 - LAYOUT ORIGINALE RIPRISTINATO
+# CONFIGURAZIONE V22.04 - CHIRURGICO (LOGICA PATCHED + LAYOUT 8)
 # ============================
 BASE_DIR = Path(__file__).resolve().parent
 DB_FILE = str(BASE_DIR / "arab_sniper_database.json")
@@ -31,15 +31,14 @@ except Exception: ROME_TZ = None
 
 def now_rome(): return datetime.now(ROME_TZ) if ROME_TZ else datetime.now()
 
-st.set_page_config(page_title="ARAB SNIPER V22.03", layout="wide")
+st.set_page_config(page_title="ARAB SNIPER V22.04", layout="wide")
 
 target_dates = [(now_rome().date() + timedelta(days=i)).strftime("%Y-%m-%d") for i in range(3)]
 
 if "config" not in st.session_state:
     if os.path.exists(CONFIG_FILE):
         with open(CONFIG_FILE, "r") as f: st.session_state.config = json.load(f)
-    else:
-        st.session_state.config = {"excluded": DEFAULT_EXCLUDED}
+    else: st.session_state.config = {"excluded": DEFAULT_EXCLUDED}
 
 if "available_countries" not in st.session_state: st.session_state.available_countries = []
 if "odds_memory" not in st.session_state: st.session_state.odds_memory = {}
@@ -119,16 +118,16 @@ def extract_elite_markets(session, fid):
             if b["id"] == 5 and mk["o25"] == 0:
                 for v in b["values"]:
                     if v["value"].lower() == "over 2.5": mk["o25"] = float(v["odd"])
-            is_1h = any(k in n for k in ["1st half", "first half", "halftime", "half-time", "1h"])
+            is_1h = any(k in n for k in ["1st half", "1st", "first half"])
             if is_1h:
                 if "total" in n:
                     for v in b["values"]:
                         vl = v["value"].lower()
-                        if vl == "over 0.5" and mk["o05ht"] == 0: mk["o05ht"] = float(v["odd"])
-                        if vl == "over 1.5" and mk["o15ht"] == 0: mk["o15ht"] = float(v["odd"])
+                        if vl == "over 0.5": mk["o05ht"] = float(v["odd"])
+                        if vl == "over 1.5": mk["o15ht"] = float(v["odd"])
                 if any(k in n for k in ["both", "gg", "btts"]) and not any(x in n for x in ["exact", "correct"]):
                     for v in b["values"]:
-                        if v["value"].lower() in ["yes", "si"] and mk["gght"] == 0: mk["gght"] = float(v["odd"])
+                        if v["value"].lower() in ["yes", "si"]: mk["gght"] = float(v["odd"])
         if mk["q1"] > 0 and mk["o25"] > 0 and mk["o05ht"] > 0: break
     if (1.01 <= mk["q1"] <= 1.10) or (1.01 <= mk["q2"] <= 1.10) or (1.01 <= mk["o25"] <= 1.30): return "SKIP"
     return mk
@@ -175,9 +174,9 @@ def execute_elite_scan(session, fixtures, snap_mem, min_rating_ui):
     return final_list
 
 # ============================
-# SIDEBAR & BOTTONI
+# SIDEBAR
 # ============================
-st.sidebar.header("👑 Arab Sniper V22.03")
+st.sidebar.header("👑 Arab Sniper V22.04")
 if last_snap_ts: st.sidebar.success(f"✅ SNAPSHOT: {last_snap_ts}")
 else: st.sidebar.warning("⚠️ SNAPSHOT ASSENTE")
 HORIZON = st.sidebar.selectbox("Orizzonte:", options=[1, 2, 3], index=0)
@@ -217,47 +216,29 @@ if st.session_state.scan_results:
         if only_gold: view = view[view["Is_Gold"]]
         if only_o25: view = view[view["Is_O25SS"]]
 
-        # COLONNE VISUALIZZATE (NASCONDIAMO LE GHOST COLUMNS)
-        hidden_cols = ["Fixture_ID", "Is_Super_Red", "Is_GGPT", "Is_Boost", "Is_Gold", "Is_O25SS"]
-
-        # Etichette più chiare
-        view_disp = view.rename(columns={"HT_Avg": "HTAvg", "GGHT": "GG1T"}).copy()
-
-        cols_to_show = ["Data", "Ora", "Lega", "Match", "1", "X", "2",
-                        "O2.5", "O0.5HT", "O1.5HT", "GG1T", "HTAvg",
-                        "Info", "Rating", "Gold"]
+        # COLONNE DA MOSTRARE (GHOST COLUMNS NASCOSTE)
+        cols_to_show = ["Data", "Ora", "Lega", "Match", "1", "X", "2", "O2.5", "O0.5HT", "O1.5HT", "GGHT", "HT_Avg", "Info", "Rating", "Gold"]
 
         def color_logic(row):
-            if row.get("Is_Super_Red", False): return ['background-color: #8b0000; color: white'] * len(row)
-            if row.get("Is_GGPT", False): return ['background-color: #38003c; color: #00e5ff'] * len(row)
-            if row.get("Is_Boost", False): return ['background-color: #003300; color: #00ff00'] * len(row)
+            if row["Is_Super_Red"]: return ['background-color: #8b0000; color: white'] * len(row)
+            if row["Is_GGPT"]: return ['background-color: #38003c; color: #00e5ff'] * len(row)
+            if row["Is_Boost"]: return ['background-color: #003300; color: #00ff00'] * len(row)
             return ['color: #cccccc'] * len(row)
 
-        styled = view_disp.sort_values("Rating", ascending=False).style.apply(color_logic, axis=1)
-
-        # Hide colonne tecniche (sia in tabella che in report)
-        try:
-            styled = styled.hide(axis="columns", subset=hidden_cols)
-        except Exception:
-            try:
-                styled = styled.hide_columns(hidden_cols)  # fallback vecchie versioni pandas
-            except Exception:
-                pass
-
+        # ORDINAMENTO CRONOLOGICO (ORA)
+        styled = view.sort_values("Ora", ascending=True).style.apply(color_logic, axis=1)
+        
         st.markdown("""
             <style>
                 table { font-size: 12px; font-weight: 600; width: 100%; border-collapse: collapse; background-color: #0e1117; }
-                th { background-color: #1a1c23; color: #00e5ff; padding: 10px; border: 1px solid #333; white-space: nowrap; }
+                th { background-color: #1a1c23; color: #00e5ff; padding: 10px; border: 1px solid #333; }
                 td { padding: 6px; border: 1px solid #333; text-align: center; white-space: nowrap; }
             </style>
         """, unsafe_allow_html=True)
-
-        # Mostriamo SOLO le colonne "pulite"
-        st.write(styled.to_html(escape=False, index=False), unsafe_allow_html=True)
-
+        
+        st.write(styled.to_html(escape=False, index=False, columns=cols_to_show), unsafe_allow_html=True)
         st.markdown("---")
         c1, c2 = st.columns(2)
         c1.download_button("💾 CSV AUDITOR", df.to_csv(index=False).encode('utf-8'), "audit.csv")
-
-        html_rep = f"<html><head><style>table {{ font-family: sans-serif; border-collapse: collapse; width: 100%; font-size: 12px; }} th {{ background: #1a1c23; color: #00e5ff; padding: 10px; }} td {{ padding: 8px; border: 1px solid #444; text-align: center; white-space: nowrap; }}</style></head><body style='background:#0e1117; color:white;'>{styled.to_html(index=False)}</body></html>"
+        html_rep = f"<html><head><style>table {{ font-family: sans-serif; border-collapse: collapse; width: 100%; font-size: 12px; }} th {{ background: #1a1c23; color: #00e5ff; padding: 10px; }} td {{ padding: 8px; border: 1px solid #444; text-align: center; }}</style></head><body style='background:#0e1117; color:white;'>{styled.to_html(index=False, columns=cols_to_show)}</body></html>"
         c2.download_button("🌐 HTML REPORT", html_rep.encode('utf-8'), "report.html")
