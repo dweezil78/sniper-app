@@ -416,7 +416,7 @@ if c1.button("📌 SNAP + SCAN"): run_full_scan(snap=True)
 if c2.button("🚀 SCAN VELOCE"): run_full_scan(snap=False)
 
 # ============================
-# TABELLA E COLORI
+# TABELLA E COLORI (FIXED)
 # ============================
 if st.session_state.scan_results:
     df = pd.DataFrame(st.session_state.scan_results)
@@ -426,19 +426,33 @@ if st.session_state.scan_results:
         if only_gold: view = view[view["Is_Gold"]]
         if only_o25: view = view[view["Is_O25SS"]]
 
+        # Definiamo le colonne che vogliamo mostrare all'utente
+        cols_to_show = ["Data", "Ora", "Lega", "Match", "1X2", "O2.5", "HT_Avg", "Info", "Rating", "Gold"]
+
         def color_logic(row):
-            if row["Is_Super_Red"]: return ['background-color: #8b0000; color: white'] * len(row)
-            if row["Is_GGPT"]: return ['background-color: #38003c; color: #00e5ff'] * len(row)
-            if row["Is_Boost"]: return ['background-color: #003300; color: #00ff00'] * len(row)
+            # Ora le colonne Is_Super_Red, ecc. sono presenti perché 
+            # applichiamo lo stile a 'view' prima di tagliarlo
+            if row["Is_Super_Red"]: 
+                return ['background-color: #8b0000; color: white'] * len(row)
+            if row["Is_GGPT"]: 
+                return ['background-color: #38003c; color: #00e5ff'] * len(row)
+            if row["Is_Boost"]: 
+                return ['background-color: #003300; color: #00ff00'] * len(row)
             return ['color: #cccccc'] * len(row)
 
-        cols = ["Data", "Ora", "Lega", "Match", "1X2", "O2.5", "HT_Avg", "Info", "Rating", "Gold"]
-        styled = view[cols].sort_values("Rating", ascending=False).style.apply(color_logic, axis=1)
+        # Applichiamo lo stile a TUTTO il dataframe 'view' così le chiavi esistono
+        # ma poi usiamo [] per selezionare solo le colonne da mostrare nell'HTML
+        styled = view.sort_values("Rating", ascending=False).style.apply(color_logic, axis=1)
         
         st.markdown("""<style>table { font-size: 13px; font-weight: 600; }</style>""", unsafe_allow_html=True)
-        st.write(styled.to_html(escape=False, index=False), unsafe_allow_html=True)
+        
+        # Fondamentale: mostriamo solo cols_to_show
+        st.write(styled.to_html(escape=False, index=False, columns=cols_to_show), unsafe_allow_html=True)
         
         st.markdown("---")
-        st.download_button("💾 CSV AUDITOR", df.to_csv(index=False).encode('utf-8'), "audit.csv")
-        html_rep = f"<html><body style='background:#0e1117'>{styled.to_html(index=False)}</body></html>"
-        st.download_button("🌐 HTML REPORT", html_rep.encode('utf-8'), "report.html")
+        c1, c2 = st.columns(2)
+        c1.download_button("💾 CSV AUDITOR", df.to_csv(index=False).encode('utf-8'), "audit.csv")
+        
+        # Anche il report HTML deve mostrare solo le colonne pulite
+        html_rep = f"<html><body style='background:#0e1117'>{styled.to_html(index=False, columns=cols_to_show)}</body></html>"
+        c2.download_button("🌐 HTML REPORT", html_rep.encode('utf-8'), "report.html")
