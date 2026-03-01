@@ -33,6 +33,9 @@ def now_rome(): return datetime.now(ROME_TZ) if ROME_TZ else datetime.now()
 
 st.set_page_config(page_title="ARAB SNIPER V22.00", layout="wide")
 
+# ===== TARGET DATES (sempre disponibili) =====
+target_dates = [(now_rome().date() + timedelta(days=i)).strftime("%Y-%m-%d") for i in range(3)]
+
 # ============================
 # FASE 1: GESTIONE PERSISTENZA & SIDEBAR
 # ============================
