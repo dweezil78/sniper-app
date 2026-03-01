@@ -408,7 +408,7 @@ if c2.button("🚀 SCAN VELOCE"):
     run_full_scan(snap=False)
 
 # ============================
-# TABELLA E COLORI
+# TABELLA E COLORI (BLOCCO FINALE CORRETTO)
 # ============================
 if st.session_state.scan_results:
     df = pd.DataFrame(st.session_state.scan_results)
@@ -433,15 +433,19 @@ if st.session_state.scan_results:
         ]
 
         def color_logic(row):
-            if row["Is_Super_Red"]:
+            # row è una Series: ritorna una lista di style lunga QUANTE le colonne del DF (ok anche se poi mostriamo subset)
+            if row.get("Is_Super_Red", False):
                 return ['background-color: #8b0000; color: white'] * len(row)
-            if row["Is_GGPT"]:
+            if row.get("Is_GGPT", False):
                 return ['background-color: #38003c; color: #00e5ff'] * len(row)
-            if row["Is_Boost"]:
+            if row.get("Is_Boost", False):
                 return ['background-color: #003300; color: #00ff00'] * len(row)
             return ['color: #cccccc'] * len(row)
 
-        styled = view.sort_values(["Data", "Ora"], ascending=[True, True]).style.apply(color_logic, axis=1)
+        # ordinamento cronologico anche nella vista
+        view_sorted = view.sort_values(["Data", "Ora"], ascending=[True, True])
+
+        styled = view_sorted.style.apply(color_logic, axis=1)
 
         st.markdown("""
             <style>
@@ -451,12 +455,23 @@ if st.session_state.scan_results:
             </style>
         """, unsafe_allow_html=True)
 
-        st.write(styled.to_html(escape=False, index=False, columns=cols_to_show), unsafe_allow_html=True)
+        # ✅ VISUAL: mostra SOLO cols_to_show
+        st.write(
+            styled.to_html(escape=False, index=False, columns=cols_to_show),
+            unsafe_allow_html=True
+        )
 
         st.markdown("---")
         c1, c2 = st.columns(2)
-        c1.download_button("💾 CSV AUDITOR", df.to_csv(index=False).encode('utf-8'), "audit.csv")
 
+        # CSV (come prima: export completo)
+        c1.download_button(
+            "💾 CSV AUDITOR",
+            df.to_csv(index=False).encode("utf-8"),
+            "audit.csv"
+        )
+
+        # ✅ HTML REPORT: mostra SOLO cols_to_show (FIX)
         html_rep = (
             "<html><head><style>"
             "table { font-family: sans-serif; border-collapse: collapse; width: 100%; font-size: 12px; } "
@@ -467,6 +482,11 @@ if st.session_state.scan_results:
             f"{styled.to_html(index=False, columns=cols_to_show)}"
             "</body></html>"
         )
-        c2.download_button("🌐 HTML REPORT", html_rep.encode('utf-8'), "report.html")
+
+        c2.download_button(
+            "🌐 HTML REPORT",
+            html_rep.encode("utf-8"),
+            "report.html"
+        )
 else:
     st.info("Nessun risultato ancora. Premi 'SCAN' per iniziare.")
