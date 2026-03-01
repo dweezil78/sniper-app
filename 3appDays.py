@@ -8,7 +8,7 @@ import time
 from pathlib import Path
 
 # ============================
-# CONFIGURAZIONE V22.02 - FINAL LAYOUT & GHOST COLUMNS
+# CONFIGURAZIONE V22.03 - LAYOUT ORIGINALE RIPRISTINATO
 # ============================
 BASE_DIR = Path(__file__).resolve().parent
 DB_FILE = str(BASE_DIR / "arab_sniper_database.json")
@@ -31,17 +31,15 @@ except Exception: ROME_TZ = None
 
 def now_rome(): return datetime.now(ROME_TZ) if ROME_TZ else datetime.now()
 
-st.set_page_config(page_title="ARAB SNIPER V22.02", layout="wide")
+st.set_page_config(page_title="ARAB SNIPER V22.03", layout="wide")
 
 target_dates = [(now_rome().date() + timedelta(days=i)).strftime("%Y-%m-%d") for i in range(3)]
 
-# ============================
-# PERSISTENZA & DB
-# ============================
 if "config" not in st.session_state:
     if os.path.exists(CONFIG_FILE):
         with open(CONFIG_FILE, "r") as f: st.session_state.config = json.load(f)
-    else: st.session_state.config = {"excluded": DEFAULT_EXCLUDED}
+    else:
+        st.session_state.config = {"excluded": DEFAULT_EXCLUDED}
 
 if "available_countries" not in st.session_state: st.session_state.available_countries = []
 if "odds_memory" not in st.session_state: st.session_state.odds_memory = {}
@@ -105,9 +103,6 @@ def get_team_performance(session, tid):
     team_stats_cache[tid] = stats
     return stats
 
-# ============================
-# MERCATI (PATCHED)
-# ============================
 def extract_elite_markets(session, fid):
     res = api_get(session, "odds", {"fixture": fid})
     if not res or not res.get("response"): return None
@@ -128,8 +123,9 @@ def extract_elite_markets(session, fid):
             if is_1h:
                 if "total" in n:
                     for v in b["values"]:
-                        if v["value"].lower() == "over 0.5": mk["o05ht"] = float(v["odd"])
-                        if v["value"].lower() == "over 1.5": mk["o15ht"] = float(v["odd"])
+                        vl = v["value"].lower()
+                        if vl == "over 0.5": mk["o05ht"] = float(v["odd"])
+                        if vl == "over 1.5": mk["o15ht"] = float(v["odd"])
                 if any(k in n for k in ["both", "gg", "btts"]) and not any(x in n for x in ["exact", "correct"]):
                     for v in b["values"]:
                         if v["value"].lower() in ["yes", "si"]: mk["gght"] = float(v["odd"])
@@ -153,7 +149,6 @@ def execute_elite_scan(session, fixtures, snap_mem, min_rating_ui):
         if not ((s_h["avg_ht"] >= 0.7 and s_a["avg_ht"] >= 0.7) or (s_h["is_elite"] or s_a["is_elite"])): continue
 
         fav = mk["q1"] if mk["q1"] < mk["q2"] else mk["q2"]
-        f_st = s_h if mk["q1"] < mk["q2"] else s_a
         gz, oz = (1.40 <= fav <= 1.90), (1.50 <= mk["o25"] <= 2.20)
         fid_s, drp = str(f["fixture"]["id"]), 0.0
         if fid_s in snap_mem: drp = float(snap_mem[fid_s].get("q1" if mk["q1"]<mk["q2"] else "q2", 0)) - fav
@@ -161,38 +156,33 @@ def execute_elite_scan(session, fixtures, snap_mem, min_rating_ui):
         tags = ["HT-OK"]
         if oz: tags.append("O25-SS")
         if drp >= 0.15: tags.append(f"Drop {drp:.2f}")
-        is_b = (oz and f_st["avg_ht"] >= 0.8 and f_st["avg_vul"] >= 1.0)
+        is_b = (oz and (s_h if mk["q1"]<mk["q2"] else s_a)["avg_ht"] >= 0.8)
         if is_b: tags.append("💣 O25-BOOST")
         is_gg = (mk["gght"] >= 3.0 and s_h["avg_ht"] >= 0.7 and s_a["avg_ht"] >= 0.7)
         if is_gg: tags.append("🎯 GG-PT")
-        is_sr = is_b and (f_st["o25_p"] >= 0.70)
+        is_sr = is_b and ((s_h if mk["q1"]<mk["q2"] else s_a)["o25_p"] >= 0.70)
         
         rtg = min(100, int(45 + (s_h["avg_ht"]+s_a["avg_ht"])*10 + (20 if is_b else 0) + (15 if drp>=0.20 else 0)))
         if rtg >= min_rating_ui:
             final_list.append({
-                "Fixture_ID": f["fixture"]["id"], "Data": f["fixture"]["date"][:10], "Ora": f["fixture"]["date"][11:16],
+                "Data": f["fixture"]["date"][:10], "Ora": f["fixture"]["date"][11:16],
                 "Lega": f"{f['league']['name']} ({cnt})", "Match": f"{f['teams']['home']['name']} - {f['teams']['away']['name']}",
-                "1X2": f"{mk['q1']:.2f}|{mk['qx']:.2f}|{mk['q2']:.2f}", "O2.5": f"{mk['o25']:.2f}",
-                "O0.5HT": f"{mk['o05ht']:.2f}", "O1.5HT": f"{mk['o15ht']:.2f}", "Quota GG1T": f"{mk['gght']:.2f}",
+                "1": f"{mk['q1']:.2f}", "X": f"{mk['qx']:.2f}", "2": f"{mk['q2']:.2f}", 
+                "O2.5": f"{mk['o25']:.2f}", "O0.5HT": f"{mk['o05ht']:.2f}", "O1.5HT": f"{mk['o15ht']:.2f}", "GGHT": f"{mk['gght']:.2f}",
                 "HT_Avg": f"{s_h['avg_ht']:.1f}|{s_a['avg_ht']:.1f}", "Info": f"[{'|'.join(tags)}]", "Rating": rtg, "Gold": "✅" if gz else "❌",
-                "Is_Super_Red": is_sr, "Is_GGPT": is_gg, "Is_Boost": is_b, "Is_Gold": gz, "Is_O25SS": oz
+                "Fixture_ID": f["fixture"]["id"], "Is_Super_Red": is_sr, "Is_GGPT": is_gg, "Is_Boost": is_b, "Is_Gold": gz, "Is_O25SS": oz
             })
     return final_list
 
 # ============================
-# SIDEBAR
+# SIDEBAR & BOTTONI
 # ============================
-st.sidebar.header("👑 Arab Sniper V22.02")
+st.sidebar.header("👑 Arab Sniper V22.03")
 if last_snap_ts: st.sidebar.success(f"✅ SNAPSHOT: {last_snap_ts}")
 else: st.sidebar.warning("⚠️ SNAPSHOT ASSENTE")
 HORIZON = st.sidebar.selectbox("Orizzonte:", options=[1, 2, 3], index=0)
 only_gold, only_o25 = st.sidebar.toggle("🎯 SOLO GOLD ZONE"), st.sidebar.toggle("⚽ SOLO O25 SS")
 min_rating = st.sidebar.slider("Rating Minimo", 30, 95, 45)
-with st.sidebar.expander("🌍 Gestione Nazioni"):
-    to_ex = st.selectbox("Escludi:", ["--"] + sorted([c for c in st.session_state.available_countries if c not in st.session_state.config["excluded"]]))
-    if to_ex != "--": st.session_state.config["excluded"].append(to_ex); save_config(); st.rerun()
-    to_in = st.selectbox("Ripristina:", ["--"] + sorted(st.session_state.config["excluded"]))
-    if to_in != "--": st.session_state.config["excluded"].remove(to_in); save_config(); st.rerun()
 
 def run_full_scan(snap=False):
     with requests.Session() as s:
@@ -218,7 +208,7 @@ if c1.button("📌 SNAP + SCAN"): run_full_scan(snap=True)
 if c2.button("🚀 SCAN VELOCE"): run_full_scan(snap=False)
 
 # ============================
-# TABELLA E LAYOUT FINALE
+# TABELLA E COLORI
 # ============================
 if st.session_state.scan_results:
     df = pd.DataFrame(st.session_state.scan_results)
@@ -227,8 +217,8 @@ if st.session_state.scan_results:
         if only_gold: view = view[view["Is_Gold"]]
         if only_o25: view = view[view["Is_O25SS"]]
 
-        # COLONNE DA MOSTRARE (ESTETICA 3APPDAYS 8)
-        cols_to_show = ["Data", "Ora", "Lega", "Match", "1X2", "O2.5", "O0.5HT", "O1.5HT", "Quota GG1T", "HT_Avg", "Info", "Rating", "Gold"]
+        # COLONNE DA MOSTRARE (GHOST COLUMNS NASCOSTE)
+        cols_to_show = ["Data", "Ora", "Lega", "Match", "1", "X", "2", "O2.5", "O0.5HT", "O1.5HT", "GGHT", "HT_Avg", "Info", "Rating", "Gold"]
 
         def color_logic(row):
             if row["Is_Super_Red"]: return ['background-color: #8b0000; color: white'] * len(row)
