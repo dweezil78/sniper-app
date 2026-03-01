@@ -8,7 +8,7 @@ import time
 from pathlib import Path
 
 # ==========================================
-# CONFIGURAZIONE ARAB SNIPER V22.04.9 - GOLD COLUMN ADDED
+# CONFIGURAZIONE ARAB SNIPER V22.04.9 - PERSISTENCE & AUTO-DATE FIX
 # ==========================================
 BASE_DIR = Path(__file__).resolve().parent
 DB_FILE = str(BASE_DIR / "arab_sniper_database.json")
@@ -43,25 +43,36 @@ if "odds_memory" not in st.session_state: st.session_state.odds_memory = {}
 def save_config():
     with open(CONFIG_FILE, "w") as f: json.dump(st.session_state.config, f)
 
+# === PARTE INTEGRATA: PERSISTENZA E SCALATA DATA ===
 def load_db():
+    """Carica i risultati salvati e rimuove quelli vecchi (scalata data)"""
     today = now_rome().strftime("%Y-%m-%d")
     ts = None
+    
+    # Caricamento Risultati Scan
     if os.path.exists(DB_FILE):
         try:
             with open(DB_FILE, "r") as f:
                 data = json.load(f).get("results", [])
+                # Filtro: tieni solo i match da oggi in poi
                 st.session_state.scan_results = [r for r in data if r.get("Data", "") >= today]
-        except: pass
+        except Exception:
+            pass
+
+    # Caricamento Snapshot Quote
     if os.path.exists(SNAP_FILE):
         try:
             with open(SNAP_FILE, "r") as f:
                 snap_data = json.load(f)
                 st.session_state.odds_memory = snap_data.get("odds", {})
                 ts = snap_data.get("timestamp", "N/D")
-        except: pass
+        except Exception:
+            pass
     return ts
 
+# Esecuzione al caricamento dell'app
 last_snap_ts = load_db()
+# =================================================
 
 # ==========================================
 # API CORE & ROBUST PARSING (DA V22.04)
@@ -162,7 +173,6 @@ def run_full_scan(snap=False):
                 s_h, s_a = get_team_performance(s, f["teams"]["home"]["id"]), get_team_performance(s, f["teams"]["away"]["id"])
                 if not s_h or not s_a: continue
 
-                # LOGICA SEGNALI & GOLD
                 fav = min(mk["q1"], mk["q2"])
                 is_gold = (1.40 <= fav <= 1.90)
                 tags = ["HT-OK"]
@@ -182,9 +192,17 @@ def run_full_scan(snap=False):
                     "1X2": f"{mk['q1']:.1f}|{mk['qx']:.1f}|{mk['q2']:.1f}",
                     "O2.5": f"{mk['o25']:.2f}", "O0.5H": f"{mk['o05ht']:.2f}", "GGH": f"{mk['gght']:.2f}",
                     "HT": f"{s_h['avg_ht']:.1f}|{s_a['avg_ht']:.1f}",
-                    "Info": " ".join(tags), "Gold": "✅" if is_gold else "❌", "Data": f["fixture"]["date"][:10]
+                    "Info": " ".join(tags), "Gold": "✅" if is_gold else "❌", "Data": f["fixture"]["date"][:10],
+                    "Fixture_ID": f["fixture"]["id"]
                 })
-            st.session_state.scan_results = final_list
+            
+            # PARTE INTEGRATA: SALVATAGGIO PERSISTENTE
+            eids = [r["Fixture_ID"] for r in st.session_state.scan_results]
+            st.session_state.scan_results += [r for r in final_list if r["Fixture_ID"] not in eids]
+            
+            with open(DB_FILE, "w") as f:
+                json.dump({"results": st.session_state.scan_results}, f)
+            
             st.rerun()
 
 # ==========================================
@@ -205,13 +223,20 @@ if all_discovered:
         st.session_state.config["excluded"] = new_ex
         save_config(); st.rerun()
 
+# Stato Snapshot nella sidebar
+if last_snap_ts:
+    st.sidebar.success(f"✅ SNAPSHOT: {last_snap_ts}")
+else:
+    st.sidebar.warning("⚠️ SNAPSHOT ASSENTE")
+
 c1, c2 = st.columns(2)
 if c1.button("📌 SNAP + SCAN"): run_full_scan(snap=True)
 if c2.button("🚀 SCAN VELOCE"): run_full_scan(snap=False)
 
 if st.session_state.scan_results:
     df = pd.DataFrame(st.session_state.scan_results)
-    view = df[df["Data"] == target_dates[HORIZON - 1]].drop(columns=["Data"])
+    # Filtro visualizzazione per data selezionata
+    view = df[df["Data"] == target_dates[HORIZON - 1]].drop(columns=["Data", "Fixture_ID"])
     
     if not view.empty:
         st.markdown("""
@@ -246,6 +271,6 @@ if st.session_state.scan_results:
         d1.download_button("💾 CSV", view.to_csv(index=False).encode("utf-8"), f"arab_{target_dates[HORIZON-1]}.csv")
         d2.download_button("🌐 HTML", html.encode("utf-8"), f"arab_{target_dates[HORIZON-1]}.html")
     else:
-        st.info("Nessun match trovato.")
+        st.info("Nessun match trovato per questa data.")
 else:
     st.info("Pronto per lo scan.")
