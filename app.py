@@ -8,7 +8,7 @@ import time
 from pathlib import Path
 
 # ==========================================
-# CONFIGURAZIONE ARAB SNIPER V22.04.5 - MOBILE OPTIMIZED
+# CONFIGURAZIONE ARAB SNIPER V22.04.7 - FIX HT & SCROLL
 # ==========================================
 BASE_DIR = Path(__file__).resolve().parent
 DB_FILE = str(BASE_DIR / "arab_sniper_database.json")
@@ -27,9 +27,8 @@ except Exception:
 def now_rome():
     return datetime.now(ROME_TZ) if ROME_TZ else datetime.now()
 
-st.set_page_config(page_title="ARAB SNIPER V22.04.5", layout="wide")
+st.set_page_config(page_title="ARAB SNIPER V22.04.7", layout="wide")
 
-# --- Inizializzazione Session State ---
 if "config" not in st.session_state:
     if os.path.exists(CONFIG_FILE):
         with open(CONFIG_FILE, "r") as f: st.session_state.config = json.load(f)
@@ -64,20 +63,11 @@ def load_db():
 last_snap_ts = load_db()
 
 # ==========================================
-# SIDEBAR (STATO & FILTRI)
+# SIDEBAR
 # ==========================================
-st.sidebar.header("👑 Arab Sniper V22.04.5")
-
-if last_snap_ts:
-    st.sidebar.success(f"✅ SNAPSHOT ATTIVO: {last_snap_ts}")
-else:
-    st.sidebar.warning("⚠️ SNAPSHOT ASSENTE")
-
+st.sidebar.header("👑 Arab Sniper V22.04.7")
 HORIZON = st.sidebar.selectbox("Orizzonte Temporale:", options=[1, 2, 3], index=0)
 target_dates = [(now_rome().date() + timedelta(days=i)).strftime("%Y-%m-%d") for i in range(3)]
-
-st.sidebar.markdown("---")
-st.sidebar.subheader("🌍 Filtro Nazioni")
 
 all_discovered = sorted(list(set(st.session_state.get("available_countries", []))))
 if st.session_state.scan_results:
@@ -88,13 +78,10 @@ if all_discovered:
     new_ex = st.sidebar.multiselect("Escludi Nazioni:", options=all_discovered, default=[c for c in st.session_state.config.get("excluded", []) if c in all_discovered])
     if st.sidebar.button("💾 SALVA CONFIG"):
         st.session_state.config["excluded"] = new_ex
-        save_config()
-        st.sidebar.success("Salvato!")
-        time.sleep(1)
-        st.rerun()
+        save_config(); st.rerun()
 
 # ==========================================
-# API & ENGINE (LOGICA SEGNALI)
+# API & ENGINE (FIXED HT QUOTES)
 # ==========================================
 API_KEY = st.secrets.get("API_SPORTS_KEY")
 HEADERS = {"x-apisports-key": API_KEY}
@@ -126,30 +113,34 @@ def extract_markets(session, fid):
     res = api_get(session, "odds", {"fixture": fid})
     if not res or not res.get("response"): return None
     mk = {"q1":0.0, "qx":0.0, "q2":0.0, "o25":0.0, "o05ht":0.0, "gght":0.0}
+    
     for bm in res["response"][0].get("bookmakers", []):
         for b in bm.get("bets", []):
             n = b.get("name", "").lower()
+            # 1X2
             if b.get("id") == 1:
                 for v in b.get("values", []):
                     vl = v["value"].lower()
                     if vl == "home": mk["q1"] = float(v["odd"])
                     elif vl == "away": mk["q2"] = float(v["odd"])
                     elif vl == "draw": mk["qx"] = float(v["odd"])
+            # OVER 2.5
             elif b.get("id") == 5:
                 for v in b.get("values", []):
                     if "over 2.5" in v["value"].lower(): mk["o25"] = float(v["odd"])
-            elif "1st half" in n or "first half" in n:
-                if "total" in n:
-                    for v in b.get("values", []):
-                        if "over 0.5" in v["value"].lower(): mk["o05ht"] = float(v["odd"])
-                if any(k in n for k in ["btts", "gg", "both"]):
-                    for v in b.get("values", []):
-                        if v["value"].lower() in ["yes", "si"]: mk["gght"] = float(v["odd"])
-        if mk["q1"] > 0: break
+            # FIX: OVER 0.5 HT (ID 13 o ricerca nominale)
+            elif b.get("id") == 13 or any(x in n for x in ["1st half goals", "first half goals", "over/under 1st half"]):
+                for v in b.get("values", []):
+                    if "over 0.5" in v["value"].lower(): mk["o05ht"] = float(v["odd"])
+            # GGPT
+            elif any(k in n for k in ["both teams to score 1st half", "btts 1st half", "gg 1h"]):
+                for v in b.get("values", []):
+                    if v["value"].lower() in ["yes", "si"]: mk["gght"] = float(v["odd"])
+        if mk["q1"] > 0 and mk["o05ht"] > 0: break
     return mk
 
 def run_full_scan(snap=False):
-    with st.spinner("🚀 Arab Sniper sta scansionando il mondo..."):
+    with st.spinner("🚀 Arab Sniper in azione..."):
         with requests.Session() as s:
             target_date = target_dates[HORIZON - 1]
             res = api_get(s, "fixtures", {"date": target_date, "timezone": "Europe/Rome"})
@@ -178,20 +169,20 @@ def run_full_scan(snap=False):
 
                 tags = ["HT-OK"]
                 h_p, h_o, h_g = False, False, False
-                if (min(mk["q1"], mk["q2"]) < 1.75) and (s_h["avg_total"] >= 1.0 and s_a["avg_total"] >= 1.0): tags.append("🐟 P-O"); h_p = True
-                if (2.0 <= mk["q1"] <= 3.5) and (2.0 <= mk["q2"] <= 3.5) and (s_h["avg_total"] >= 1.0 and s_a["avg_total"] >= 1.0): tags.append("🐟 P-G"); h_p = True
+                if (min(mk["q1"], mk["q2"]) < 1.75) and (s_h["avg_total"] >= 1.0 and s_a["avg_total"] >= 1.0): tags.append("🐟O"); h_p = True
+                if (2.0 <= mk["q1"] <= 3.5) and (2.0 <= mk["q2"] <= 3.5) and (s_h["avg_total"] >= 1.0 and s_a["avg_total"] >= 1.0): tags.append("🐟G"); h_p = True
                 if (s_h["avg_total"] >= 2.0 and s_a["avg_total"] >= 2.0):
-                    if mk["o25"] > 1.80 and mk["o05ht"] > 1.30: tags.append("⚽ OVER"); h_o = True
-                    elif mk["o25"] <= 1.80 and mk["o05ht"] <= 1.30: tags.append("🚀 BOOST"); h_o = True
-                if (s_h["avg_total"] >= 1.2 and s_a["avg_total"] >= 1.2): tags.append("🎯 GGPT"); h_g = True
-                if h_p and h_o and h_g: tags.insert(0, "⚽⭐ DORATO")
+                    if mk["o25"] > 1.80 and mk["o05ht"] > 1.30: tags.append("⚽"); h_o = True
+                    elif mk["o25"] <= 1.80 and mk["o05ht"] <= 1.30: tags.append("🚀"); h_o = True
+                if (s_h["avg_total"] >= 1.2 and s_a["avg_total"] >= 1.2): tags.append("🎯PT"); h_g = True
+                if h_p and h_o and h_g: tags.insert(0, "⚽⭐")
 
                 final_list.append({
                     "Ora": f["fixture"]["date"][11:16],
-                    "Lega": f"{f['league']['name'][:10]}..({cnt[:3]})",
+                    "Lega": f"{f['league']['name'][:8]}..({cnt[:3]})",
                     "Match": f"{f['teams']['home']['name'][:10]} - {f['teams']['away']['name'][:10]}",
                     "1X2": f"{mk['q1']:.1f}|{mk['qx']:.1f}|{mk['q2']:.1f}",
-                    "O2.5": mk["o25"], "O0.5H": mk["o05ht"], "GGH": mk["gght"],
+                    "O2.5": f"{mk['o25']:.2f}", "O0.5H": f"{mk['o05ht']:.2f}", "GGH": f"{mk['gght']:.2f}",
                     "HT": f"{s_h['avg_ht']:.1f}|{s_a['avg_ht']:.1f}",
                     "Info": " ".join(tags), "Data": f["fixture"]["date"][:10]
                 })
@@ -199,7 +190,7 @@ def run_full_scan(snap=False):
             st.rerun()
 
 # ==========================================
-# MAIN UI & TABELLA FORMATA
+# UI & TABLE WITH SCROLLBAR
 # ==========================================
 c1, c2 = st.columns(2)
 if c1.button("📌 SNAP + SCAN"): run_full_scan(snap=True)
@@ -210,39 +201,38 @@ if st.session_state.scan_results:
     view = df[df["Data"] == target_dates[HORIZON - 1]].drop(columns=["Data"])
     
     if not view.empty:
-        # CSS PER MOBILE E RIGA UNICA
         st.markdown("""
             <style>
-                .mobile-table { width: 100%; border-collapse: collapse; font-family: 'Segoe UI', sans-serif; font-size: 11px; }
-                .mobile-table th, .mobile-table td { 
-                    white-space: nowrap; 
-                    padding: 4px 6px; 
-                    border: 1px solid #333; 
-                    text-align: center; 
+                .scroll-container { 
+                    width: 100%; 
+                    overflow-x: auto; 
+                    display: block; 
+                    -webkit-overflow-scrolling: touch;
+                    border: 1px solid #444;
+                    margin: 10px 0;
                 }
-                .mobile-table th { background: #1a1a1a; color: #00e5ff; }
+                .mobile-table { width: 100%; min-width: 850px; border-collapse: collapse; font-family: sans-serif; font-size: 11px; }
+                .mobile-table th, .mobile-table td { white-space: nowrap; padding: 6px 4px; border: 1px solid #444; text-align: center; }
+                .mobile-table th { background: #222; color: #00e5ff; position: sticky; top: 0; }
                 .row-dorato { background-color: #FFD700 !important; color: black !important; font-weight: bold; }
                 .row-boost { background-color: #FF0000 !important; color: white !important; font-weight: bold; }
                 .row-ggpt { background-color: #0000FF !important; color: white !important; font-weight: bold; }
-                .row-std { color: #eee; }
-                .table-container { overflow-x: auto; display: block; }
+                .row-std { background-color: white !important; color: black !important; }
             </style>
         """, unsafe_allow_html=True)
 
         def get_row_class(info):
-            if "DORATO" in info: return "row-dorato"
-            if "BOOST" in info: return "row-boost"
-            if "GGPT" in info: return "row-ggpt"
+            if "⚽⭐" in info: return "row-dorato"
+            if "🚀" in info: return "row-boost"
+            if "🎯PT" in info: return "row-ggpt"
             return "row-std"
 
-        # COSTRUZIONE TABELLA HTML MANUALE PER MASSIMO CONTROLLO
-        html = '<div class="table-container"><table class="mobile-table"><tr>'
-        html += ''.join(f'<th>{c}</th>' for c in view.columns) + '</tr>'
-        
+        html = '<div class="scroll-container"><table class="mobile-table"><thead><tr>'
+        html += ''.join(f'<th>{c}</th>' for c in view.columns) + '</tr></thead><tbody>'
         for _, row in view.iterrows():
             cls = get_row_class(row["Info"])
             html += f'<tr class="{cls}">' + ''.join(f'<td>{v}</td>' for v in row) + '</tr>'
-        html += '</table></div>'
+        html += '</tbody></table></div>'
         
         st.markdown(html, unsafe_allow_html=True)
         
@@ -253,4 +243,4 @@ if st.session_state.scan_results:
     else:
         st.info("Nessun match trovato.")
 else:
-    st.info("Avvia uno scan.")
+    st.info("Pronto per lo scan.")
