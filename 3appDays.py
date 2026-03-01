@@ -70,12 +70,36 @@ last_snap_ts = load_db()
 API_KEY = st.secrets.get("API_SPORTS_KEY")
 HEADERS = {"x-apisports-key": API_KEY}
 
-def api_get(session, path, params):
-    try:
-        r = session.get(f"https://v3.football.api-sports.io/{path}", headers=HEADERS, params=params, timeout=20)
-        js = r.json()
-        return js
-    except: return None
+def api_get(session, path, params, retries=2):
+    """Wrapper API-Sports con retry base (soprattutto per 429) e gestione errori leggera."""
+    last_err = None
+    for i in range(retries + 1):
+        try:
+            r = session.get(
+                f"https://v3.football.api-sports.io/{path}",
+                headers=HEADERS,
+                params=params,
+                timeout=25
+            )
+            if r.status_code == 429 and i < retries:
+                time.sleep(1.5 * (i + 1))
+                continue
+            r.raise_for_status()
+            js = r.json()
+            # se API-Sports segnala errori logici in payload
+            if isinstance(js, dict) and js.get("errors"):
+                last_err = RuntimeError(f"API Errors: {js['errors']}")
+                if i < retries:
+                    time.sleep(1.0 * (i + 1))
+                    continue
+                raise last_err
+            return js
+        except Exception as e:
+            last_err = e
+            if i < retries:
+                time.sleep(1.0 * (i + 1))
+                continue
+            return None
 
 # ============================
 # FASE 4: ANALISI 0.7 HT & STORICO ADATTIVO
@@ -128,39 +152,128 @@ def get_team_performance(session, tid):
 # FASE 2 & 3: RICERCA AGGRESSIVA & SWEET SPOT
 # ============================
 def extract_elite_markets(session, fid):
+    """
+    Estrazione mercati chiave:
+      - 1X2 (Home/Away)
+      - Over 2.5 FT
+      - Over 0.5 1H
+      - BTTS 1H (GG-PT)
+    Fix: normalizzazione stringhe + riconoscimento 1H più ampio + fallback O2.5 FT non solo bet id=5.
+    """
     res = api_get(session, "odds", {"fixture": fid})
-    if not res or not res.get("response"): return None
-    
-    mk = {"q1":0.0, "q2":0.0, "o25":0.0, "o05ht":0.0, "gght":0.0}
-    
-    # Ricerca su tutti i bookmaker (Punto 2.4)
-    for bm in res["response"][0].get("bookmakers", []):
-        for b in bm.get("bets", []):
-            name = b["name"].lower()
+    if not res or not res.get("response"):
+        return None
+
+    mk = {"q1": 0.0, "q2": 0.0, "o25": 0.0, "o05ht": 0.0, "gght": 0.0}
+
+    def clean(s: str) -> str:
+        return (
+            str(s or "")
+            .lower()
+            .strip()
+            .replace(" ", "")
+            .replace("-", "")
+            .replace("_", "")
+            .replace("/", "")
+            .replace("(", "")
+            .replace(")", "")
+            .replace(",", ".")
+        )
+
+    def to_float(x):
+        try:
+            return float(x)
+        except Exception:
+            return 0.0
+
+    def pick_over(values, key_norm: str) -> float:
+        # key_norm: "over2.5", "over0.5", ecc.
+        for v in values or []:
+            if clean(v.get("value")) == key_norm:
+                odd = to_float(v.get("odd"))
+                if odd > 0:
+                    return odd
+        return 0.0
+
+    def is_first_half(name_clean: str) -> bool:
+        # evita 2nd half
+        if any(k in name_clean for k in ["2nd", "2h", "secondhalf"]):
+            return False
+        return any(k in name_clean for k in ["1st", "1h", "firsthalf", "halftime", "half-time", "1sthalf", "1sthalfgoals"])
+
+    def is_total_market(name_clean: str) -> bool:
+        return any(k in name_clean for k in ["total", "overunder", "over/under", "goals"])
+
+    def is_btts_market(name_clean: str) -> bool:
+        # attenzione: no "first goal", "correct score", ecc.
+        if any(k in name_clean for k in ["firstgoal", "lastgoal", "correctscore", "exact", "result", "winner", "doublechance"]):
+            return False
+        return any(k in name_clean for k in ["btts", "bothteamstoscore", "bothteams", "both", "gg"])
+
+    # Scansione su più bookmakers: stop solo quando abbiamo i fondamentali
+    for ibm, bm in enumerate(res["response"][0].get("bookmakers", []) or []):
+        for b in bm.get("bets", []) or []:
+            bid = b.get("id")
+            name_raw = b.get("name") or ""
+            name = clean(name_raw)
+
             # 1X2
-            if b["id"] == 1 and mk["q1"] == 0:
-                for v in b["values"]:
-                    if v["value"].lower() == "home": mk["q1"] = float(v["odd"])
-                    if v["value"].lower() == "away": mk["q2"] = float(v["odd"])
-            # Over 2.5
-            if b["id"] == 5 and mk["o25"] == 0:
-                for v in b["values"]:
-                    if v["value"].lower() == "over 2.5": mk["o25"] = float(v["odd"])
-            # HT Markets
-            is_1h = "1st half" in name or "1st" in name
-            if is_1h:
-                if "total" in name:
-                    for v in b["values"]:
-                        if v["value"].lower() == "over 0.5": mk["o05ht"] = float(v["odd"])
-                if any(k in name for k in ["both", "gg", "btts"]):
-                    for v in b["values"]:
-                        if v["value"].lower() in ["yes", "si"]: mk["gght"] = float(v["odd"])
-        if mk["q1"] > 0 and mk["o05ht"] > 0 and mk["gght"] > 0: break
-    
+            if bid == 1 and mk["q1"] == 0:
+                for v in b.get("values", []) or []:
+                    vv = clean(v.get("value"))
+                    odd = to_float(v.get("odd"))
+                    if odd <= 0:
+                        continue
+                    if vv in ["home", "1", "team1"]:
+                        mk["q1"] = odd
+                    elif vv in ["away", "2", "team2"]:
+                        mk["q2"] = odd
+                # se manca label ma ci sono 3 valori, spesso sono home/draw/away
+                if mk["q1"] == 0 and mk["q2"] == 0 and len(b.get("values", []) or []) >= 3:
+                    mk["q1"] = to_float(b["values"][0].get("odd"))
+                    mk["q2"] = to_float(b["values"][2].get("odd"))
+
+            # Over 2.5 FT (bet id=5 oppure fallback su mercati total FT)
+            if mk["o25"] == 0:
+                if bid == 5:
+                    o = pick_over(b.get("values", []), "over2.5")
+                    if o > 0:
+                        mk["o25"] = o
+                else:
+                    # fallback: total/overunder FT (non 1H)
+                    if is_total_market(name) and not is_first_half(name):
+                        o = pick_over(b.get("values", []), "over2.5")
+                        if o > 0:
+                            mk["o25"] = o
+
+            # Mercati 1H
+            if is_first_half(name):
+                # Over 0.5 1H
+                if mk["o05ht"] == 0 and is_total_market(name):
+                    o = pick_over(b.get("values", []), "over0.5")
+                    if o > 0:
+                        mk["o05ht"] = o
+                # BTTS 1H
+                if mk["gght"] == 0 and (bid == 71 or is_btts_market(name)):
+                    for v in b.get("values", []) or []:
+                        vv = clean(v.get("value"))
+                        if vv in ["yes", "si", "oui"]:
+                            odd = to_float(v.get("odd"))
+                            if odd > 0:
+                                mk["gght"] = odd
+                                break
+
+        # stop solo quando abbiamo 1X2 + O2.5 + O0.5HT + GGHT
+        if mk["q1"] > 0 and mk["q2"] > 0 and mk["o25"] > 0 and mk["o05ht"] > 0 and mk["gght"] > 0:
+            break
+        # cap prestazioni: dopo 6 bookmakers ci fermiamo se almeno core+o25 presi
+        if ibm >= 5 and mk["q1"] > 0 and mk["o25"] > 0:
+            break
+
     # Prefiltro sbilanciamento (Punto 2.3)
     if (1.01 <= mk["q1"] <= 1.10) or (1.01 <= mk["q2"] <= 1.10) or (1.01 <= mk["o25"] <= 1.30):
         return "SKIP"
-        
+
     return mk
 
 # ============================
@@ -266,22 +379,33 @@ def run_full_scan(snap=False):
     with requests.Session() as s:
         target_date = target_dates[HORIZON-1]
         res = api_get(s, "fixtures", {"date": target_date, "timezone": "Europe/Rome"})
-        if not res: return
+        if not res:
+            return
         day_fx = [f for f in res.get("response", []) if f["fixture"]["status"]["short"] == "NS"]
-        
+
+        # SNAPSHOT: salva e soprattutto aggiorna la memoria in-session (serve per Drop coerente)
+        current_snap = None
         if snap:
             current_snap = {}
             pb_snap = st.progress(0)
+            denom = max(1, len(day_fx))
             for j, f in enumerate(day_fx):
-                pb_snap.progress((j+1)/len(day_fx))
+                pb_snap.progress((j + 1) / denom)
                 m = extract_elite_markets(s, f["fixture"]["id"])
-                if m and m != "SKIP": current_snap[str(f["fixture"]["id"])] = {"q1": m["q1"], "q2": m["q2"]}
-            with open(SNAP_FILE, "w") as f: json.dump({"odds": current_snap, "timestamp": now_rome().strftime("%H:%M")}, f)
-        
-        new_res = execute_elite_scan(s, day_fx, st.session_state.odds_memory, min_rating)
+                if m and m != "SKIP":
+                    current_snap[str(f["fixture"]["id"])] = {"q1": m["q1"], "q2": m["q2"]}
+            # aggiorna memoria runtime e persiste
+            st.session_state.odds_memory = current_snap
+            with open(SNAP_FILE, "w") as f:
+                json.dump({"odds": current_snap, "timestamp": now_rome().strftime("%H:%M")}, f)
+
+        snap_mem = current_snap if current_snap is not None else st.session_state.odds_memory
+        new_res = execute_elite_scan(s, day_fx, snap_mem, min_rating)
+
         existing_ids = [r["Fixture_ID"] for r in st.session_state.scan_results]
         st.session_state.scan_results += [r for r in new_res if r["Fixture_ID"] not in existing_ids]
-        with open(DB_FILE, "w") as f: json.dump({"results": st.session_state.scan_results}, f)
+        with open(DB_FILE, "w") as f:
+            json.dump({"results": st.session_state.scan_results}, f)
         st.rerun()
 
 c1, c2 = st.columns(2)
