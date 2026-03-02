@@ -8,7 +8,7 @@ import time
 from pathlib import Path
 
 # ==========================================
-# CONFIGURAZIONE ARAB SNIPER V22.04.13 - ULTIMATE ODDS PARSING
+# CONFIGURAZIONE ARAB SNIPER V22.04.14 - TOLLERANT BTTS 1H (GGH)
 # ==========================================
 BASE_DIR = Path(__file__).resolve().parent
 DB_FILE = str(BASE_DIR / "arab_sniper_database.json")
@@ -27,7 +27,7 @@ except Exception:
 def now_rome():
     return datetime.now(ROME_TZ) if ROME_TZ else datetime.now()
 
-st.set_page_config(page_title="ARAB SNIPER V22.04.13", layout="wide")
+st.set_page_config(page_title="ARAB SNIPER V22.04.14", layout="wide")
 
 # --- Inizializzazione Session State ---
 if "config" not in st.session_state:
@@ -73,7 +73,7 @@ def api_get(session, path, params):
     except: return None
 
 # ==========================================
-# CORE ENGINE: PARSING SENZA BREAK (PIÙ COMPLETO)
+# UTILITY PER PARSING TOLLERANTE GGH
 # ==========================================
 def _is_junk_market(n):
     junk = ["corner", "card", "booking", "yellow", "red", "offside", "throw", "foul", "shot", "goal kick"]
@@ -83,13 +83,20 @@ def _is_team_total(n):
     n = n.lower()
     return "team total" in n or ("total" in n and ("home" in n or "away" in n))
 
+def _is_yes(val):
+    v = (val or "").strip().lower()
+    return v in ["yes", "si", "sì", "y"]
+
+def _is_first_half_text(txt):
+    t = (txt or "").lower()
+    return any(k in t for k in ["1st half", "first half", "1h", "ht", "half time", "halftime"])
+
 def extract_elite_markets(session, fid):
     res = api_get(session, "odds", {"fixture": fid})
     if not res or not res.get("response"): return None
     
     mk = {"q1": 0.0, "qx": 0.0, "q2": 0.0, "o25": 0.0, "o05ht": 0.0, "gght": 0.0}
     
-    # Rimosso il break anticipato: scansiona tutti i bookmaker disponibili nel feed
     for bm in res["response"][0].get("bookmakers", []):
         for b in bm.get("bets", []):
             n = (b.get("name") or "").lower()
@@ -110,32 +117,33 @@ def extract_elite_markets(session, fid):
                     if "over 2.5" in v["value"].lower(): mk["o25"] = float(v["odd"])
             
             # OVER 0.5 HT (ID 13 o mercati nominali 1H)
-            is_1h = any(k in n for k in ["1st half", "first half", "1h", "half time"])
-            if bid == 13 or (is_1h and mk["o05ht"] == 0 and any(k in n for k in ["total", "over/under", "ou"])):
+            is_1h_name = _is_first_half_text(n)
+            if bid == 13 or (is_1h_name and mk["o05ht"] == 0 and any(k in n for k in ["total", "over/under", "ou"])):
                 if _is_team_total(n) or _is_junk_market(n): continue
                 for v in b.get("values", []):
                     if "over 0.5" in v["value"].lower(): mk["o05ht"] = float(v["odd"])
             
-            # GGH / BTTS 1H (ID 40, 71 o sinonimi)
-            # In Romania e campionati minori spesso l'ID cambia, cerchiamo il pattern nominale
-            is_btts_1h = any(k in n for k in ["btts", "gg", "both teams"]) and is_1h
-            if (bid in [40, 71] or is_btts_1h) and mk["gght"] == 0:
+            # GGH / BTTS 1H (LOGICA TOLLERANTE PATCHATA)
+            is_btts = any(k in n for k in ["both teams", "both team", "btts", "gg", "to score"])
+            if is_btts and mk["gght"] == 0:
                 if any(x in n for x in ["exact", "correct", "score"]): continue
+                bet_is_1h = _is_first_half_text(n)
                 for v in b.get("values", []):
-                    if v["value"].lower() in ["yes", "si"]: mk["gght"] = float(v["odd"])
+                    vv = (v.get("value") or "")
+                    if _is_yes(vv) and (bet_is_1h or _is_first_half_text(vv)):
+                        mk["gght"] = float(v.get("odd"))
+                        break
                     
-        # Esci solo se hai trovato TUTTE le quote. Altrimenti continua a cercare in altri bookmaker.
         if mk["q1"] > 0 and mk["o25"] > 0 and mk["o05ht"] > 0 and mk["gght"] > 0:
             break
             
-    # Filtro di sicurezza skip per mercati spazzatura o coverage insufficiente
     if (1.01 <= mk["q1"] <= 1.10) or (1.01 <= mk["q2"] <= 1.10) or (1.01 <= mk["o25"] <= 1.30):
         return "SKIP"
     return mk
 
-# ... [Resto della logica Stats, Scan UI Sidebar identica a V22.04.12] ...
-# (Viene mantenuto il sistema di salvataggio persistente e aggiornamento dei fixture esistenti)
-
+# ==========================================
+# RESTO DELLA LOGICA (INVARIATA)
+# ==========================================
 def get_team_performance(session, tid):
     if str(tid) in st.session_state.team_stats_cache: return st.session_state.team_stats_cache[str(tid)]
     res = api_get(session, "fixtures", {"team": tid, "last": 8, "status": "FT"})
@@ -224,10 +232,7 @@ def run_full_scan(snap=False):
             with open(DB_FILE, "w") as f: json.dump({"results": st.session_state.scan_results}, f)
             st.rerun()
 
-# ==========================================
-# UI SIDEBAR & TABELLA MOBILE OPTIMIZED
-# ==========================================
-st.sidebar.header("👑 Arab Sniper V22.04.13")
+st.sidebar.header("👑 Arab Sniper V22.04.14")
 HORIZON = st.sidebar.selectbox("Orizzonte Temporale:", options=[1, 2, 3], index=0)
 target_dates = [(now_rome().date() + timedelta(days=i)).strftime("%Y-%m-%d") for i in range(3)]
 
