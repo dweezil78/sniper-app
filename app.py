@@ -8,7 +8,7 @@ import time
 from pathlib import Path
 
 # ==========================================
-# CONFIGURAZIONE ARAB SNIPER V22.04.17 - LOGIC UPDATE
+# CONFIGURAZIONE ARAB SNIPER V22.04.17 - AUDITOR FIX
 # ==========================================
 BASE_DIR = Path(__file__).resolve().parent
 DB_FILE = str(BASE_DIR / "arab_sniper_database.json")
@@ -123,7 +123,7 @@ def extract_elite_markets(session, fid):
                         mk["gght"] = float(v["odd"])
                         break
                     
-        if mk["q1"] > 0 and mk["o25"] > 0 and mk["o05ht"] > 0 and mk["gght"] > 0:
+        if mk["q1"] > 0 and mk["o25"] > 0 and (mk["o05ht"] > 0 or mk["gght"] > 0):
             break
             
     if (1.01 <= mk["q1"] <= 1.10) or (1.01 <= mk["q2"] <= 1.10) or (1.01 <= mk["o25"] <= 1.30):
@@ -197,17 +197,19 @@ def run_full_scan(snap=False):
                     if mk["o25"] > 1.80 and mk["o05ht"] > 1.30: tags.append("⚽"); h_o = True
                     elif mk["o25"] <= 1.80 and mk["o05ht"] <= 1.30: tags.append("🚀"); h_o = True
                 
-                # MODIFICA 1: soglia avg_total da 1.2 a 1.5
+                # MODIFICA: soglia avg_total da 1.2 a 1.5
                 if (s_h["avg_total"] >= 1.5 and s_a["avg_total"] >= 1.5): tags.append("🎯PT"); h_g = True
                 
-                # MODIFICA 2: integrazione avg_ht >= 0.8 per tag Dorato
-                if h_p and h_o and h_g and s_h["avg_ht"] >= 0.6 and s_a["avg_ht"] >= 0.6: tags.insert(0, "⚽⭐")
+                # MODIFICA: integrazione avg_ht >= 0.6 e quota O0.5 HT > 1.25 per tag Dorato
+                if h_p and h_o and h_g:
+                    if (s_h["avg_ht"] >= 0.6 and s_a["avg_ht"] >= 0.6 and mk["o05ht"] > 1.25):
+                        tags.insert(0, "⚽⭐")
 
                 final_list.append({
                     "Ora": f["fixture"]["date"][11:16],
                     "Lega": f"{f['league']['name']} ({cnt})",
                     "Match": f"{f['teams']['home']['name']} - {f['teams']['away']['name']}",
-                    "Gold": "✅" if is_gold else "❌",
+                    "Gold": "✅" if is_gold else "❌", # SPOSTATO ALLA QUARTA POSIZIONE
                     "1X2": f"{mk['q1']:.1f}|{mk['qx']:.1f}|{mk['q2']:.1f}",
                     "O2.5": f"{mk['o25']:.2f}", "O0.5H": f"{mk['o05ht']:.2f}", "GGH": f"{mk['gght']:.2f}",
                     "HT": f"{s_h['avg_ht']:.1f}|{s_a['avg_ht']:.1f}",
@@ -248,9 +250,13 @@ if c2.button("🚀 SCAN VELOCE"): run_full_scan(snap=False)
 
 if st.session_state.scan_results:
     df = pd.DataFrame(st.session_state.scan_results)
-    view = df[df["Data"] == target_dates[HORIZON - 1]].drop(columns=["Data", "Fixture_ID"])
+    # Filtro visualizzazione per data selezionata
+    full_view = df[df["Data"] == target_dates[HORIZON - 1]]
     
-    if not view.empty:
+    if not full_view.empty:
+        # UI Table: Rimuoviamo colonne tecniche solo per la visualizzazione a schermo
+        view = full_view.drop(columns=["Data", "Fixture_ID"])
+        
         st.markdown("""
             <style>
                 .main-container { width: 100%; max-height: 800px; overflow: auto; border: 1px solid #444; border-radius: 8px; background-color: #0e1117; }
@@ -280,7 +286,8 @@ if st.session_state.scan_results:
         st.markdown(html, unsafe_allow_html=True)
         st.markdown("---")
         d1, d2 = st.columns(2)
-        d1.download_button("💾 CSV", view.to_csv(index=False).encode("utf-8"), f"arab_{target_dates[HORIZON-1]}.csv")
+        # Il CSV scaricato mantiene il Fixture_ID per l'auditing
+        d1.download_button("💾 CSV", full_view.to_csv(index=False).encode("utf-8"), f"arab_{target_dates[HORIZON-1]}.csv")
         d2.download_button("🌐 HTML", html.encode("utf-8"), f"arab_{target_dates[HORIZON-1]}.html")
 else:
     st.info("Esegui uno scan.")
