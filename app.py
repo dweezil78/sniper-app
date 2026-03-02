@@ -8,7 +8,7 @@ import time
 from pathlib import Path
 
 # ==========================================
-# CONFIGURAZIONE ARAB SNIPER V22.04.10
+# CONFIGURAZIONE ARAB SNIPER V22.04.10 - UI REFINED
 # ==========================================
 BASE_DIR = Path(__file__).resolve().parent
 DB_FILE = str(BASE_DIR / "arab_sniper_database.json")
@@ -44,7 +44,7 @@ def save_config():
     with open(CONFIG_FILE, "w") as f: json.dump(st.session_state.config, f)
 
 def load_db():
-    """Caricamento persistente con scalata data"""
+    """Carica i risultati salvati e rimuove quelli vecchi (scalata data)"""
     today = now_rome().strftime("%Y-%m-%d")
     ts = None
     if os.path.exists(DB_FILE):
@@ -65,7 +65,7 @@ def load_db():
 last_snap_ts = load_db()
 
 # ==========================================
-# API CORE & ELITE PARSING
+# API CORE & ROBUST PARSING
 # ==========================================
 API_KEY = st.secrets.get("API_SPORTS_KEY")
 HEADERS = {"x-apisports-key": API_KEY}
@@ -76,13 +76,14 @@ def api_get(session, path, params):
         return r.json() if r.status_code == 200 else None
     except: return None
 
-def _is_junk_market(n):
+def _is_junk_market(name_lower: str) -> bool:
     junk = ["corner", "card", "booking", "yellow", "red", "offside", "throw", "foul", "shot", "goal kick"]
-    return any(j in n.lower() for j in junk)
+    return any(j in name_lower for j in junk)
 
-def _is_team_total(n):
-    n = n.lower()
-    return "team total" in n or ("total" in n and ("home" in n or "away" in n))
+def _is_team_total(name_lower: str) -> bool:
+    if "team total" in name_lower: return True
+    if "total" in name_lower and ("home" in name_lower or "away" in name_lower): return True
+    return False
 
 def extract_elite_markets(session, fid):
     res = api_get(session, "odds", {"fixture": fid})
@@ -91,26 +92,27 @@ def extract_elite_markets(session, fid):
     for bm in res["response"][0].get("bookmakers", []):
         for b in bm.get("bets", []):
             n = (b.get("name") or "").lower()
+            if not n: continue
             if b.get("id") == 1 and mk["q1"] == 0:
                 for v in b.get("values", []):
-                    vl = v["value"].lower()
+                    vl = (v.get("value") or "").lower()
                     if vl == "home": mk["q1"] = float(v["odd"])
                     elif vl == "draw": mk["qx"] = float(v["odd"])
                     elif vl == "away": mk["q2"] = float(v["odd"])
             if b.get("id") == 5 and mk["o25"] == 0:
                 if _is_junk_market(n): continue
                 for v in b.get("values", []):
-                    if "over 2.5" in v["value"].lower(): mk["o25"] = float(v["odd"])
-            is_1h = any(k in n for k in ["1st half", "first half", "1h", "half time"])
+                    if (v.get("value") or "").lower() == "over 2.5": mk["o25"] = float(v["odd"])
+            is_1h = any(k in n for k in ["1st half", "first half", "1h", "1st", "half time", "halftime"])
             if not is_1h or _is_junk_market(n): continue
             if mk["o05ht"] == 0 and any(k in n for k in ["total", "over/under", "ou"]):
                 if _is_team_total(n): continue
                 for v in b.get("values", []):
-                    if "over 0.5" in v["value"].lower(): mk["o05ht"] = float(v["odd"])
-            if mk["gght"] == 0 and any(k in n for k in ["btts", "gg", "both teams"]):
+                    if (v.get("value") or "").lower() == "over 0.5": mk["o05ht"] = float(v["odd"])
+            if mk["gght"] == 0 and any(k in n for k in ["both teams to score", "btts", "gg", "both"]):
                 if any(x in n for x in ["exact", "correct"]): continue
                 for v in b.get("values", []):
-                    if v["value"].lower() in ["yes", "si"]: mk["gght"] = float(v["odd"])
+                    if (v.get("value") or "").lower() in ["yes", "si"]: mk["gght"] = float(v["odd"])
         if mk["q1"] > 0 and mk["o25"] > 0 and (mk["o05ht"] > 0 or mk["gght"] > 0): break
     if (1.01 <= mk["q1"] <= 1.10) or (1.01 <= mk["q2"] <= 1.10) or (1.01 <= mk["o25"] <= 1.30): return "SKIP"
     return mk
@@ -132,12 +134,9 @@ def get_team_performance(session, tid):
     st.session_state.team_stats_cache[str(tid)] = stats
     return stats
 
-# ==========================================
-# SCAN CORE
-# ==========================================
 def run_full_scan(snap=False):
     target_dates = [(now_rome().date() + timedelta(days=i)).strftime("%Y-%m-%d") for i in range(3)]
-    with st.spinner("🚀 Arab Sniper: Scan e Persistenza in corso..."):
+    with st.spinner("🚀 Arab Sniper: Analisi mercati e Gold Zone..."):
         with requests.Session() as s:
             target_date = target_dates[HORIZON - 1]
             res = api_get(s, "fixtures", {"date": target_date, "timezone": "Europe/Rome"})
@@ -178,9 +177,9 @@ def run_full_scan(snap=False):
 
                 final_list.append({
                     "Ora": f["fixture"]["date"][11:16],
-                    "Lega": f"{f['league']['name'][:8]}..({cnt[:3]})",
-                    "Match": f"{f['teams']['home']['name'][:10]} - {f['teams']['away']['name'][:10]}",
-                    "1X2": f"{mk['q1']:.1f}|{mk['qx']:.1f}|{mk['q2']:.1f}",
+                    "Lega": f"{f['league']['name']} ({cnt})",
+                    "Match": f"{f['teams']['home']['name']} - {f['teams']['away']['name']}",
+                    "1X2": f"{mk['q1']:.2f}|{mk['qx']:.2f}|{mk['q2']:.2f}",
                     "O2.5": f"{mk['o25']:.2f}", "O0.5H": f"{mk['o05ht']:.2f}", "GGH": f"{mk['gght']:.2f}",
                     "HT": f"{s_h['avg_ht']:.1f}|{s_a['avg_ht']:.1f}",
                     "Info": " ".join(tags), "Gold": "✅" if is_gold else "❌", "Data": f["fixture"]["date"][:10],
@@ -214,7 +213,7 @@ if last_snap_ts: st.sidebar.success(f"✅ SNAPSHOT: {last_snap_ts}")
 else: st.sidebar.warning("⚠️ SNAPSHOT ASSENTE")
 
 # ==========================================
-# MAIN UI & TABLE (STICKY HEADER)
+# MAIN UI & TABLE (FIXED HEADER & SCROLL)
 # ==========================================
 c1, c2 = st.columns(2)
 if c1.button("📌 SNAP + SCAN"): run_full_scan(snap=True)
@@ -227,10 +226,15 @@ if st.session_state.scan_results:
     if not view.empty:
         st.markdown("""
             <style>
-                .main-container { width: 100%; max-height: 800px; overflow: auto; border: 1px solid #444; border-radius: 8px; }
-                .mobile-table { width: 100%; min-width: 950px; border-collapse: separate; border-spacing: 0; font-family: sans-serif; font-size: 11px; }
-                .mobile-table th { position: sticky; top: 0; background: #1a1c23; color: #00e5ff; z-index: 10; padding: 10px 5px; border-bottom: 2px solid #333; border-right: 1px solid #333; }
-                .mobile-table td { padding: 7px 5px; border-bottom: 1px solid #333; border-right: 1px solid #333; text-align: center; white-space: nowrap; }
+                .main-container { width: 100%; max-height: 800px; overflow: auto; border: 1px solid #444; border-radius: 8px; background-color: #0e1117; }
+                .mobile-table { width: 100%; min-width: 1000px; border-collapse: separate; border-spacing: 0; font-family: sans-serif; font-size: 11px; }
+                .mobile-table th { 
+                    position: sticky; top: 0; 
+                    background: #1a1c23; color: #00e5ff; 
+                    z-index: 10; padding: 12px 5px; 
+                    border-bottom: 2px solid #333; border-right: 1px solid #333; 
+                }
+                .mobile-table td { padding: 8px 5px; border-bottom: 1px solid #333; border-right: 1px solid #333; text-align: center; white-space: nowrap; }
                 .row-dorato { background-color: #FFD700 !important; color: black !important; font-weight: bold; }
                 .row-boost { background-color: #FF0000 !important; color: white !important; font-weight: bold; }
                 .row-ggpt { background-color: #0000FF !important; color: white !important; font-weight: bold; }
