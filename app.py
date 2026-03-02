@@ -8,7 +8,7 @@ import time
 from pathlib import Path
 
 # ==========================================
-# CONFIGURAZIONE ARAB SNIPER V22.04.15 - UNIVERSAL GGH ENGINE
+# CONFIGURAZIONE ARAB SNIPER V22.04.16 - GOLD COLUMN POSITION FIX
 # ==========================================
 BASE_DIR = Path(__file__).resolve().parent
 DB_FILE = str(BASE_DIR / "arab_sniper_database.json")
@@ -27,7 +27,7 @@ except Exception:
 def now_rome():
     return datetime.now(ROME_TZ) if ROME_TZ else datetime.now()
 
-st.set_page_config(page_title="ARAB SNIPER V22.04.15", layout="wide")
+st.set_page_config(page_title="ARAB SNIPER V22.04.16", layout="wide")
 
 # --- Inizializzazione Session State ---
 if "config" not in st.session_state:
@@ -73,7 +73,7 @@ def api_get(session, path, params):
     except: return None
 
 # ==========================================
-# NUOVE UTILITY DI PARSING AGGRESSIVO
+# UTILITY DI PARSING UNIVERSALE
 # ==========================================
 def _contains_ht(text):
     t = (text or "").lower()
@@ -98,7 +98,6 @@ def extract_elite_markets(session, fid):
             name = (b.get("name") or "").lower()
             bid = b.get("id")
             
-            # 1X2 FT
             if bid == 1 and mk["q1"] == 0:
                 for v in b.get("values", []):
                     vl = v["value"].lower()
@@ -106,34 +105,24 @@ def extract_elite_markets(session, fid):
                     elif "draw" in vl: mk["qx"] = float(v["odd"])
                     elif "away" in vl: mk["q2"] = float(v["odd"])
             
-            # OVER 2.5 FT
             if bid == 5 and mk["o25"] == 0:
                 if any(j in name for j in ["corner", "card", "booking"]): continue
                 for v in b.get("values", []):
                     if "over 2.5" in v["value"].lower(): mk["o25"] = float(v["odd"])
             
-            # OVER 0.5 HT (Parsing Universale)
             if mk["o05ht"] == 0 and _contains_ht(name) and any(k in name for k in ["total", "over/under", "ou", "goals"]):
                 if "team" in name: continue
                 for v in b.get("values", []):
                     if "over 0.5" in v["value"].lower(): mk["o05ht"] = float(v["odd"])
 
-            # GGH / BTTS 1H (Parsing Universale)
             if mk["gght"] == 0 and _contains_btts(name):
-                # Escludiamo risultati esatti o mercati FT
-                if any(x in name for x in ["exact", "correct", "score"]) or (not _contains_ht(name) and bid not in [40, 71]):
-                    # Se non c'è HT nel nome, controlliamo se è negli ID specifici o nel valore
-                    pass 
-                
                 is_name_ht = _contains_ht(name)
                 for v in b.get("values", []):
                     val_txt = v["value"].lower()
-                    # Cattura se è "Yes" E (il nome dice HT O il valore dice HT)
                     if _is_yes(val_txt) and (is_name_ht or _contains_ht(val_txt) or bid in [40, 71]):
                         mk["gght"] = float(v["odd"])
                         break
                     
-        # Se abbiamo tutto, usciamo per risparmiare chiamate
         if mk["q1"] > 0 and mk["o25"] > 0 and mk["o05ht"] > 0 and mk["gght"] > 0:
             break
             
@@ -141,9 +130,6 @@ def extract_elite_markets(session, fid):
         return "SKIP"
     return mk
 
-# ==========================================
-# RESTO DELLA LOGICA STATS & SCAN (INVARIATA)
-# ==========================================
 def get_team_performance(session, tid):
     if str(tid) in st.session_state.team_stats_cache: return st.session_state.team_stats_cache[str(tid)]
     res = api_get(session, "fixtures", {"team": tid, "last": 8, "status": "FT"})
@@ -217,10 +203,11 @@ def run_full_scan(snap=False):
                     "Ora": f["fixture"]["date"][11:16],
                     "Lega": f"{f['league']['name']} ({cnt})",
                     "Match": f"{f['teams']['home']['name']} - {f['teams']['away']['name']}",
+                    "Gold": "✅" if is_gold else "❌", # SPOSTATO ALLA QUARTA POSIZIONE
                     "1X2": f"{mk['q1']:.1f}|{mk['qx']:.1f}|{mk['q2']:.1f}",
                     "O2.5": f"{mk['o25']:.2f}", "O0.5H": f"{mk['o05ht']:.2f}", "GGH": f"{mk['gght']:.2f}",
                     "HT": f"{s_h['avg_ht']:.1f}|{s_a['avg_ht']:.1f}",
-                    "Info": " ".join(tags), "Gold": "✅" if is_gold else "❌", "Data": f["fixture"]["date"][:10],
+                    "Info": " ".join(tags), "Data": f["fixture"]["date"][:10],
                     "Fixture_ID": f["fixture"]["id"]
                 })
             
@@ -232,8 +219,8 @@ def run_full_scan(snap=False):
             with open(DB_FILE, "w") as f: json.dump({"results": st.session_state.scan_results}, f)
             st.rerun()
 
-# --- UI (STESSA STRUTTURA) ---
-st.sidebar.header("👑 Arab Sniper V22.04.15")
+# --- UI ---
+st.sidebar.header("👑 Arab Sniper V22.04.16")
 HORIZON = st.sidebar.selectbox("Orizzonte Temporale:", options=[1, 2, 3], index=0)
 target_dates = [(now_rome().date() + timedelta(days=i)).strftime("%Y-%m-%d") for i in range(3)]
 
