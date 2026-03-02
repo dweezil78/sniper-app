@@ -8,7 +8,7 @@ import time
 from pathlib import Path
 
 # ==========================================
-# CONFIGURAZIONE ARAB SNIPER V22.04.14 - TOLLERANT BTTS 1H (GGH)
+# CONFIGURAZIONE ARAB SNIPER V22.04.15 - UNIVERSAL GGH ENGINE
 # ==========================================
 BASE_DIR = Path(__file__).resolve().parent
 DB_FILE = str(BASE_DIR / "arab_sniper_database.json")
@@ -27,7 +27,7 @@ except Exception:
 def now_rome():
     return datetime.now(ROME_TZ) if ROME_TZ else datetime.now()
 
-st.set_page_config(page_title="ARAB SNIPER V22.04.14", layout="wide")
+st.set_page_config(page_title="ARAB SNIPER V22.04.15", layout="wide")
 
 # --- Inizializzazione Session State ---
 if "config" not in st.session_state:
@@ -73,23 +73,19 @@ def api_get(session, path, params):
     except: return None
 
 # ==========================================
-# UTILITY PER PARSING TOLLERANTE GGH
+# NUOVE UTILITY DI PARSING AGGRESSIVO
 # ==========================================
-def _is_junk_market(n):
-    junk = ["corner", "card", "booking", "yellow", "red", "offside", "throw", "foul", "shot", "goal kick"]
-    return any(j in n.lower() for j in junk)
+def _contains_ht(text):
+    t = (text or "").lower()
+    return any(k in t for k in ["1st half", "first half", "1h", "ht", "half time", "halftime", "1° tempo"])
 
-def _is_team_total(n):
-    n = n.lower()
-    return "team total" in n or ("total" in n and ("home" in n or "away" in n))
+def _contains_btts(text):
+    t = (text or "").lower()
+    return any(k in t for k in ["both teams", "btts", "gg", "to score", "gol/gol", "entrambe segnano"])
 
-def _is_yes(val):
-    v = (val or "").strip().lower()
-    return v in ["yes", "si", "sì", "y"]
-
-def _is_first_half_text(txt):
-    t = (txt or "").lower()
-    return any(k in t for k in ["1st half", "first half", "1h", "ht", "half time", "halftime"])
+def _is_yes(text):
+    t = (text or "").strip().lower()
+    return t in ["yes", "si", "sì", "y", "1"]
 
 def extract_elite_markets(session, fid):
     res = api_get(session, "odds", {"fixture": fid})
@@ -99,41 +95,45 @@ def extract_elite_markets(session, fid):
     
     for bm in res["response"][0].get("bookmakers", []):
         for b in bm.get("bets", []):
-            n = (b.get("name") or "").lower()
+            name = (b.get("name") or "").lower()
             bid = b.get("id")
             
-            # 1X2 FT (ID 1)
+            # 1X2 FT
             if bid == 1 and mk["q1"] == 0:
                 for v in b.get("values", []):
                     vl = v["value"].lower()
-                    if vl == "home": mk["q1"] = float(v["odd"])
-                    elif vl == "draw": mk["qx"] = float(v["odd"])
-                    elif vl == "away": mk["q2"] = float(v["odd"])
+                    if "home" in vl: mk["q1"] = float(v["odd"])
+                    elif "draw" in vl: mk["qx"] = float(v["odd"])
+                    elif "away" in vl: mk["q2"] = float(v["odd"])
             
-            # OVER 2.5 FT (ID 5)
+            # OVER 2.5 FT
             if bid == 5 and mk["o25"] == 0:
-                if _is_junk_market(n): continue
+                if any(j in name for j in ["corner", "card", "booking"]): continue
                 for v in b.get("values", []):
                     if "over 2.5" in v["value"].lower(): mk["o25"] = float(v["odd"])
             
-            # OVER 0.5 HT (ID 13 o mercati nominali 1H)
-            is_1h_name = _is_first_half_text(n)
-            if bid == 13 or (is_1h_name and mk["o05ht"] == 0 and any(k in n for k in ["total", "over/under", "ou"])):
-                if _is_team_total(n) or _is_junk_market(n): continue
+            # OVER 0.5 HT (Parsing Universale)
+            if mk["o05ht"] == 0 and _contains_ht(name) and any(k in name for k in ["total", "over/under", "ou", "goals"]):
+                if "team" in name: continue
                 for v in b.get("values", []):
                     if "over 0.5" in v["value"].lower(): mk["o05ht"] = float(v["odd"])
-            
-            # GGH / BTTS 1H (LOGICA TOLLERANTE PATCHATA)
-            is_btts = any(k in n for k in ["both teams", "both team", "btts", "gg", "to score"])
-            if is_btts and mk["gght"] == 0:
-                if any(x in n for x in ["exact", "correct", "score"]): continue
-                bet_is_1h = _is_first_half_text(n)
+
+            # GGH / BTTS 1H (Parsing Universale)
+            if mk["gght"] == 0 and _contains_btts(name):
+                # Escludiamo risultati esatti o mercati FT
+                if any(x in name for x in ["exact", "correct", "score"]) or (not _contains_ht(name) and bid not in [40, 71]):
+                    # Se non c'è HT nel nome, controlliamo se è negli ID specifici o nel valore
+                    pass 
+                
+                is_name_ht = _contains_ht(name)
                 for v in b.get("values", []):
-                    vv = (v.get("value") or "")
-                    if _is_yes(vv) and (bet_is_1h or _is_first_half_text(vv)):
-                        mk["gght"] = float(v.get("odd"))
+                    val_txt = v["value"].lower()
+                    # Cattura se è "Yes" E (il nome dice HT O il valore dice HT)
+                    if _is_yes(val_txt) and (is_name_ht or _contains_ht(val_txt) or bid in [40, 71]):
+                        mk["gght"] = float(v["odd"])
                         break
                     
+        # Se abbiamo tutto, usciamo per risparmiare chiamate
         if mk["q1"] > 0 and mk["o25"] > 0 and mk["o05ht"] > 0 and mk["gght"] > 0:
             break
             
@@ -142,7 +142,7 @@ def extract_elite_markets(session, fid):
     return mk
 
 # ==========================================
-# RESTO DELLA LOGICA (INVARIATA)
+# RESTO DELLA LOGICA STATS & SCAN (INVARIATA)
 # ==========================================
 def get_team_performance(session, tid):
     if str(tid) in st.session_state.team_stats_cache: return st.session_state.team_stats_cache[str(tid)]
@@ -163,7 +163,7 @@ def get_team_performance(session, tid):
 
 def run_full_scan(snap=False):
     target_dates = [(now_rome().date() + timedelta(days=i)).strftime("%Y-%m-%d") for i in range(3)]
-    with st.spinner("🚀 Arab Sniper: Analisi mercati in corso..."):
+    with st.spinner("🚀 Arab Sniper: Ricerca mercati con motore universale..."):
         with requests.Session() as s:
             target_date = target_dates[HORIZON - 1]
             res = api_get(s, "fixtures", {"date": target_date, "timezone": "Europe/Rome"})
@@ -232,7 +232,8 @@ def run_full_scan(snap=False):
             with open(DB_FILE, "w") as f: json.dump({"results": st.session_state.scan_results}, f)
             st.rerun()
 
-st.sidebar.header("👑 Arab Sniper V22.04.14")
+# --- UI (STESSA STRUTTURA) ---
+st.sidebar.header("👑 Arab Sniper V22.04.15")
 HORIZON = st.sidebar.selectbox("Orizzonte Temporale:", options=[1, 2, 3], index=0)
 target_dates = [(now_rome().date() + timedelta(days=i)).strftime("%Y-%m-%d") for i in range(3)]
 
@@ -263,12 +264,7 @@ if st.session_state.scan_results:
             <style>
                 .main-container { width: 100%; max-height: 800px; overflow: auto; border: 1px solid #444; border-radius: 8px; background-color: #0e1117; }
                 .mobile-table { width: 100%; min-width: 1000px; border-collapse: separate; border-spacing: 0; font-family: sans-serif; font-size: 11px; }
-                .mobile-table th { 
-                    position: sticky; top: 0; 
-                    background: #1a1c23; color: #00e5ff; 
-                    z-index: 10; padding: 12px 5px; 
-                    border-bottom: 2px solid #333; border-right: 1px solid #333; 
-                }
+                .mobile-table th { position: sticky; top: 0; background: #1a1c23; color: #00e5ff; z-index: 10; padding: 12px 5px; border-bottom: 2px solid #333; border-right: 1px solid #333; }
                 .mobile-table td { padding: 8px 5px; border-bottom: 1px solid #333; border-right: 1px solid #333; text-align: center; white-space: nowrap; }
                 .row-dorato { background-color: #FFD700 !important; color: black !important; font-weight: bold; }
                 .row-boost { background-color: #FF0000 !important; color: white !important; font-weight: bold; }
