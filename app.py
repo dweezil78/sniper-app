@@ -8,7 +8,7 @@ import time
 from pathlib import Path
 
 # ==========================================
-# CONFIGURAZIONE ARAB SNIPER V22.04.9 - PERSISTENCE & AUTO-DATE FIX
+# CONFIGURAZIONE ARAB SNIPER V22.04.10
 # ==========================================
 BASE_DIR = Path(__file__).resolve().parent
 DB_FILE = str(BASE_DIR / "arab_sniper_database.json")
@@ -27,7 +27,7 @@ except Exception:
 def now_rome():
     return datetime.now(ROME_TZ) if ROME_TZ else datetime.now()
 
-st.set_page_config(page_title="ARAB SNIPER V22.04.9", layout="wide")
+st.set_page_config(page_title="ARAB SNIPER V22.04.10", layout="wide")
 
 # --- Inizializzazione Session State ---
 if "config" not in st.session_state:
@@ -43,39 +43,29 @@ if "odds_memory" not in st.session_state: st.session_state.odds_memory = {}
 def save_config():
     with open(CONFIG_FILE, "w") as f: json.dump(st.session_state.config, f)
 
-# === PARTE INTEGRATA: PERSISTENZA E SCALATA DATA ===
 def load_db():
-    """Carica i risultati salvati e rimuove quelli vecchi (scalata data)"""
+    """Caricamento persistente con scalata data"""
     today = now_rome().strftime("%Y-%m-%d")
     ts = None
-    
-    # Caricamento Risultati Scan
     if os.path.exists(DB_FILE):
         try:
             with open(DB_FILE, "r") as f:
                 data = json.load(f).get("results", [])
-                # Filtro: tieni solo i match da oggi in poi
                 st.session_state.scan_results = [r for r in data if r.get("Data", "") >= today]
-        except Exception:
-            pass
-
-    # Caricamento Snapshot Quote
+        except: pass
     if os.path.exists(SNAP_FILE):
         try:
             with open(SNAP_FILE, "r") as f:
                 snap_data = json.load(f)
                 st.session_state.odds_memory = snap_data.get("odds", {})
                 ts = snap_data.get("timestamp", "N/D")
-        except Exception:
-            pass
+        except: pass
     return ts
 
-# Esecuzione al caricamento dell'app
 last_snap_ts = load_db()
-# =================================================
 
 # ==========================================
-# API CORE & ROBUST PARSING (DA V22.04)
+# API CORE & ELITE PARSING
 # ==========================================
 API_KEY = st.secrets.get("API_SPORTS_KEY")
 HEADERS = {"x-apisports-key": API_KEY}
@@ -86,14 +76,13 @@ def api_get(session, path, params):
         return r.json() if r.status_code == 200 else None
     except: return None
 
-def _is_junk_market(name_lower: str) -> bool:
+def _is_junk_market(n):
     junk = ["corner", "card", "booking", "yellow", "red", "offside", "throw", "foul", "shot", "goal kick"]
-    return any(j in name_lower for j in junk)
+    return any(j in n.lower() for j in junk)
 
-def _is_team_total(name_lower: str) -> bool:
-    if "team total" in name_lower: return True
-    if "total" in name_lower and ("home" in name_lower or "away" in name_lower): return True
-    return False
+def _is_team_total(n):
+    n = n.lower()
+    return "team total" in n or ("total" in n and ("home" in n or "away" in n))
 
 def extract_elite_markets(session, fid):
     res = api_get(session, "odds", {"fixture": fid})
@@ -102,27 +91,26 @@ def extract_elite_markets(session, fid):
     for bm in res["response"][0].get("bookmakers", []):
         for b in bm.get("bets", []):
             n = (b.get("name") or "").lower()
-            if not n: continue
             if b.get("id") == 1 and mk["q1"] == 0:
                 for v in b.get("values", []):
-                    vl = (v.get("value") or "").lower()
+                    vl = v["value"].lower()
                     if vl == "home": mk["q1"] = float(v["odd"])
                     elif vl == "draw": mk["qx"] = float(v["odd"])
                     elif vl == "away": mk["q2"] = float(v["odd"])
             if b.get("id") == 5 and mk["o25"] == 0:
                 if _is_junk_market(n): continue
                 for v in b.get("values", []):
-                    if (v.get("value") or "").lower() == "over 2.5": mk["o25"] = float(v["odd"])
-            is_1h = any(k in n for k in ["1st half", "first half", "1h", "1st", "half time", "halftime"])
+                    if "over 2.5" in v["value"].lower(): mk["o25"] = float(v["odd"])
+            is_1h = any(k in n for k in ["1st half", "first half", "1h", "half time"])
             if not is_1h or _is_junk_market(n): continue
             if mk["o05ht"] == 0 and any(k in n for k in ["total", "over/under", "ou"]):
                 if _is_team_total(n): continue
                 for v in b.get("values", []):
-                    if (v.get("value") or "").lower() == "over 0.5": mk["o05ht"] = float(v["odd"])
-            if mk["gght"] == 0 and any(k in n for k in ["both teams to score", "btts", "gg", "both"]):
+                    if "over 0.5" in v["value"].lower(): mk["o05ht"] = float(v["odd"])
+            if mk["gght"] == 0 and any(k in n for k in ["btts", "gg", "both teams"]):
                 if any(x in n for x in ["exact", "correct"]): continue
                 for v in b.get("values", []):
-                    if (v.get("value") or "").lower() in ["yes", "si"]: mk["gght"] = float(v["odd"])
+                    if v["value"].lower() in ["yes", "si"]: mk["gght"] = float(v["odd"])
         if mk["q1"] > 0 and mk["o25"] > 0 and (mk["o05ht"] > 0 or mk["gght"] > 0): break
     if (1.01 <= mk["q1"] <= 1.10) or (1.01 <= mk["q2"] <= 1.10) or (1.01 <= mk["o25"] <= 1.30): return "SKIP"
     return mk
@@ -144,9 +132,12 @@ def get_team_performance(session, tid):
     st.session_state.team_stats_cache[str(tid)] = stats
     return stats
 
+# ==========================================
+# SCAN CORE
+# ==========================================
 def run_full_scan(snap=False):
     target_dates = [(now_rome().date() + timedelta(days=i)).strftime("%Y-%m-%d") for i in range(3)]
-    with st.spinner("🚀 Arab Sniper: Analisi mercati e Gold Zone..."):
+    with st.spinner("🚀 Arab Sniper: Scan e Persistenza in corso..."):
         with requests.Session() as s:
             target_date = target_dates[HORIZON - 1]
             res = api_get(s, "fixtures", {"date": target_date, "timezone": "Europe/Rome"})
@@ -196,19 +187,15 @@ def run_full_scan(snap=False):
                     "Fixture_ID": f["fixture"]["id"]
                 })
             
-            # PARTE INTEGRATA: SALVATAGGIO PERSISTENTE
             eids = [r["Fixture_ID"] for r in st.session_state.scan_results]
             st.session_state.scan_results += [r for r in final_list if r["Fixture_ID"] not in eids]
-            
-            with open(DB_FILE, "w") as f:
-                json.dump({"results": st.session_state.scan_results}, f)
-            
+            with open(DB_FILE, "w") as f: json.dump({"results": st.session_state.scan_results}, f)
             st.rerun()
 
 # ==========================================
-# UI & TABELLA
+# UI SIDEBAR
 # ==========================================
-st.sidebar.header("👑 Arab Sniper V22.04.9")
+st.sidebar.header("👑 Arab Sniper V22.04.10")
 HORIZON = st.sidebar.selectbox("Orizzonte Temporale:", options=[1, 2, 3], index=0)
 target_dates = [(now_rome().date() + timedelta(days=i)).strftime("%Y-%m-%d") for i in range(3)]
 
@@ -223,28 +210,27 @@ if all_discovered:
         st.session_state.config["excluded"] = new_ex
         save_config(); st.rerun()
 
-# Stato Snapshot nella sidebar
-if last_snap_ts:
-    st.sidebar.success(f"✅ SNAPSHOT: {last_snap_ts}")
-else:
-    st.sidebar.warning("⚠️ SNAPSHOT ASSENTE")
+if last_snap_ts: st.sidebar.success(f"✅ SNAPSHOT: {last_snap_ts}")
+else: st.sidebar.warning("⚠️ SNAPSHOT ASSENTE")
 
+# ==========================================
+# MAIN UI & TABLE (STICKY HEADER)
+# ==========================================
 c1, c2 = st.columns(2)
 if c1.button("📌 SNAP + SCAN"): run_full_scan(snap=True)
 if c2.button("🚀 SCAN VELOCE"): run_full_scan(snap=False)
 
 if st.session_state.scan_results:
     df = pd.DataFrame(st.session_state.scan_results)
-    # Filtro visualizzazione per data selezionata
     view = df[df["Data"] == target_dates[HORIZON - 1]].drop(columns=["Data", "Fixture_ID"])
     
     if not view.empty:
         st.markdown("""
             <style>
-                .scroll-container { width: 100%; overflow-x: auto; display: block; border: 1px solid #444; margin: 10px 0; }
-                .mobile-table { width: 100%; min-width: 880px; border-collapse: collapse; font-family: sans-serif; font-size: 11px; }
-                .mobile-table th, .mobile-table td { white-space: nowrap; padding: 6px 4px; border: 1px solid #444; text-align: center; }
-                .mobile-table th { background: #222; color: #00e5ff; }
+                .main-container { width: 100%; max-height: 800px; overflow: auto; border: 1px solid #444; border-radius: 8px; }
+                .mobile-table { width: 100%; min-width: 950px; border-collapse: separate; border-spacing: 0; font-family: sans-serif; font-size: 11px; }
+                .mobile-table th { position: sticky; top: 0; background: #1a1c23; color: #00e5ff; z-index: 10; padding: 10px 5px; border-bottom: 2px solid #333; border-right: 1px solid #333; }
+                .mobile-table td { padding: 7px 5px; border-bottom: 1px solid #333; border-right: 1px solid #333; text-align: center; white-space: nowrap; }
                 .row-dorato { background-color: #FFD700 !important; color: black !important; font-weight: bold; }
                 .row-boost { background-color: #FF0000 !important; color: white !important; font-weight: bold; }
                 .row-ggpt { background-color: #0000FF !important; color: white !important; font-weight: bold; }
@@ -258,7 +244,7 @@ if st.session_state.scan_results:
             if "🎯PT" in info: return "row-ggpt"
             return "row-std"
 
-        html = '<div class="scroll-container"><table class="mobile-table"><thead><tr>'
+        html = '<div class="main-container"><table class="mobile-table"><thead><tr>'
         html += ''.join(f'<th>{c}</th>' for c in view.columns) + '</tr></thead><tbody>'
         for _, row in view.iterrows():
             cls = get_row_class(row["Info"])
@@ -270,7 +256,5 @@ if st.session_state.scan_results:
         d1, d2 = st.columns(2)
         d1.download_button("💾 CSV", view.to_csv(index=False).encode("utf-8"), f"arab_{target_dates[HORIZON-1]}.csv")
         d2.download_button("🌐 HTML", html.encode("utf-8"), f"arab_{target_dates[HORIZON-1]}.html")
-    else:
-        st.info("Nessun match trovato per questa data.")
 else:
-    st.info("Pronto per lo scan.")
+    st.info("Esegui uno scan.")
