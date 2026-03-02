@@ -8,7 +8,7 @@ import time
 from pathlib import Path
 
 # ==========================================
-# CONFIGURAZIONE ARAB SNIPER V22.04.12 - FIX BTTS 1H (GGH)
+# CONFIGURAZIONE ARAB SNIPER V22.04.13 - ULTIMATE ODDS PARSING
 # ==========================================
 BASE_DIR = Path(__file__).resolve().parent
 DB_FILE = str(BASE_DIR / "arab_sniper_database.json")
@@ -27,8 +27,9 @@ except Exception:
 def now_rome():
     return datetime.now(ROME_TZ) if ROME_TZ else datetime.now()
 
-st.set_page_config(page_title="ARAB SNIPER V22.04.12", layout="wide")
+st.set_page_config(page_title="ARAB SNIPER V22.04.13", layout="wide")
 
+# --- Inizializzazione Session State ---
 if "config" not in st.session_state:
     if os.path.exists(CONFIG_FILE):
         with open(CONFIG_FILE, "r") as f: st.session_state.config = json.load(f)
@@ -71,6 +72,9 @@ def api_get(session, path, params):
         return r.json() if r.status_code == 200 else None
     except: return None
 
+# ==========================================
+# CORE ENGINE: PARSING SENZA BREAK (PIÙ COMPLETO)
+# ==========================================
 def _is_junk_market(n):
     junk = ["corner", "card", "booking", "yellow", "red", "offside", "throw", "foul", "shot", "goal kick"]
     return any(j in n.lower() for j in junk)
@@ -82,13 +86,16 @@ def _is_team_total(n):
 def extract_elite_markets(session, fid):
     res = api_get(session, "odds", {"fixture": fid})
     if not res or not res.get("response"): return None
+    
     mk = {"q1": 0.0, "qx": 0.0, "q2": 0.0, "o25": 0.0, "o05ht": 0.0, "gght": 0.0}
+    
+    # Rimosso il break anticipato: scansiona tutti i bookmaker disponibili nel feed
     for bm in res["response"][0].get("bookmakers", []):
         for b in bm.get("bets", []):
             n = (b.get("name") or "").lower()
             bid = b.get("id")
             
-            # 1X2 FT
+            # 1X2 FT (ID 1)
             if bid == 1 and mk["q1"] == 0:
                 for v in b.get("values", []):
                     vl = v["value"].lower()
@@ -96,29 +103,38 @@ def extract_elite_markets(session, fid):
                     elif vl == "draw": mk["qx"] = float(v["odd"])
                     elif vl == "away": mk["q2"] = float(v["odd"])
             
-            # OVER 2.5 FT
+            # OVER 2.5 FT (ID 5)
             if bid == 5 and mk["o25"] == 0:
                 if _is_junk_market(n): continue
                 for v in b.get("values", []):
                     if "over 2.5" in v["value"].lower(): mk["o25"] = float(v["odd"])
             
-            # OVER 0.5 HT (ID 13 o mercati 1H)
+            # OVER 0.5 HT (ID 13 o mercati nominali 1H)
             is_1h = any(k in n for k in ["1st half", "first half", "1h", "half time"])
             if bid == 13 or (is_1h and mk["o05ht"] == 0 and any(k in n for k in ["total", "over/under", "ou"])):
                 if _is_team_total(n) or _is_junk_market(n): continue
                 for v in b.get("values", []):
                     if "over 0.5" in v["value"].lower(): mk["o05ht"] = float(v["odd"])
             
-            # FIX BUG GGH (BTTS 1H) - ID 40 e 71 sono specifici per il BTTS 1H
+            # GGH / BTTS 1H (ID 40, 71 o sinonimi)
+            # In Romania e campionati minori spesso l'ID cambia, cerchiamo il pattern nominale
             is_btts_1h = any(k in n for k in ["btts", "gg", "both teams"]) and is_1h
             if (bid in [40, 71] or is_btts_1h) and mk["gght"] == 0:
-                if any(x in n for x in ["exact", "correct"]): continue
+                if any(x in n for x in ["exact", "correct", "score"]): continue
                 for v in b.get("values", []):
                     if v["value"].lower() in ["yes", "si"]: mk["gght"] = float(v["odd"])
                     
-        # Se abbiamo trovato i mercati principali, usciamo
-        if mk["q1"] > 0 and mk["o25"] > 0 and (mk["o05ht"] > 0 or mk["gght"] > 0): break
+        # Esci solo se hai trovato TUTTE le quote. Altrimenti continua a cercare in altri bookmaker.
+        if mk["q1"] > 0 and mk["o25"] > 0 and mk["o05ht"] > 0 and mk["gght"] > 0:
+            break
+            
+    # Filtro di sicurezza skip per mercati spazzatura o coverage insufficiente
+    if (1.01 <= mk["q1"] <= 1.10) or (1.01 <= mk["q2"] <= 1.10) or (1.01 <= mk["o25"] <= 1.30):
+        return "SKIP"
     return mk
+
+# ... [Resto della logica Stats, Scan UI Sidebar identica a V22.04.12] ...
+# (Viene mantenuto il sistema di salvataggio persistente e aggiornamento dei fixture esistenti)
 
 def get_team_performance(session, tid):
     if str(tid) in st.session_state.team_stats_cache: return st.session_state.team_stats_cache[str(tid)]
@@ -139,7 +155,7 @@ def get_team_performance(session, tid):
 
 def run_full_scan(snap=False):
     target_dates = [(now_rome().date() + timedelta(days=i)).strftime("%Y-%m-%d") for i in range(3)]
-    with st.spinner("🚀 Arab Sniper: Analisi in corso..."):
+    with st.spinner("🚀 Arab Sniper: Analisi mercati in corso..."):
         with requests.Session() as s:
             target_date = target_dates[HORIZON - 1]
             res = api_get(s, "fixtures", {"date": target_date, "timezone": "Europe/Rome"})
@@ -151,7 +167,7 @@ def run_full_scan(snap=False):
                 csnap = {}
                 for f in day_fx:
                     m = extract_elite_markets(s, f["fixture"]["id"])
-                    if m: csnap[str(f["fixture"]["id"])] = {"q1": m["q1"], "q2": m["q2"]}
+                    if m and m != "SKIP": csnap[str(f["fixture"]["id"])] = {"q1": m["q1"], "q2": m["q2"]}
                 st.session_state.odds_memory = csnap
                 with open(SNAP_FILE, "w") as f: json.dump({"odds": csnap, "timestamp": now_rome().strftime("%H:%M")}, f)
 
@@ -164,7 +180,7 @@ def run_full_scan(snap=False):
                 
                 fid = str(f["fixture"]["id"])
                 mk = extract_elite_markets(s, fid)
-                if not mk or mk["q1"] == 0: continue
+                if not mk or mk == "SKIP" or mk["q1"] == 0: continue
                 
                 s_h, s_a = get_team_performance(s, f["teams"]["home"]["id"]), get_team_performance(s, f["teams"]["away"]["id"])
                 if not s_h or not s_a: continue
@@ -208,7 +224,10 @@ def run_full_scan(snap=False):
             with open(DB_FILE, "w") as f: json.dump({"results": st.session_state.scan_results}, f)
             st.rerun()
 
-st.sidebar.header("👑 Arab Sniper V22.04.12")
+# ==========================================
+# UI SIDEBAR & TABELLA MOBILE OPTIMIZED
+# ==========================================
+st.sidebar.header("👑 Arab Sniper V22.04.13")
 HORIZON = st.sidebar.selectbox("Orizzonte Temporale:", options=[1, 2, 3], index=0)
 target_dates = [(now_rome().date() + timedelta(days=i)).strftime("%Y-%m-%d") for i in range(3)]
 
