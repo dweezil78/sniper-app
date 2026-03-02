@@ -8,7 +8,7 @@ import time
 from pathlib import Path
 
 # ==========================================
-# CONFIGURAZIONE ARAB SNIPER V22.04.16 - GOLD COLUMN POSITION FIX
+# CONFIGURAZIONE ARAB SNIPER V22.04.17 - LOGIC UPDATE
 # ==========================================
 BASE_DIR = Path(__file__).resolve().parent
 DB_FILE = str(BASE_DIR / "arab_sniper_database.json")
@@ -27,7 +27,7 @@ except Exception:
 def now_rome():
     return datetime.now(ROME_TZ) if ROME_TZ else datetime.now()
 
-st.set_page_config(page_title="ARAB SNIPER V22.04.16", layout="wide")
+st.set_page_config(page_title="ARAB SNIPER V22.04.17", layout="wide")
 
 # --- Inizializzazione Session State ---
 if "config" not in st.session_state:
@@ -196,14 +196,18 @@ def run_full_scan(snap=False):
                 if (s_h["avg_total"] >= 2.0 and s_a["avg_total"] >= 2.0):
                     if mk["o25"] > 1.80 and mk["o05ht"] > 1.30: tags.append("⚽"); h_o = True
                     elif mk["o25"] <= 1.80 and mk["o05ht"] <= 1.30: tags.append("🚀"); h_o = True
-                if (s_h["avg_total"] >= 1.2 and s_a["avg_total"] >= 1.2): tags.append("🎯PT"); h_g = True
-                if h_p and h_o and h_g: tags.insert(0, "⚽⭐")
+                
+                # MODIFICA 1: soglia avg_total da 1.2 a 1.5
+                if (s_h["avg_total"] >= 1.5 and s_a["avg_total"] >= 1.5): tags.append("🎯PT"); h_g = True
+                
+                # MODIFICA 2: integrazione avg_ht >= 0.8 per tag Dorato
+                if h_p and h_o and h_g and s_h["avg_ht"] >= 0.8 and s_a["avg_ht"] >= 0.8: tags.insert(0, "⚽⭐")
 
                 final_list.append({
                     "Ora": f["fixture"]["date"][11:16],
                     "Lega": f"{f['league']['name']} ({cnt})",
                     "Match": f"{f['teams']['home']['name']} - {f['teams']['away']['name']}",
-                    "Gold": "✅" if is_gold else "❌", # SPOSTATO ALLA QUARTA POSIZIONE
+                    "Gold": "✅" if is_gold else "❌",
                     "1X2": f"{mk['q1']:.1f}|{mk['qx']:.1f}|{mk['q2']:.1f}",
                     "O2.5": f"{mk['o25']:.2f}", "O0.5H": f"{mk['o05ht']:.2f}", "GGH": f"{mk['gght']:.2f}",
                     "HT": f"{s_h['avg_ht']:.1f}|{s_a['avg_ht']:.1f}",
@@ -220,7 +224,7 @@ def run_full_scan(snap=False):
             st.rerun()
 
 # --- UI ---
-st.sidebar.header("👑 Arab Sniper V22.04.16")
+st.sidebar.header("👑 Arab Sniper V22.04.17")
 HORIZON = st.sidebar.selectbox("Orizzonte Temporale:", options=[1, 2, 3], index=0)
 target_dates = [(now_rome().date() + timedelta(days=i)).strftime("%Y-%m-%d") for i in range(3)]
 
