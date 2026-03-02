@@ -1,20 +1,19 @@
 import streamlit as st
 import requests
 import pandas as pd
-from datetime import datetime, timedelta
-import json
-import os
-from pathlib import Path
+from datetime import datetime, timedelta, date
+import re
 
-# ==========================================
-# AUDITOR - verifica segnali vs risultati (ieri)
-# ==========================================
-BASE_DIR = Path(__file__).resolve().parent
-DB_FILE = str(BASE_DIR / "arab_sniper_database.json")
+# =========================================================
+# RetroScan + Auditor (API-Sports) - standalone
+# =========================================================
 
-API_KEY = st.secrets.get("API_SPORTS_KEY")
-HEADERS = {"x-apisports-key": API_KEY}
+st.set_page_config(page_title="Arab RetroScan + Auditor", layout="wide")
+st.title("🕰️ Arab RetroScan + Auditor (date passate)")
 
+# --------------------------
+# TZ (Rome)
+# --------------------------
 try:
     from zoneinfo import ZoneInfo
     ROME_TZ = ZoneInfo("Europe/Rome")
@@ -24,261 +23,452 @@ except Exception:
 def now_rome():
     return datetime.now(ROME_TZ) if ROME_TZ else datetime.now()
 
+# --------------------------
+# API
+# --------------------------
+API_KEY = st.secrets.get("API_SPORTS_KEY")
+HEADERS = {"x-apisports-key": API_KEY}
+
 def api_get(session, path, params):
-    r = session.get(f"https://v3.football.api-sports.io/{path}", headers=HEADERS, params=params, timeout=25)
-    if r.status_code != 200:
-        return None
-    return r.json()
-
-def load_db_results():
-    if not os.path.exists(DB_FILE):
-        return []
     try:
-        with open(DB_FILE, "r") as f:
-            data = json.load(f)
-        return data.get("results", []) or []
-    except:
-        return []
-
-def parse_1x2(s):
-    # "6.2|4.0|1.5" -> q1,qx,q2
-    try:
-        parts = str(s).split("|")
-        return float(parts[0]), float(parts[1]), float(parts[2])
-    except:
-        return None, None, None
-
-def safe_float(x):
-    try:
-        return float(str(x).replace(",", "."))
-    except:
+        r = session.get(f"https://v3.football.api-sports.io/{path}", headers=HEADERS, params=params, timeout=25)
+        if r.status_code != 200:
+            return None
+        return r.json()
+    except Exception:
         return None
 
-def build_results_map(session, fixture_ids):
+# --------------------------
+# Helpers parsing odds
+# --------------------------
+def _norm(s: str) -> str:
+    return (s or "").strip().lower()
+
+def _to_float_odd(x):
+    try:
+        if x is None:
+            return None
+        if isinstance(x, (int, float)):
+            return float(x)
+        s = str(x).strip().replace(",", ".")
+        return float(s)
+    except Exception:
+        return None
+
+def _is_over_value(val_norm: str, line: str) -> bool:
+    if "over" not in val_norm:
+        return False
+    m = re.search(r"(\d+(?:[.,]\d+)?)", val_norm)
+    if not m:
+        return False
+    num = m.group(1).replace(",", ".")
+    return num == line
+
+def _is_btts_yes(val_norm: str) -> bool:
+    return val_norm in {"yes", "si", "sì", "y"}
+
+def _is_first_half_text(txt: str) -> bool:
+    t = _norm(txt)
+    return any(k in t for k in ["1st half", "first half", "1h", "ht", "half time", "halftime"])
+
+def _maybe_set_max(mk: dict, key: str, odd_val):
+    odd = _to_float_odd(odd_val)
+    if odd is None or odd <= 0:
+        return
+    cur = float(mk.get(key, 0) or 0)
+    if odd > cur:
+        mk[key] = odd
+
+def extract_markets_from_odds_response(odds_json) -> dict:
     """
-    Ritorna dict fixture_id -> {ht_home, ht_away, ft_home, ft_away}
+    Estrae mercati robustamente dalla response /odds (se presente).
+    Ritorna mk con:
+      q1,qx,q2,o25,o05ht,gght (0.0 se non trovati)
     """
-    out = {}
-    # API-Sports non permette batch IDs in un colpo solo in modo standard qui,
-    # quindi facciamo chiamate singole (ieri di solito poche centinaia max).
-    for fid in fixture_ids:
-        res = api_get(session, "fixtures", {"id": fid})
-        if not res or not res.get("response"):
-            continue
-        fx = res["response"][0]
-        ht = fx.get("score", {}).get("halftime", {}) or {}
-        ft = fx.get("score", {}).get("fulltime", {}) or {}
+    mk = {"q1": 0.0, "qx": 0.0, "q2": 0.0, "o25": 0.0, "o05ht": 0.0, "gght": 0.0}
 
-        # In alcuni casi HT/FT può essere None: gestiamo.
-        ht_home = ht.get("home")
-        ht_away = ht.get("away")
-        ft_home = ft.get("home")
-        ft_away = ft.get("away")
+    if not odds_json or not odds_json.get("response"):
+        return mk
 
-        # fallback: goals FT (alcuni feed hanno sempre goals)
-        goals = fx.get("goals", {}) or {}
-        if ft_home is None:
-            ft_home = goals.get("home")
-        if ft_away is None:
-            ft_away = goals.get("away")
+    resp0 = odds_json["response"][0]
+    bookmakers = resp0.get("bookmakers", []) or []
 
-        out[str(fid)] = {
-            "HT_H": ht_home, "HT_A": ht_away,
-            "FT_H": ft_home, "FT_A": ft_away,
-            "Status": fx.get("fixture", {}).get("status", {}).get("short")
-        }
-    return out
+    for bm in bookmakers:
+        bets = bm.get("bets", []) or []
+        for b in bets:
+            b_id = b.get("id")
+            b_name = _norm(b.get("name", ""))
 
-def compute_outcomes(row):
-    ht_h = row.get("HT_H")
-    ht_a = row.get("HT_A")
-    ft_h = row.get("FT_H")
-    ft_a = row.get("FT_A")
+            values = b.get("values", []) or []
 
+            # 1X2
+            if b_id == 1 or any(k in b_name for k in ["match winner", "1x2", "winner", "full time result"]):
+                for v in values:
+                    vv = _norm(v.get("value", ""))
+                    odd = v.get("odd")
+                    if vv in {"home", "1", "local", "casa"}:
+                        _maybe_set_max(mk, "q1", odd)
+                    elif vv in {"draw", "x", "pareggio"}:
+                        _maybe_set_max(mk, "qx", odd)
+                    elif vv in {"away", "2", "visitors", "trasferta"}:
+                        _maybe_set_max(mk, "q2", odd)
+
+            # Over 2.5 FT
+            if (b_id == 5) or (
+                ("over/under" in b_name or "over under" in b_name or "totals" in b_name)
+                and not any(k in b_name for k in ["1st half", "first half", "half time", "1h", "ht"])
+            ):
+                for v in values:
+                    vv = _norm(v.get("value", ""))
+                    odd = v.get("odd")
+                    if _is_over_value(vv, "2.5"):
+                        _maybe_set_max(mk, "o25", odd)
+
+            # Over 0.5 HT (1st half totals)
+            if (b_id == 13) or (_is_first_half_text(b_name) and any(k in b_name for k in ["over/under", "over under", "totals", "goals"])):
+                for v in values:
+                    vv = _norm(v.get("value", ""))
+                    odd = v.get("odd")
+                    if _is_over_value(vv, "0.5"):
+                        _maybe_set_max(mk, "o05ht", odd)
+
+            # BTTS 1H (GGHT) - tollerante name/value
+            is_btts = any(k in b_name for k in ["both teams", "both team", "btts", "gg", "to score"])
+            if is_btts:
+                bet_is_1h = _is_first_half_text(b_name)
+                for v in values:
+                    vv_raw = v.get("value", "")
+                    vv = _norm(vv_raw)
+                    odd = v.get("odd")
+                    if _is_btts_yes(vv) and (bet_is_1h or _is_first_half_text(vv_raw)):
+                        _maybe_set_max(mk, "gght", odd)
+
+        # se vuoi, puoi “early stop” SOLO se hai tutto:
+        # (ma a retro scan preferisco completezza)
+    return mk
+
+def get_fixture_odds(session, fixture_id: int):
+    return api_get(session, "odds", {"fixture": fixture_id})
+
+# --------------------------
+# Team stats (same style)
+# --------------------------
+def get_team_performance(session, tid: int):
+    # ultimi 8 FT
+    res = api_get(session, "fixtures", {"team": tid, "last": 8, "status": "FT"})
+    fx = res.get("response", []) if res else []
+    if not fx:
+        return None
+
+    act = len(fx)
+    tht, gf, gs = 0, 0, 0
+    for f in fx:
+        ht = f.get("score", {}).get("halftime", {}) or {}
+        tht += (ht.get("home") or 0) + (ht.get("away") or 0)
+
+        is_home = f.get("teams", {}).get("home", {}).get("id") == tid
+        goals = f.get("goals", {}) or {}
+        gh = goals.get("home") or 0
+        ga = goals.get("away") or 0
+        if is_home:
+            gf += gh
+            gs += ga
+        else:
+            gf += ga
+            gs += gh
+
+    return {"avg_ht": tht / act, "avg_total": (gf + gs) / act}
+
+# --------------------------
+# Tag logic (replica della tua)
+# --------------------------
+def compute_tags(mk, s_h, s_a):
+    """
+    Replica la logica base che hai nel tuo Sniper:
+      🐟O, 🐟G, ⚽, 🚀, 🎯PT, ⚽⭐
+    """
+    tags = ["HT-OK"]
+    h_p, h_o, h_g = False, False, False
+
+    q1, q2 = mk["q1"], mk["q2"]
+    o25, o05ht = mk["o25"], mk["o05ht"]
+
+    # NOTE: se quote = 0 (odds missing) questi blocchi non scatteranno,
+    # quindi il retro-audit segnalerà: odds mancanti.
+    if (min(q1, q2) > 0 and min(q1, q2) < 1.75) and (s_h["avg_total"] >= 1.0 and s_a["avg_total"] >= 1.0):
+        tags.append("🐟O")
+        h_p = True
+
+    if (2.0 <= q1 <= 3.5) and (2.0 <= q2 <= 3.5) and (s_h["avg_total"] >= 1.0 and s_a["avg_total"] >= 1.0):
+        tags.append("🐟G")
+        h_p = True
+
+    if (s_h["avg_total"] >= 2.0 and s_a["avg_total"] >= 2.0):
+        if (o25 > 1.80) and (o05ht > 1.30):
+            tags.append("⚽")
+            h_o = True
+        elif (o25 > 0 and o05ht > 0) and (o25 <= 1.80) and (o05ht <= 1.30):
+            tags.append("🚀")
+            h_o = True
+
+    if (s_h["avg_total"] >= 1.2 and s_a["avg_total"] >= 1.2):
+        tags.append("🎯PT")
+        h_g = True
+
+    if h_p and h_o and h_g:
+        tags.insert(0, "⚽⭐")
+
+    return " ".join(tags)
+
+# --------------------------
+# Outcomes (HIT/MISS)
+# --------------------------
+def compute_outcomes(ht_h, ht_a, ft_h, ft_a):
     def to_int(v):
         try:
             if v is None:
                 return None
             return int(v)
-        except:
+        except Exception:
             return None
 
     ht_h = to_int(ht_h); ht_a = to_int(ht_a)
     ft_h = to_int(ft_h); ft_a = to_int(ft_a)
 
-    # Totali
     ht_total = (ht_h + ht_a) if (ht_h is not None and ht_a is not None) else None
     ft_total = (ft_h + ft_a) if (ft_h is not None and ft_a is not None) else None
 
-    # Hit mercati
     o05ht_hit = (ht_total is not None and ht_total >= 1)
     gght_hit  = (ht_h is not None and ht_a is not None and ht_h >= 1 and ht_a >= 1)
     o25_hit   = (ft_total is not None and ft_total >= 3)
 
-    return pd.Series({
-        "HT_Total": ht_total,
-        "FT_Total": ft_total,
-        "O0.5HT_HIT": o05ht_hit,
-        "GGHT_HIT": gght_hit,
-        "O2.5_HIT": o25_hit
-    })
+    return ht_total, ft_total, o05ht_hit, gght_hit, o25_hit
 
-# ==========================================
-# UI
-# ==========================================
-st.set_page_config(page_title="Arab Sniper Auditor (Ieri)", layout="wide")
-st.title("🧪 Arab Sniper Auditor - Verifica Segnali vs Risultati (Ieri)")
+# =========================================================
+# UI Controls
+# =========================================================
+today = now_rome().date()
+default_day = today - timedelta(days=1)
 
-yesterday = (now_rome().date() - timedelta(days=1)).strftime("%Y-%m-%d")
+c1, c2, c3, c4 = st.columns([1.2, 1.2, 1.2, 1.4])
 
-st.caption(f"Data audit: **{yesterday}** (timezone Europe/Rome)")
+audit_day = c1.date_input("Data da auditare", value=default_day, max_value=today)
+timezone = c2.selectbox("Timezone fixtures", ["Europe/Rome"], index=0)
+max_fixtures = c3.slider("Limite match (per velocità)", min_value=50, max_value=500, value=250, step=50)
+only_finished = c4.checkbox("Solo match FT", value=True)
 
-raw = load_db_results()
-if not raw:
-    st.error("Non trovo arab_sniper_database.json o è vuoto. Prima fai uno scan che salva nel DB.")
-    st.stop()
+with st.expander("⚙️ Filtri (opzionali)", expanded=False):
+    excluded_countries_str = st.text_input(
+        "Escludi nazioni (separate da virgola). Esempio: Thailand, Indonesia",
+        value=""
+    )
+    league_blacklist_str = st.text_input(
+        "Escludi leghe se contengono (separati da virgola). Esempio: u19, women, friendly",
+        value="u19,u20,youth,women,friendly"
+    )
 
-df = pd.DataFrame(raw)
-if "Data" not in df.columns or "Fixture_ID" not in df.columns:
-    st.error("Nel DB non ci sono le colonne minime (Data / Fixture_ID).")
-    st.stop()
+excluded_countries = [x.strip() for x in excluded_countries_str.split(",") if x.strip()]
+league_blacklist = [x.strip().lower() for x in league_blacklist_str.split(",") if x.strip()]
 
-df_y = df[df["Data"] == yesterday].copy()
-if df_y.empty:
-    st.warning(f"Nessun record nel DB per {yesterday}. (Hai fatto lo scan ieri?)")
-    st.stop()
+run = st.button("🧪 Avvia RetroScan + Audit", type="primary")
 
-# Normalizziamo colonne odds/quote se presenti
-if "1X2" in df_y.columns:
-    df_y[["q1", "qx", "q2"]] = df_y["1X2"].apply(lambda s: pd.Series(parse_1x2(s)))
+# =========================================================
+# Run
+# =========================================================
+if run:
+    dstr = audit_day.strftime("%Y-%m-%d")
 
-for c in ["O2.5", "O0.5H", "GGH"]:
-    if c in df_y.columns:
-        df_y[c] = df_y[c].apply(safe_float)
+    with st.spinner(f"Scarico fixtures del {dstr}..."):
+        with requests.Session() as session:
+            fx_res = api_get(session, "fixtures", {"date": dstr, "timezone": timezone})
+            if not fx_res or not fx_res.get("response"):
+                st.error("Nessun fixture trovato o errore API.")
+                st.stop()
 
-# Recupero risultati reali via API
-fixture_ids = df_y["Fixture_ID"].astype(str).unique().tolist()
+            fixtures = fx_res["response"]
 
-with st.spinner("Recupero risultati (HT/FT) dall'API..."):
-    with requests.Session() as s:
-        results_map = build_results_map(s, fixture_ids)
+            # Filtri
+            rows = []
+            for f in fixtures:
+                status = f.get("fixture", {}).get("status", {}).get("short")
+                if only_finished and status != "FT":
+                    continue
 
-# Merge risultati
-res_df = pd.DataFrame.from_dict(results_map, orient="index").reset_index().rename(columns={"index": "Fixture_ID"})
-df_y["Fixture_ID"] = df_y["Fixture_ID"].astype(str)
-res_df["Fixture_ID"] = res_df["Fixture_ID"].astype(str)
+                country = f.get("league", {}).get("country", "") or ""
+                league_name = f.get("league", {}).get("name", "") or ""
 
-audit = df_y.merge(res_df, on="Fixture_ID", how="left")
+                if excluded_countries and country in excluded_countries:
+                    continue
 
-# Calcolo outcome hit/miss
-audit = pd.concat([audit, audit.apply(compute_outcomes, axis=1)], axis=1)
+                if any(b in (league_name.lower()) for b in league_blacklist):
+                    continue
 
-# Colonne utili
-audit["FT_Score"] = audit.apply(
-    lambda r: f"{r['FT_H']}-{r['FT_A']}" if pd.notna(r.get("FT_H")) and pd.notna(r.get("FT_A")) else "N/D",
-    axis=1
-)
-audit["HT_Score"] = audit.apply(
-    lambda r: f"{r['HT_H']}-{r['HT_A']}" if pd.notna(r.get("HT_H")) and pd.notna(r.get("HT_A")) else "N/D",
-    axis=1
-)
+                rows.append(f)
 
-# ==========================================
-# KPI GENERALI
-# ==========================================
-st.subheader("📊 KPI Generali (ieri)")
+            # Limite
+            rows = rows[:max_fixtures]
 
-col1, col2, col3, col4 = st.columns(4)
+            if not rows:
+                st.warning("Dopo i filtri non resta nessun match.")
+                st.stop()
 
-n_total = len(audit)
-n_ft_ok = audit["FT_Total"].notna().sum()
-n_ht_ok = audit["HT_Total"].notna().sum()
+            st.success(f"Fixture selezionati: {len(rows)}")
 
-col1.metric("Match in audit", n_total)
-col2.metric("Match con FT disponibile", n_ft_ok)
-col3.metric("Match con HT disponibile", n_ht_ok)
+            # Process
+            out = []
+            pb = st.progress(0.0)
+            for i, f in enumerate(rows, start=1):
+                pb.progress(i / len(rows))
 
-# Hit-rate complessivi (su match con dato disponibile)
-def hit_rate(series_bool):
-    valid = series_bool.dropna()
-    if len(valid) == 0:
-        return None
-    return 100.0 * (valid == True).mean()
+                fid = int(f["fixture"]["id"])
+                dt_iso = f["fixture"]["date"]  # ISO string
+                ora = dt_iso[11:16]
+                country = f["league"]["country"]
+                lega = f"{f['league']['name']} ({country})"
+                home = f["teams"]["home"]["name"]
+                away = f["teams"]["away"]["name"]
+                match = f"{home} - {away}"
 
-hr_o25 = hit_rate(audit.loc[audit["FT_Total"].notna(), "O2.5_HIT"])
-hr_o05ht = hit_rate(audit.loc[audit["HT_Total"].notna(), "O0.5HT_HIT"])
-hr_gght = hit_rate(audit.loc[audit["HT_Total"].notna(), "GGHT_HIT"])
+                # risultati
+                sc = f.get("score", {}) or {}
+                ht = sc.get("halftime", {}) or {}
+                ft = sc.get("fulltime", {}) or {}
+                goals = f.get("goals", {}) or {}
+                ht_h, ht_a = ht.get("home"), ht.get("away")
+                ft_h, ft_a = ft.get("home"), ft.get("away")
+                if ft_h is None:
+                    ft_h = goals.get("home")
+                if ft_a is None:
+                    ft_a = goals.get("away")
 
-col4.metric("Hit-rate O2.5 / O0.5HT / GGHT", f"{hr_o25:.1f}% | {hr_o05ht:.1f}% | {hr_gght:.1f}%")
+                # odds + mercati
+                odds_json = get_fixture_odds(session, fid)
+                mk = extract_markets_from_odds_response(odds_json)
 
-# ==========================================
-# KPI PER TAG (Info)
-# ==========================================
-st.subheader("🏷️ KPI per Tag (Info)")
+                odds_missing = (mk["q1"] == 0 and mk["q2"] == 0 and mk["o25"] == 0 and mk["o05ht"] == 0 and mk["gght"] == 0)
 
-def has_tag(info, tag):
-    return (tag in (info or ""))
+                # stats team
+                s_h = get_team_performance(session, f["teams"]["home"]["id"])
+                s_a = get_team_performance(session, f["teams"]["away"]["id"])
 
-tags_to_check = ["⚽⭐", "⚽", "🚀", "🎯PT", "🐟O", "🐟G"]
+                # tag (solo se ho stats)
+                info = ""
+                if s_h and s_a:
+                    info = compute_tags(mk, s_h, s_a)
+                else:
+                    info = "NO-STATS"
 
-rows = []
-for t in tags_to_check:
-    sub = audit[audit["Info"].apply(lambda x: has_tag(x, t))].copy()
-    if sub.empty:
-        continue
+                # outcomes
+                ht_total, ft_total, hit_o05ht, hit_gght, hit_o25 = compute_outcomes(ht_h, ht_a, ft_h, ft_a)
 
-    # hit-rate su subset
-    o25 = hit_rate(sub.loc[sub["FT_Total"].notna(), "O2.5_HIT"])
-    o05 = hit_rate(sub.loc[sub["HT_Total"].notna(), "O0.5HT_HIT"])
-    gg  = hit_rate(sub.loc[sub["HT_Total"].notna(), "GGHT_HIT"])
+                out.append({
+                    "Data": dstr,
+                    "Ora": ora,
+                    "Lega": lega,
+                    "Match": match,
+                    "Fixture_ID": fid,
 
-    rows.append({
-        "Tag": t,
-        "N": len(sub),
-        "Hit O2.5": None if o25 is None else round(o25, 1),
-        "Hit O0.5HT": None if o05 is None else round(o05, 1),
-        "Hit GGHT": None if gg is None else round(gg, 1),
-    })
+                    "Q1": mk["q1"],
+                    "QX": mk["qx"],
+                    "Q2": mk["q2"],
+                    "O2.5": mk["o25"],
+                    "O0.5HT": mk["o05ht"],
+                    "GGHT": mk["gght"],
+                    "ODDS_MISSING": odds_missing,
 
-kpi_tags = pd.DataFrame(rows).sort_values("N", ascending=False)
-st.dataframe(kpi_tags, use_container_width=True)
+                    "HT_H": ht_h, "HT_A": ht_a,
+                    "FT_H": ft_h, "FT_A": ft_a,
+                    "HT_Total": ht_total,
+                    "FT_Total": ft_total,
 
-# ==========================================
-# TABELLA DETTAGLIO + FILTRI
-# ==========================================
-st.subheader("🔎 Dettaglio Match (ieri)")
+                    "HIT_O0.5HT": hit_o05ht,
+                    "HIT_GGHT": hit_gght,
+                    "HIT_O2.5": hit_o25,
 
-fcol1, fcol2, fcol3 = st.columns(3)
-flt_tag = fcol1.selectbox("Filtro Tag (Info contiene)", ["(tutti)"] + tags_to_check)
-flt_league = fcol2.text_input("Filtro Lega contiene", "")
-only_missing = fcol3.checkbox("Mostra solo match con dati mancanti (HT/FT)", value=False)
+                    "Info": info,
+                    "HT_AVG_H": None if not s_h else round(s_h["avg_ht"], 2),
+                    "HT_AVG_A": None if not s_a else round(s_a["avg_ht"], 2),
+                    "TOT_AVG_H": None if not s_h else round(s_h["avg_total"], 2),
+                    "TOT_AVG_A": None if not s_a else round(s_a["avg_total"], 2),
+                })
 
-view = audit.copy()
-if flt_tag != "(tutti)":
-    view = view[view["Info"].apply(lambda x: has_tag(x, flt_tag))]
+            df = pd.DataFrame(out)
 
-if flt_league.strip():
-    view = view[view["Lega"].astype(str).str.lower().str.contains(flt_league.strip().lower(), na=False)]
+    st.divider()
+    st.subheader("📌 KPI Generali")
 
-if only_missing:
-    view = view[(view["FT_Total"].isna()) | (view["HT_Total"].isna())]
+    k1, k2, k3, k4 = st.columns(4)
+    k1.metric("Match auditati", len(df))
+    k2.metric("Odds missing", int(df["ODDS_MISSING"].sum()))
+    k3.metric("Con HT disponibile", int(df["HT_Total"].notna().sum()))
+    k4.metric("Con FT disponibile", int(df["FT_Total"].notna().sum()))
 
-# Colonne “auditor”
-cols = [
-    "Ora", "Lega", "Match", "Info",
-    "1X2", "O2.5", "O0.5H", "GGH",
-    "HT_Score", "FT_Score",
-    "O0.5HT_HIT", "GGHT_HIT", "O2.5_HIT",
-    "Fixture_ID"
-]
-cols = [c for c in cols if c in view.columns]
+    def hit_rate(mask, col):
+        s = df.loc[mask, col].dropna()
+        if s.empty:
+            return None
+        return 100.0 * (s == True).mean()
 
-st.dataframe(view[cols].sort_values("Ora"), use_container_width=True)
+    hr_o25 = hit_rate(df["FT_Total"].notna(), "HIT_O2.5")
+    hr_o05 = hit_rate(df["HT_Total"].notna(), "HIT_O0.5HT")
+    hr_gg  = hit_rate(df["HT_Total"].notna(), "HIT_GGHT")
 
-# Export
-st.download_button(
-    "💾 Scarica Audit CSV",
-    view.to_csv(index=False).encode("utf-8"),
-    file_name=f"audit_{yesterday}.csv",
-    mime="text/csv"
-)
+    st.write(
+        f"**Hit-rate**  O2.5: `{(hr_o25 if hr_o25 is not None else 0):.1f}%`   |   "
+        f"O0.5HT: `{(hr_o05 if hr_o05 is not None else 0):.1f}%`   |   "
+        f"GGHT: `{(hr_gg if hr_gg is not None else 0):.1f}%`"
+    )
+
+    st.subheader("🏷️ KPI per Tag")
+    tags_to_check = ["⚽⭐", "⚽", "🚀", "🎯PT", "🐟O", "🐟G"]
+
+    rows = []
+    for t in tags_to_check:
+        sub = df[df["Info"].astype(str).str.contains(re.escape(t), na=False)]
+        if sub.empty:
+            continue
+        o25 = (100.0 * (sub.loc[sub["FT_Total"].notna(), "HIT_O2.5"] == True).mean()) if sub["FT_Total"].notna().any() else None
+        o05 = (100.0 * (sub.loc[sub["HT_Total"].notna(), "HIT_O0.5HT"] == True).mean()) if sub["HT_Total"].notna().any() else None
+        gg  = (100.0 * (sub.loc[sub["HT_Total"].notna(), "HIT_GGHT"] == True).mean()) if sub["HT_Total"].notna().any() else None
+        rows.append({
+            "Tag": t,
+            "N": len(sub),
+            "Odds missing (N)": int(sub["ODDS_MISSING"].sum()),
+            "Hit O2.5 %": None if o25 is None else round(o25, 1),
+            "Hit O0.5HT %": None if o05 is None else round(o05, 1),
+            "Hit GGHT %": None if gg is None else round(gg, 1),
+        })
+
+    kpi_tags = pd.DataFrame(rows).sort_values("N", ascending=False) if rows else pd.DataFrame()
+    st.dataframe(kpi_tags, use_container_width=True)
+
+    st.subheader("🔎 Dettaglio match")
+    f1, f2, f3 = st.columns([1.2, 1.2, 1.6])
+    flt_tag = f1.selectbox("Filtro Tag", ["(tutti)"] + tags_to_check, index=0)
+    only_tagged = f2.checkbox("Solo match con almeno 1 tag", value=False)
+    only_odds_missing = f3.checkbox("Solo ODDS_MISSING", value=False)
+
+    view = df.copy()
+    if flt_tag != "(tutti)":
+        view = view[view["Info"].astype(str).str.contains(re.escape(flt_tag), na=False)]
+    if only_tagged:
+        view = view[view["Info"].astype(str).str.contains("⚽⭐|⚽|🚀|🎯PT|🐟O|🐟G", regex=True, na=False)]
+    if only_odds_missing:
+        view = view[view["ODDS_MISSING"] == True]
+
+    # ordina per ora e mostra colonne principali
+    show_cols = [
+        "Ora", "Lega", "Match", "Info",
+        "Q1", "QX", "Q2", "O2.5", "O0.5HT", "GGHT", "ODDS_MISSING",
+        "HT_H", "HT_A", "FT_H", "FT_A",
+        "HIT_O0.5HT", "HIT_GGHT", "HIT_O2.5",
+        "Fixture_ID"
+    ]
+    st.dataframe(view[show_cols].sort_values("Ora"), use_container_width=True)
+
+    st.download_button(
+        "💾 Scarica CSV audit",
+        view.to_csv(index=False).encode("utf-8"),
+        file_name=f"retro_audit_{dstr}.csv",
+        mime="text/csv"
+    )
