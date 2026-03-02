@@ -201,7 +201,7 @@ def run_full_scan(snap=False):
                 if (s_h["avg_total"] >= 1.5 and s_a["avg_total"] >= 1.5): tags.append("🎯PT"); h_g = True
                 
                 # MODIFICA 2: integrazione avg_ht >= 0.8 per tag Dorato
-                if h_p and h_o and h_g and s_h["avg_ht"] >= 0.8 and s_a["avg_ht"] >= 0.8: tags.insert(0, "⚽⭐")
+                if h_p and h_o and h_g and s_h["avg_ht"] >= 0.6 and s_a["avg_ht"] >= 0.6: tags.insert(0, "⚽⭐")
 
                 final_list.append({
                     "Ora": f["fixture"]["date"][11:16],
