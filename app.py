@@ -8,7 +8,7 @@ import time
 from pathlib import Path
 
 # ==========================================
-# CONFIGURAZIONE ARAB SNIPER V22.04.16 - GOLD COLUMN POSITION FIX
+# CONFIGURAZIONE ARAB SNIPER V22.04.18 - ROBUSTNESS & AUDIT FIX
 # ==========================================
 BASE_DIR = Path(__file__).resolve().parent
 DB_FILE = str(BASE_DIR / "arab_sniper_database.json")
@@ -27,7 +27,7 @@ except Exception:
 def now_rome():
     return datetime.now(ROME_TZ) if ROME_TZ else datetime.now()
 
-st.set_page_config(page_title="ARAB SNIPER V22.04.16", layout="wide")
+st.set_page_config(page_title="ARAB SNIPER V22.04.18", layout="wide")
 
 # --- Inizializzazione Session State ---
 if "config" not in st.session_state:
@@ -73,66 +73,86 @@ def api_get(session, path, params):
     except: return None
 
 # ==========================================
-# UTILITY DI PARSING UNIVERSALE
+# UTILITY DI PARSING ROBUSTO
 # ==========================================
 def _contains_ht(text):
-    t = (text or "").lower()
+    t = str(text or "").lower()
     return any(k in t for k in ["1st half", "first half", "1h", "ht", "half time", "halftime", "1° tempo"])
 
 def _contains_btts(text):
-    t = (text or "").lower()
+    t = str(text or "").lower()
     return any(k in t for k in ["both teams", "btts", "gg", "to score", "gol/gol", "entrambe segnano"])
 
 def _is_yes(text):
-    t = (text or "").strip().lower()
+    t = str(text or "").strip().lower()
     return t in ["yes", "si", "sì", "y", "1"]
 
+def safe_float(val):
+    try:
+        if val is None: return 0.0
+        return float(str(val).replace(",", "."))
+    except:
+        return 0.0
+
 def extract_elite_markets(session, fid):
-    res = api_get(session, "odds", {"fixture": fid})
+    # PROBLEMA 2 FIX: fid forzato a int
+    res = api_get(session, "odds", {"fixture": int(fid)})
     if not res or not res.get("response"): return None
     
     mk = {"q1": 0.0, "qx": 0.0, "q2": 0.0, "o25": 0.0, "o05ht": 0.0, "gght": 0.0}
     
     for bm in res["response"][0].get("bookmakers", []):
         for b in bm.get("bets", []):
-            name = (b.get("name") or "").lower()
+            name = str(b.get("name", "")).lower()
             bid = b.get("id")
             
-            if bid == 1 and mk["q1"] == 0:
+            # 1X2 FT - MIGLIORAMENTO B: Prendi la quota migliore
+            if bid == 1:
                 for v in b.get("values", []):
-                    vl = v["value"].lower()
-                    if "home" in vl: mk["q1"] = float(v["odd"])
-                    elif "draw" in vl: mk["qx"] = float(v["odd"])
-                    elif "away" in vl: mk["q2"] = float(v["odd"])
+                    vl = str(v.get("value", "")).lower()
+                    odd = safe_float(v.get("odd"))
+                    if "home" in vl: mk["q1"] = max(mk["q1"], odd)
+                    elif "draw" in vl: mk["qx"] = max(mk["qx"], odd)
+                    elif "away" in vl: mk["q2"] = max(mk["q2"], odd)
             
-            if bid == 5 and mk["o25"] == 0:
+            # OVER 2.5 FT
+            if bid == 5:
                 if any(j in name for j in ["corner", "card", "booking"]): continue
                 for v in b.get("values", []):
-                    if "over 2.5" in v["value"].lower(): mk["o25"] = float(v["odd"])
+                    txt = str(v.get("value", "")).lower().replace(",", ".")
+                    if "over" in txt and "2.5" in txt:
+                        mk["o25"] = max(mk["o25"], safe_float(v.get("odd")))
             
-            if mk["o05ht"] == 0 and _contains_ht(name) and any(k in name for k in ["total", "over/under", "ou", "goals"]):
+            # OVER 0.5 HT - MIGLIORAMENTO A: Match numerico robusto
+            if _contains_ht(name) and any(k in name for k in ["total", "over/under", "ou", "goals"]):
                 if "team" in name: continue
                 for v in b.get("values", []):
-                    if "over 0.5" in v["value"].lower(): mk["o05ht"] = float(v["odd"])
+                    txt = str(v.get("value", "")).lower().replace(",", ".")
+                    if "over" in txt and "0.5" in txt:
+                        mk["o05ht"] = max(mk["o05ht"], safe_float(v.get("odd")))
 
-            if mk["gght"] == 0 and _contains_btts(name):
+            # GGH / BTTS 1H (Parsing Universale)
+            if _contains_btts(name):
+                if any(x in name for x in ["exact", "correct", "score"]): continue
                 is_name_ht = _contains_ht(name)
                 for v in b.get("values", []):
-                    val_txt = v["value"].lower()
+                    val_txt = str(v.get("value", "")).lower()
                     if _is_yes(val_txt) and (is_name_ht or _contains_ht(val_txt) or bid in [40, 71]):
-                        mk["gght"] = float(v["odd"])
+                        mk["gght"] = max(mk["gght"], safe_float(v.get("odd")))
                         break
                     
-        if mk["q1"] > 0 and mk["o25"] > 0 and mk["o05ht"] > 0 and mk["gght"] > 0:
-            break
+        if all(v > 0 for v in mk.values()): break
             
     if (1.01 <= mk["q1"] <= 1.10) or (1.01 <= mk["q2"] <= 1.10) or (1.01 <= mk["o25"] <= 1.30):
         return "SKIP"
     return mk
 
+# ==========================================
+# ENGINE STATS & SCAN
+# ==========================================
 def get_team_performance(session, tid):
     if str(tid) in st.session_state.team_stats_cache: return st.session_state.team_stats_cache[str(tid)]
-    res = api_get(session, "fixtures", {"team": tid, "last": 8, "status": "FT"})
+    res = api_get(session, "fixtures", {"team": int(tid), "last": 8, "status": "FT"})
     fx = res.get("response", []) if res else []
     if not fx: return None
     act = len(fx)
@@ -149,7 +169,7 @@ def get_team_performance(session, tid):
 
 def run_full_scan(snap=False):
     target_dates = [(now_rome().date() + timedelta(days=i)).strftime("%Y-%m-%d") for i in range(3)]
-    with st.spinner("🚀 Arab Sniper: Ricerca mercati con motore universale..."):
+    with st.spinner("🚀 Arab Sniper: Analisi Robustezza V18..."):
         with requests.Session() as s:
             target_date = target_dates[HORIZON - 1]
             res = api_get(s, "fixtures", {"date": target_date, "timezone": "Europe/Rome"})
@@ -172,7 +192,7 @@ def run_full_scan(snap=False):
                 cnt = f["league"]["country"]
                 if cnt in st.session_state.config["excluded"]: continue
                 
-                fid = str(f["fixture"]["id"])
+                fid = int(f["fixture"]["id"])
                 mk = extract_elite_markets(s, fid)
                 if not mk or mk == "SKIP" or mk["q1"] == 0: continue
                 
@@ -180,35 +200,50 @@ def run_full_scan(snap=False):
                 if not s_h or not s_a: continue
 
                 fav = min(mk["q1"], mk["q2"])
-                is_gold = (1.40 <= fav <= 1.90)
+                is_gold_zone = (1.40 <= fav <= 1.90)
                 tags = ["HT-OK"]
                 
-                if fid in st.session_state.odds_memory:
-                    old_data = st.session_state.odds_memory[fid]
+                if str(fid) in st.session_state.odds_memory:
+                    old_data = st.session_state.odds_memory[str(fid)]
                     old_q = old_data["q1"] if mk["q1"] < mk["q2"] else old_data["q2"]
                     if old_q > fav:
                         diff = old_q - fav
                         if diff >= 0.05: tags.append(f"📉-{diff:.2f}")
 
-                h_p, h_o, h_g = False, False, False
-                if (fav < 1.75) and (s_h["avg_total"] >= 1.0 and s_a["avg_total"] >= 1.0): tags.append("🐟O"); h_p = True
-                if (2.0 <= mk["q1"] <= 3.5) and (2.0 <= mk["q2"] <= 3.5) and (s_h["avg_total"] >= 1.0 and s_a["avg_total"] >= 1.0): tags.append("🐟G"); h_p = True
-                if (s_h["avg_total"] >= 2.0 and s_a["avg_total"] >= 2.0):
-                    if mk["o25"] > 1.80 and mk["o05ht"] > 1.30: tags.append("⚽"); h_o = True
-                    elif mk["o25"] <= 1.80 and mk["o05ht"] <= 1.30: tags.append("🚀"); h_o = True
-                if (s_h["avg_total"] >= 1.2 and s_a["avg_total"] >= 1.2): tags.append("🎯PT"); h_g = True
-                if h_p and h_o and h_g: tags.insert(0, "⚽⭐")
+                # LOGICA SEGNALI
+                h_p = (fav < 1.75) and (s_h["avg_total"] >= 1.0 and s_a["avg_total"] >= 1.0)
+                if h_p: tags.append("🐟O")
+                
+                h_g_pesce = (2.0 <= mk["q1"] <= 3.5) and (2.0 <= mk["q2"] <= 3.5) and (s_h["avg_total"] >= 1.0 and s_a["avg_total"] >= 1.0)
+                if h_g_pesce: tags.append("🐟G")
+                
+                h_o = (s_h["avg_total"] >= 2.0 and s_a["avg_total"] >= 2.0)
+                if h_o:
+                    if mk["o25"] > 1.80 and mk["o05ht"] > 1.30: tags.append("⚽")
+                    elif mk["o25"] <= 1.80 and mk["o05ht"] <= 1.30: tags.append("🚀")
+                
+                h_pt_gg = (s_h["avg_total"] >= 1.5 and s_a["avg_total"] >= 1.5)
+                if h_pt_gg: tags.append("🎯PT")
+                
+                if (h_p or h_g_pesce) and h_o and h_pt_gg and s_h["avg_ht"] >= 0.8 and s_a["avg_ht"] >= 0.8:
+                    tags.insert(0, "⚽⭐")
+
+                # PROBLEMA 3 FIX: Salvataggio GGH_RAW per Audit
+                display_gght = f"{mk['gght']:.2f}" if (s_h["avg_ht"] >= 0.9 and s_a["avg_ht"] >= 0.9) else "0.00"
 
                 final_list.append({
                     "Ora": f["fixture"]["date"][11:16],
                     "Lega": f"{f['league']['name']} ({cnt})",
                     "Match": f"{f['teams']['home']['name']} - {f['teams']['away']['name']}",
-                    "Gold": "✅" if is_gold else "❌", # SPOSTATO ALLA QUARTA POSIZIONE
+                    "Gold": "✅" if is_gold_zone else "❌",
                     "1X2": f"{mk['q1']:.1f}|{mk['qx']:.1f}|{mk['q2']:.1f}",
-                    "O2.5": f"{mk['o25']:.2f}", "O0.5H": f"{mk['o05ht']:.2f}", "GGH": f"{mk['gght']:.2f}",
+                    "O2.5": f"{mk['o25']:.2f}", 
+                    "O0.5H": f"{mk['o05ht']:.2f}", 
+                    "GGH": display_gght,
+                    "GGH_RAW": f"{mk['gght']:.2f}", # Per l'Auditor
                     "HT": f"{s_h['avg_ht']:.1f}|{s_a['avg_ht']:.1f}",
                     "Info": " ".join(tags), "Data": f["fixture"]["date"][:10],
-                    "Fixture_ID": f["fixture"]["id"]
+                    "Fixture_ID": fid
                 })
             
             current_db = {str(r["Fixture_ID"]): r for r in st.session_state.scan_results}
@@ -220,7 +255,7 @@ def run_full_scan(snap=False):
             st.rerun()
 
 # --- UI ---
-st.sidebar.header("👑 Arab Sniper V22.04.16")
+st.sidebar.header("👑 Arab Sniper V22.04.18")
 HORIZON = st.sidebar.selectbox("Orizzonte Temporale:", options=[1, 2, 3], index=0)
 target_dates = [(now_rome().date() + timedelta(days=i)).strftime("%Y-%m-%d") for i in range(3)]
 
@@ -244,7 +279,10 @@ if c2.button("🚀 SCAN VELOCE"): run_full_scan(snap=False)
 
 if st.session_state.scan_results:
     df = pd.DataFrame(st.session_state.scan_results)
-    view = df[df["Data"] == target_dates[HORIZON - 1]].drop(columns=["Data", "Fixture_ID"])
+    view_raw = df[df["Data"] == target_dates[HORIZON - 1]]
+    
+    # Rimuoviamo colonne tecniche per la visualizzazione pulita
+    view = view_raw.drop(columns=["Data", "Fixture_ID", "GGH_RAW"]) if not view_raw.empty else view_raw
     
     if not view.empty:
         st.markdown("""
@@ -276,7 +314,8 @@ if st.session_state.scan_results:
         st.markdown(html, unsafe_allow_html=True)
         st.markdown("---")
         d1, d2 = st.columns(2)
-        d1.download_button("💾 CSV", view.to_csv(index=False).encode("utf-8"), f"arab_{target_dates[HORIZON-1]}.csv")
-        d2.download_button("🌐 HTML", html.encode("utf-8"), f"arab_{target_dates[HORIZON-1]}.html")
+        # Il CSV scaricato conterrà la colonna GGH_RAW per l'Auditor
+        d1.download_button("💾 CSV (FULL DATA)", df.to_csv(index=False).encode("utf-8"), f"arab_full_{target_dates[HORIZON-1]}.csv")
+        d2.download_button("🌐 HTML", html.encode("utf-8"), f"arab_view_{target_dates[HORIZON-1]}.html")
 else:
     st.info("Esegui uno scan.")
