@@ -8,7 +8,7 @@ import time
 from pathlib import Path
 
 # ==========================================
-# CONFIGURAZIONE ARAB SNIPER V22.04.11 - UPDATING FIX & DROP TAG
+# CONFIGURAZIONE ARAB SNIPER V22.04.12 - FIX BTTS 1H (GGH)
 # ==========================================
 BASE_DIR = Path(__file__).resolve().parent
 DB_FILE = str(BASE_DIR / "arab_sniper_database.json")
@@ -27,9 +27,8 @@ except Exception:
 def now_rome():
     return datetime.now(ROME_TZ) if ROME_TZ else datetime.now()
 
-st.set_page_config(page_title="ARAB SNIPER V22.04.11", layout="wide")
+st.set_page_config(page_title="ARAB SNIPER V22.04.12", layout="wide")
 
-# --- Inizializzazione Session State ---
 if "config" not in st.session_state:
     if os.path.exists(CONFIG_FILE):
         with open(CONFIG_FILE, "r") as f: st.session_state.config = json.load(f)
@@ -63,9 +62,6 @@ def load_db():
 
 last_snap_ts = load_db()
 
-# ==========================================
-# API CORE & ELITE PARSING
-# ==========================================
 API_KEY = st.secrets.get("API_SPORTS_KEY")
 HEADERS = {"x-apisports-key": API_KEY}
 
@@ -90,26 +86,37 @@ def extract_elite_markets(session, fid):
     for bm in res["response"][0].get("bookmakers", []):
         for b in bm.get("bets", []):
             n = (b.get("name") or "").lower()
-            if b.get("id") == 1 and mk["q1"] == 0:
+            bid = b.get("id")
+            
+            # 1X2 FT
+            if bid == 1 and mk["q1"] == 0:
                 for v in b.get("values", []):
                     vl = v["value"].lower()
                     if vl == "home": mk["q1"] = float(v["odd"])
                     elif vl == "draw": mk["qx"] = float(v["odd"])
                     elif vl == "away": mk["q2"] = float(v["odd"])
-            if b.get("id") == 5 and mk["o25"] == 0:
+            
+            # OVER 2.5 FT
+            if bid == 5 and mk["o25"] == 0:
                 if _is_junk_market(n): continue
                 for v in b.get("values", []):
                     if "over 2.5" in v["value"].lower(): mk["o25"] = float(v["odd"])
+            
+            # OVER 0.5 HT (ID 13 o mercati 1H)
             is_1h = any(k in n for k in ["1st half", "first half", "1h", "half time"])
-            if not is_1h or _is_junk_market(n): continue
-            if mk["o05ht"] == 0 and any(k in n for k in ["total", "over/under", "ou"]):
-                if _is_team_total(n): continue
+            if bid == 13 or (is_1h and mk["o05ht"] == 0 and any(k in n for k in ["total", "over/under", "ou"])):
+                if _is_team_total(n) or _is_junk_market(n): continue
                 for v in b.get("values", []):
                     if "over 0.5" in v["value"].lower(): mk["o05ht"] = float(v["odd"])
-            if mk["gght"] == 0 and any(k in n for k in ["btts", "gg", "both teams"]):
+            
+            # FIX BUG GGH (BTTS 1H) - ID 40 e 71 sono specifici per il BTTS 1H
+            is_btts_1h = any(k in n for k in ["btts", "gg", "both teams"]) and is_1h
+            if (bid in [40, 71] or is_btts_1h) and mk["gght"] == 0:
                 if any(x in n for x in ["exact", "correct"]): continue
                 for v in b.get("values", []):
                     if v["value"].lower() in ["yes", "si"]: mk["gght"] = float(v["odd"])
+                    
+        # Se abbiamo trovato i mercati principali, usciamo
         if mk["q1"] > 0 and mk["o25"] > 0 and (mk["o05ht"] > 0 or mk["gght"] > 0): break
     return mk
 
@@ -130,9 +137,6 @@ def get_team_performance(session, tid):
     st.session_state.team_stats_cache[str(tid)] = stats
     return stats
 
-# ==========================================
-# SCAN CORE CON LOGICA UPDATE
-# ==========================================
 def run_full_scan(snap=False):
     target_dates = [(now_rome().date() + timedelta(days=i)).strftime("%Y-%m-%d") for i in range(3)]
     with st.spinner("🚀 Arab Sniper: Analisi in corso..."):
@@ -165,15 +169,12 @@ def run_full_scan(snap=False):
                 s_h, s_a = get_team_performance(s, f["teams"]["home"]["id"]), get_team_performance(s, f["teams"]["away"]["id"])
                 if not s_h or not s_a: continue
 
-                # LOGICA SEGNALI
                 fav = min(mk["q1"], mk["q2"])
                 is_gold = (1.40 <= fav <= 1.90)
                 tags = ["HT-OK"]
                 
-                # CALCOLO DROP
                 if fid in st.session_state.odds_memory:
                     old_data = st.session_state.odds_memory[fid]
-                    # Prende la vecchia quota della squadra che oggi è favorita
                     old_q = old_data["q1"] if mk["q1"] < mk["q2"] else old_data["q2"]
                     if old_q > fav:
                         diff = old_q - fav
@@ -199,10 +200,7 @@ def run_full_scan(snap=False):
                     "Fixture_ID": f["fixture"]["id"]
                 })
             
-            # === FIX: LOGICA DI AGGIORNAMENTO (UPDATE) ===
-            # Creiamo un dizionario dei risultati attuali usando Fixture_ID come chiave
             current_db = {str(r["Fixture_ID"]): r for r in st.session_state.scan_results}
-            # Sovrascriviamo o aggiungiamo i nuovi risultati dello scan
             for r in final_list:
                 current_db[str(r["Fixture_ID"])] = r
             
@@ -210,10 +208,7 @@ def run_full_scan(snap=False):
             with open(DB_FILE, "w") as f: json.dump({"results": st.session_state.scan_results}, f)
             st.rerun()
 
-# ==========================================
-# UI SIDEBAR
-# ==========================================
-st.sidebar.header("👑 Arab Sniper V22.04.11")
+st.sidebar.header("👑 Arab Sniper V22.04.12")
 HORIZON = st.sidebar.selectbox("Orizzonte Temporale:", options=[1, 2, 3], index=0)
 target_dates = [(now_rome().date() + timedelta(days=i)).strftime("%Y-%m-%d") for i in range(3)]
 
@@ -231,9 +226,6 @@ if all_discovered:
 if last_snap_ts: st.sidebar.success(f"✅ SNAPSHOT: {last_snap_ts}")
 else: st.sidebar.warning("⚠️ SNAPSHOT ASSENTE")
 
-# ==========================================
-# MAIN UI & TABLE (FIXED HEADER & SCROLL)
-# ==========================================
 c1, c2 = st.columns(2)
 if c1.button("📌 SNAP + SCAN"): run_full_scan(snap=True)
 if c2.button("🚀 SCAN VELOCE"): run_full_scan(snap=False)
