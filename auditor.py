@@ -1,15 +1,17 @@
+# retrocan_auditor_fixed.py
 import streamlit as st
 import requests
 import pandas as pd
 from datetime import datetime, timedelta, date
 import re
+from typing import Any
 
 # =========================================================
-# RetroScan + Auditor (API-Sports) - standalone
+# RetroScan + Auditor (API-Sports) - standalone - FIXED
 # =========================================================
 
-st.set_page_config(page_title="Arab RetroScan + Auditor", layout="wide")
-st.title("🕰️ Arab RetroScan + Auditor (date passate)")
+st.set_page_config(page_title="Arab RetroScan + Auditor (fixed)", layout="wide")
+st.title("🕰️ Arab RetroScan + Auditor (FIXED)")
 
 # --------------------------
 # TZ (Rome)
@@ -27,7 +29,7 @@ def now_rome():
 # API
 # --------------------------
 API_KEY = st.secrets.get("API_SPORTS_KEY")
-HEADERS = {"x-apisports-key": API_KEY}
+HEADERS = {"x-apisports-key": API_KEY} if API_KEY else {}
 
 def api_get(session, path, params):
     try:
@@ -39,19 +41,81 @@ def api_get(session, path, params):
         return None
 
 # --------------------------
-# Helpers parsing odds
+# Helpers parsing odds (robuste)
 # --------------------------
-def _norm(s: str) -> str:
-    return (s or "").strip().lower()
+def _norm_any(s: Any) -> str:
+    """
+    Normalizza qualunque valore a stringa lowercase sicura.
+    Se s è dict e ha 'value' prova a usarlo.
+    """
+    try:
+        if s is None:
+            return ""
+        # se è dict e ha key 'value'
+        if isinstance(s, dict):
+            v = s.get("value", "") or ""
+            return str(v).strip().lower()
+        # ansonsten cast a str
+        return str(s).strip().lower()
+    except Exception:
+        return ""
 
-def _to_float_odd(x):
+def _extract_value_from_v(v: Any) -> str:
+    """
+    Riceve l'elemento v dalla lista 'values' e restituisce il 'value' come stringa
+    Gestisce più formati possibili (dict con 'value', stringa, list, etc.)
+    """
+    try:
+        if v is None:
+            return ""
+        if isinstance(v, dict):
+            # possono esserci diverse chiavi: 'value', 'name', 'label'
+            for k in ("value", "name", "label"):
+                if k in v and v.get(k) is not None:
+                    return str(v.get(k))
+            # come fallback prova a serializzare
+            return str(v)
+        # se è str o numero
+        return str(v)
+    except Exception:
+        return ""
+
+def _extract_odd_from_v(v: Any):
+    """
+    Estrae la quota 'odd' da un elemento value della response.
+    Restituisce None se non è convertibile.
+    """
+    try:
+        if v is None:
+            return None
+        if isinstance(v, dict):
+            # chiavi possibili: 'odd', 'price', 'odds'
+            for k in ("odd", "price", "odds", "value"):
+                if k in v and v.get(k) is not None:
+                    try:
+                        return float(str(v.get(k)).replace(",", "."))
+                    except Exception:
+                        continue
+            # fallback: cerca in tutto il dict la prima cosa convertibile a float
+            for vv in v.values():
+                try:
+                    return float(str(vv).replace(",", "."))
+                except Exception:
+                    continue
+            return None
+        # se è già un numero o stringa convertibile
+        try:
+            return float(str(v).replace(",", "."))
+        except Exception:
+            return None
+    except Exception:
+        return None
+
+def _to_float_safe(x):
     try:
         if x is None:
             return None
-        if isinstance(x, (int, float)):
-            return float(x)
-        s = str(x).strip().replace(",", ".")
-        return float(s)
+        return float(str(x).replace(",", "."))
     except Exception:
         return None
 
@@ -65,47 +129,73 @@ def _is_over_value(val_norm: str, line: str) -> bool:
     return num == line
 
 def _is_btts_yes(val_norm: str) -> bool:
-    return val_norm in {"yes", "si", "sì", "y"}
+    return val_norm in {"yes", "si", "sì", "y", "true", "1"}
 
 def _is_first_half_text(txt: str) -> bool:
-    t = _norm(txt)
+    t = _norm_any(txt)
     return any(k in t for k in ["1st half", "first half", "1h", "ht", "half time", "halftime"])
 
 def _maybe_set_max(mk: dict, key: str, odd_val):
-    odd = _to_float_odd(odd_val)
+    odd = _to_float_safe(odd_val)
     if odd is None or odd <= 0:
         return
     cur = float(mk.get(key, 0) or 0)
     if odd > cur:
         mk[key] = odd
 
+# --------------------------
+# Market extraction (robusto)
+# --------------------------
 def extract_markets_from_odds_response(odds_json) -> dict:
     """
-    Estrae mercati robustamente dalla response /odds (se presente).
-    Ritorna mk con:
-      q1,qx,q2,o25,o05ht,gght (0.0 se non trovati)
+    Estrae mercati dalla response /odds in maniera robusta.
+    Ritorna mk con q1,qx,q2,o25,o05ht,gght (0.0 se non trovati)
     """
     mk = {"q1": 0.0, "qx": 0.0, "q2": 0.0, "o25": 0.0, "o05ht": 0.0, "gght": 0.0}
 
     if not odds_json or not odds_json.get("response"):
         return mk
 
-    resp0 = odds_json["response"][0]
+    try:
+        resp0 = odds_json["response"][0]
+    except Exception:
+        return mk
+
     bookmakers = resp0.get("bookmakers", []) or []
 
     for bm in bookmakers:
-        bets = bm.get("bets", []) or []
+        # protezione: bookmaker inattesi
+        try:
+            bets = bm.get("bets", []) or []
+        except Exception:
+            # se il bookmaker è inatteso skip
+            continue
+
         for b in bets:
-            b_id = b.get("id")
-            b_name = _norm(b.get("name", ""))
+            # protezioni sui tipi
+            try:
+                b_id = b.get("id") if isinstance(b, dict) else None
+                b_name = _norm_any(b.get("name") if isinstance(b, dict) else b)
+            except Exception:
+                b_id = None
+                b_name = ""
 
-            values = b.get("values", []) or []
+            # prendi valori in modo sicuro
+            try:
+                values = b.get("values", []) if isinstance(b, dict) else []
+                if values is None:
+                    values = []
+            except Exception:
+                values = []
 
-            # 1X2
-            if b_id == 1 or any(k in b_name for k in ["match winner", "1x2", "winner", "full time result"]):
-                for v in values:
-                    vv = _norm(v.get("value", ""))
-                    odd = v.get("odd")
+            # SCORRI values difendendoti da formati strani
+            for v in values:
+                v_val_raw = _extract_value_from_v(v)
+                vv = _norm_any(v_val_raw)
+                odd = _extract_odd_from_v(v)
+
+                # 1X2 - match winner
+                if b_id == 1 or any(k in b_name for k in ["match winner", "1x2", "winner", "full time result"]):
                     if vv in {"home", "1", "local", "casa"}:
                         _maybe_set_max(mk, "q1", odd)
                     elif vv in {"draw", "x", "pareggio"}:
@@ -113,38 +203,31 @@ def extract_markets_from_odds_response(odds_json) -> dict:
                     elif vv in {"away", "2", "visitors", "trasferta"}:
                         _maybe_set_max(mk, "q2", odd)
 
-            # Over 2.5 FT
-            if (b_id == 5) or (
-                ("over/under" in b_name or "over under" in b_name or "totals" in b_name)
-                and not any(k in b_name for k in ["1st half", "first half", "half time", "1h", "ht"])
-            ):
-                for v in values:
-                    vv = _norm(v.get("value", ""))
-                    odd = v.get("odd")
+                # Over 2.5 FT
+                if (b_id == 5) or (
+                    ("over/under" in b_name or "over under" in b_name or "totals" in b_name)
+                    and not any(k in b_name for k in ["1st half", "first half", "half time", "1h", "ht"])
+                ):
                     if _is_over_value(vv, "2.5"):
                         _maybe_set_max(mk, "o25", odd)
 
-            # Over 0.5 HT (1st half totals)
-            if (b_id == 13) or (_is_first_half_text(b_name) and any(k in b_name for k in ["over/under", "over under", "totals", "goals"])):
-                for v in values:
-                    vv = _norm(v.get("value", ""))
-                    odd = v.get("odd")
+                # Over 0.5 HT (1st half totals)
+                if (b_id == 13) or (_is_first_half_text(b_name) and any(k in b_name for k in ["over/under", "over under", "totals", "goals"])):
                     if _is_over_value(vv, "0.5"):
                         _maybe_set_max(mk, "o05ht", odd)
 
-            # BTTS 1H (GGHT) - tollerante name/value
-            is_btts = any(k in b_name for k in ["both teams", "both team", "btts", "gg", "to score"])
-            if is_btts:
-                bet_is_1h = _is_first_half_text(b_name)
-                for v in values:
-                    vv_raw = v.get("value", "")
-                    vv = _norm(vv_raw)
-                    odd = v.get("odd")
-                    if _is_btts_yes(vv) and (bet_is_1h or _is_first_half_text(vv_raw)):
+                # BTTS 1H (GGHT) - tollerante name/value
+                is_btts = any(k in b_name for k in ["both teams", "both team", "btts", "gg", "to score"])
+                if is_btts:
+                    bet_is_1h = _is_first_half_text(b_name)
+                    # se value dice "yes" e bet è 1H o value contiene 1H
+                    if _is_btts_yes(vv) and (bet_is_1h or _is_first_half_text(v_val_raw)):
                         _maybe_set_max(mk, "gght", odd)
 
-        # se vuoi, puoi “early stop” SOLO se hai tutto:
-        # (ma a retro scan preferisco completezza)
+            # Fine for values
+        # Fine for bets
+    # Fine for bookmakers
+
     return mk
 
 def get_fixture_odds(session, fixture_id: int):
@@ -154,10 +237,12 @@ def get_fixture_odds(session, fixture_id: int):
 # Team stats (same style)
 # --------------------------
 def get_team_performance(session, tid: int):
-    # ultimi 8 FT
-    res = api_get(session, "fixtures", {"team": tid, "last": 8, "status": "FT"})
-    fx = res.get("response", []) if res else []
-    if not fx:
+    try:
+        res = api_get(session, "fixtures", {"team": tid, "last": 8, "status": "FT"})
+        fx = res.get("response", []) if res else []
+        if not fx:
+            return None
+    except Exception:
         return None
 
     act = len(fx)
@@ -165,7 +250,6 @@ def get_team_performance(session, tid: int):
     for f in fx:
         ht = f.get("score", {}).get("halftime", {}) or {}
         tht += (ht.get("home") or 0) + (ht.get("away") or 0)
-
         is_home = f.get("teams", {}).get("home", {}).get("id") == tid
         goals = f.get("goals", {}) or {}
         gh = goals.get("home") or 0
@@ -180,21 +264,15 @@ def get_team_performance(session, tid: int):
     return {"avg_ht": tht / act, "avg_total": (gf + gs) / act}
 
 # --------------------------
-# Tag logic (replica della tua)
+# Tag logic (replica)
 # --------------------------
 def compute_tags(mk, s_h, s_a):
-    """
-    Replica la logica base che hai nel tuo Sniper:
-      🐟O, 🐟G, ⚽, 🚀, 🎯PT, ⚽⭐
-    """
     tags = ["HT-OK"]
     h_p, h_o, h_g = False, False, False
 
-    q1, q2 = mk["q1"], mk["q2"]
-    o25, o05ht = mk["o25"], mk["o05ht"]
+    q1, q2 = mk.get("q1", 0), mk.get("q2", 0)
+    o25, o05ht = mk.get("o25", 0), mk.get("o05ht", 0)
 
-    # NOTE: se quote = 0 (odds missing) questi blocchi non scatteranno,
-    # quindi il retro-audit segnalerà: odds mancanti.
     if (min(q1, q2) > 0 and min(q1, q2) < 1.75) and (s_h["avg_total"] >= 1.0 and s_a["avg_total"] >= 1.0):
         tags.append("🐟O")
         h_p = True
@@ -320,13 +398,17 @@ if run:
             for i, f in enumerate(rows, start=1):
                 pb.progress(i / len(rows))
 
-                fid = int(f["fixture"]["id"])
-                dt_iso = f["fixture"]["date"]  # ISO string
-                ora = dt_iso[11:16]
-                country = f["league"]["country"]
-                lega = f"{f['league']['name']} ({country})"
-                home = f["teams"]["home"]["name"]
-                away = f["teams"]["away"]["name"]
+                try:
+                    fid = int(f["fixture"]["id"])
+                except Exception:
+                    continue
+
+                dt_iso = f["fixture"].get("date", "")
+                ora = dt_iso[11:16] if dt_iso else ""
+                country = f["league"].get("country", "")
+                lega = f"{f['league'].get('name','')} ({country})"
+                home = f["teams"].get("home", {}).get("name", "Home")
+                away = f["teams"].get("away", {}).get("name", "Away")
                 match = f"{home} - {away}"
 
                 # risultati
@@ -348,8 +430,8 @@ if run:
                 odds_missing = (mk["q1"] == 0 and mk["q2"] == 0 and mk["o25"] == 0 and mk["o05ht"] == 0 and mk["gght"] == 0)
 
                 # stats team
-                s_h = get_team_performance(session, f["teams"]["home"]["id"])
-                s_a = get_team_performance(session, f["teams"]["away"]["id"])
+                s_h = get_team_performance(session, f["teams"].get("home", {}).get("id"))
+                s_a = get_team_performance(session, f["teams"].get("away", {}).get("id"))
 
                 # tag (solo se ho stats)
                 info = ""
@@ -399,9 +481,9 @@ if run:
 
     k1, k2, k3, k4 = st.columns(4)
     k1.metric("Match auditati", len(df))
-    k2.metric("Odds missing", int(df["ODDS_MISSING"].sum()))
-    k3.metric("Con HT disponibile", int(df["HT_Total"].notna().sum()))
-    k4.metric("Con FT disponibile", int(df["FT_Total"].notna().sum()))
+    k2.metric("Odds missing", int(df["ODDS_MISSING"].sum()) if not df.empty else 0)
+    k3.metric("Con HT disponibile", int(df["HT_Total"].notna().sum()) if not df.empty else 0)
+    k4.metric("Con FT disponibile", int(df["FT_Total"].notna().sum()) if not df.empty else 0)
 
     def hit_rate(mask, col):
         s = df.loc[mask, col].dropna()
