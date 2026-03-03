@@ -8,7 +8,7 @@ import time
 from pathlib import Path
 
 # ==========================================
-# CONFIGURAZIONE ARAB SNIPER V22.04.9 - PERSISTENCE & AUTO-DATE FIX
+# CONFIGURAZIONE ARAB SNIPER V22.04.18 - VULNERABILITY REFINED
 # ==========================================
 BASE_DIR = Path(__file__).resolve().parent
 DB_FILE = str(BASE_DIR / "arab_sniper_database.json")
@@ -27,9 +27,8 @@ except Exception:
 def now_rome():
     return datetime.now(ROME_TZ) if ROME_TZ else datetime.now()
 
-st.set_page_config(page_title="ARAB SNIPER V22.04.9", layout="wide")
+st.set_page_config(page_title="ARAB SNIPER V22.04.18", layout="wide")
 
-# --- Inizializzazione Session State ---
 if "config" not in st.session_state:
     if os.path.exists(CONFIG_FILE):
         with open(CONFIG_FILE, "r") as f: st.session_state.config = json.load(f)
@@ -43,40 +42,26 @@ if "odds_memory" not in st.session_state: st.session_state.odds_memory = {}
 def save_config():
     with open(CONFIG_FILE, "w") as f: json.dump(st.session_state.config, f)
 
-# === PARTE INTEGRATA: PERSISTENZA E SCALATA DATA ===
 def load_db():
-    """Carica i risultati salvati e rimuove quelli vecchi (scalata data)"""
     today = now_rome().strftime("%Y-%m-%d")
     ts = None
-    
-    # Caricamento Risultati Scan
     if os.path.exists(DB_FILE):
         try:
             with open(DB_FILE, "r") as f:
                 data = json.load(f).get("results", [])
-                # Filtro: tieni solo i match da oggi in poi
                 st.session_state.scan_results = [r for r in data if r.get("Data", "") >= today]
-        except Exception:
-            pass
-
-    # Caricamento Snapshot Quote
+        except: pass
     if os.path.exists(SNAP_FILE):
         try:
             with open(SNAP_FILE, "r") as f:
                 snap_data = json.load(f)
                 st.session_state.odds_memory = snap_data.get("odds", {})
                 ts = snap_data.get("timestamp", "N/D")
-        except Exception:
-            pass
+        except: pass
     return ts
 
-# Esecuzione al caricamento dell'app
 last_snap_ts = load_db()
-# =================================================
 
-# ==========================================
-# API CORE & ROBUST PARSING (DA V22.04)
-# ==========================================
 API_KEY = st.secrets.get("API_SPORTS_KEY")
 HEADERS = {"x-apisports-key": API_KEY}
 
@@ -86,14 +71,17 @@ def api_get(session, path, params):
         return r.json() if r.status_code == 200 else None
     except: return None
 
-def _is_junk_market(name_lower: str) -> bool:
-    junk = ["corner", "card", "booking", "yellow", "red", "offside", "throw", "foul", "shot", "goal kick"]
-    return any(j in name_lower for j in junk)
+def _contains_ht(text):
+    t = (text or "").lower()
+    return any(k in t for k in ["1st half", "first half", "1h", "ht", "half time", "halftime", "1° tempo"])
 
-def _is_team_total(name_lower: str) -> bool:
-    if "team total" in name_lower: return True
-    if "total" in name_lower and ("home" in name_lower or "away" in name_lower): return True
-    return False
+def _contains_btts(text):
+    t = (text or "").lower()
+    return any(k in t for k in ["both teams", "btts", "gg", "to score", "gol/gol", "entrambe segnano"])
+
+def _is_yes(text):
+    t = (text or "").strip().lower()
+    return t in ["yes", "si", "sì", "y", "1"]
 
 def extract_elite_markets(session, fid):
     res = api_get(session, "odds", {"fixture": fid})
@@ -101,28 +89,29 @@ def extract_elite_markets(session, fid):
     mk = {"q1": 0.0, "qx": 0.0, "q2": 0.0, "o25": 0.0, "o05ht": 0.0, "gght": 0.0}
     for bm in res["response"][0].get("bookmakers", []):
         for b in bm.get("bets", []):
-            n = (b.get("name") or "").lower()
-            if not n: continue
-            if b.get("id") == 1 and mk["q1"] == 0:
+            name = (b.get("name") or "").lower()
+            bid = b.get("id")
+            if bid == 1 and mk["q1"] == 0:
                 for v in b.get("values", []):
-                    vl = (v.get("value") or "").lower()
-                    if vl == "home": mk["q1"] = float(v["odd"])
-                    elif vl == "draw": mk["qx"] = float(v["odd"])
-                    elif vl == "away": mk["q2"] = float(v["odd"])
-            if b.get("id") == 5 and mk["o25"] == 0:
-                if _is_junk_market(n): continue
+                    vl = v["value"].lower()
+                    if "home" in vl: mk["q1"] = float(v["odd"])
+                    elif "draw" in vl: mk["qx"] = float(v["odd"])
+                    elif "away" in vl: mk["q2"] = float(v["odd"])
+            if bid == 5 and mk["o25"] == 0:
+                if any(j in name for j in ["corner", "card", "booking"]): continue
                 for v in b.get("values", []):
-                    if (v.get("value") or "").lower() == "over 2.5": mk["o25"] = float(v["odd"])
-            is_1h = any(k in n for k in ["1st half", "first half", "1h", "1st", "half time", "halftime"])
-            if not is_1h or _is_junk_market(n): continue
-            if mk["o05ht"] == 0 and any(k in n for k in ["total", "over/under", "ou"]):
-                if _is_team_total(n): continue
+                    if "over 2.5" in v["value"].lower(): mk["o25"] = float(v["odd"])
+            if mk["o05ht"] == 0 and _contains_ht(name) and any(k in name for k in ["total", "over/under", "ou", "goals"]):
+                if "team" in name: continue
                 for v in b.get("values", []):
-                    if (v.get("value") or "").lower() == "over 0.5": mk["o05ht"] = float(v["odd"])
-            if mk["gght"] == 0 and any(k in n for k in ["both teams to score", "btts", "gg", "both"]):
-                if any(x in n for x in ["exact", "correct"]): continue
+                    if "over 0.5" in v["value"].lower(): mk["o05ht"] = float(v["odd"])
+            if mk["gght"] == 0 and _contains_btts(name):
+                is_name_ht = _contains_ht(name)
                 for v in b.get("values", []):
-                    if (v.get("value") or "").lower() in ["yes", "si"]: mk["gght"] = float(v["odd"])
+                    val_txt = v["value"].lower()
+                    if _is_yes(val_txt) and (is_name_ht or _contains_ht(val_txt) or bid in [40, 71]):
+                        mk["gght"] = float(v["odd"])
+                        break
         if mk["q1"] > 0 and mk["o25"] > 0 and (mk["o05ht"] > 0 or mk["gght"] > 0): break
     if (1.01 <= mk["q1"] <= 1.10) or (1.01 <= mk["q2"] <= 1.10) or (1.01 <= mk["o25"] <= 1.30): return "SKIP"
     return mk
@@ -146,14 +135,13 @@ def get_team_performance(session, tid):
 
 def run_full_scan(snap=False):
     target_dates = [(now_rome().date() + timedelta(days=i)).strftime("%Y-%m-%d") for i in range(3)]
-    with st.spinner("🚀 Arab Sniper: Analisi mercati e Gold Zone..."):
+    with st.spinner("🚀 Arab Sniper: Ricerca mercati e affinamento vulnerabilità..."):
         with requests.Session() as s:
             target_date = target_dates[HORIZON - 1]
             res = api_get(s, "fixtures", {"date": target_date, "timezone": "Europe/Rome"})
             if not res: return
             day_fx = [f for f in res.get("response", []) if f["fixture"]["status"]["short"] == "NS"]
             st.session_state.available_countries = sorted(list(set(st.session_state.available_countries) | {fx["league"]["country"] for fx in day_fx}))
-            
             if snap:
                 csnap = {}
                 for f in day_fx:
@@ -161,116 +149,111 @@ def run_full_scan(snap=False):
                     if m and m != "SKIP": csnap[str(f["fixture"]["id"])] = {"q1": m["q1"], "q2": m["q2"]}
                 st.session_state.odds_memory = csnap
                 with open(SNAP_FILE, "w") as f: json.dump({"odds": csnap, "timestamp": now_rome().strftime("%H:%M")}, f)
-
             final_list = []
             pb = st.progress(0)
             for i, f in enumerate(day_fx):
                 pb.progress((i+1)/len(day_fx))
                 cnt = f["league"]["country"]
                 if cnt in st.session_state.config["excluded"]: continue
-                mk = extract_elite_markets(s, f["fixture"]["id"])
-                if not mk or mk == "SKIP": continue
+                fid = str(f["fixture"]["id"])
+                mk = extract_elite_markets(s, fid)
+                if not mk or mk == "SKIP" or mk["q1"] == 0: continue
                 s_h, s_a = get_team_performance(s, f["teams"]["home"]["id"]), get_team_performance(s, f["teams"]["away"]["id"])
                 if not s_h or not s_a: continue
-
                 fav = min(mk["q1"], mk["q2"])
                 is_gold = (1.40 <= fav <= 1.90)
                 tags = ["HT-OK"]
+                if fid in st.session_state.odds_memory:
+                    old_data = st.session_state.odds_memory[fid]
+                    old_q = old_data["q1"] if mk["q1"] < mk["q2"] else old_data["q2"]
+                    if old_q > fav:
+                        diff = old_q - fav
+                        if diff >= 0.05: tags.append(f"📉-{diff:.2f}")
                 h_p, h_o, h_g = False, False, False
                 if (fav < 1.75) and (s_h["avg_total"] >= 1.0 and s_a["avg_total"] >= 1.0): tags.append("🐟O"); h_p = True
                 if (2.0 <= mk["q1"] <= 3.5) and (2.0 <= mk["q2"] <= 3.5) and (s_h["avg_total"] >= 1.0 and s_a["avg_total"] >= 1.0): tags.append("🐟G"); h_p = True
                 if (s_h["avg_total"] >= 2.0 and s_a["avg_total"] >= 2.0):
                     if mk["o25"] > 1.80 and mk["o05ht"] > 1.30: tags.append("⚽"); h_o = True
                     elif mk["o25"] <= 1.80 and mk["o05ht"] <= 1.30: tags.append("🚀"); h_o = True
-                if (s_h["avg_total"] >= 1.2 and s_a["avg_total"] >= 1.2): tags.append("🎯PT"); h_g = True
-                if h_p and h_o and h_g: tags.insert(0, "⚽⭐")
+                
+                # MODIFICA PARAMETRI VULNERABILITÀ
+                if (s_h["avg_total"] >= 1.6 and s_a["avg_total"] >= 1.6) and (s_h["avg_ht"] >= 1.1 and s_a["avg_ht"] >= 1.1):
+                    tags.append("🎯PT")
+                    h_g = True
+                
+                # MODIFICA BLOCCO GOLD
+                if h_p and h_o and h_g:
+                    if (s_h["avg_ht"] >= 0.6 and s_a["avg_ht"] >= 0.6 and mk["o05ht"] > 1.25):
+                        tags.insert(0, "⚽⭐")
 
                 final_list.append({
                     "Ora": f["fixture"]["date"][11:16],
-                    "Lega": f"{f['league']['name'][:8]}..({cnt[:3]})",
-                    "Match": f"{f['teams']['home']['name'][:10]} - {f['teams']['away']['name'][:10]}",
+                    "Lega": f"{f['league']['name']} ({cnt})",
+                    "Match": f"{f['teams']['home']['name']} - {f['teams']['away']['name']}",
+                    "Gold": "✅" if is_gold else "❌",
                     "1X2": f"{mk['q1']:.1f}|{mk['qx']:.1f}|{mk['q2']:.1f}",
                     "O2.5": f"{mk['o25']:.2f}", "O0.5H": f"{mk['o05ht']:.2f}", "GGH": f"{mk['gght']:.2f}",
-                    "HT": f"{s_h['avg_ht']:.1f}|{s_a['avg_ht']:.1f}",
-                    "Info": " ".join(tags), "Gold": "✅" if is_gold else "❌", "Data": f["fixture"]["date"][:10],
+                    "AVG FT": f"{s_h['avg_total']:.1f}|{s_a['avg_total']:.1f}",
+                    "AVG HT": f"{s_h['avg_ht']:.1f}|{s_a['avg_ht']:.1f}",
+                    "Info": " ".join(tags), "Data": f["fixture"]["date"][:10],
                     "Fixture_ID": f["fixture"]["id"]
                 })
-            
-            # PARTE INTEGRATA: SALVATAGGIO PERSISTENTE
-            eids = [r["Fixture_ID"] for r in st.session_state.scan_results]
-            st.session_state.scan_results += [r for r in final_list if r["Fixture_ID"] not in eids]
-            
-            with open(DB_FILE, "w") as f:
-                json.dump({"results": st.session_state.scan_results}, f)
-            
+            current_db = {str(r["Fixture_ID"]): r for r in st.session_state.scan_results}
+            for r in final_list:
+                current_db[str(r["Fixture_ID"])] = r
+            st.session_state.scan_results = list(current_db.values())
+            with open(DB_FILE, "w") as f: json.dump({"results": st.session_state.scan_results}, f)
             st.rerun()
 
-# ==========================================
-# UI & TABELLA
-# ==========================================
-st.sidebar.header("👑 Arab Sniper V22.04.9")
+st.sidebar.header("👑 Arab Sniper V22.04.18")
 HORIZON = st.sidebar.selectbox("Orizzonte Temporale:", options=[1, 2, 3], index=0)
 target_dates = [(now_rome().date() + timedelta(days=i)).strftime("%Y-%m-%d") for i in range(3)]
-
 all_discovered = sorted(list(set(st.session_state.get("available_countries", []))))
 if st.session_state.scan_results:
     historical_cnt = {r["Lega"].split('(')[-1].replace(')', '') for r in st.session_state.scan_results}
     all_discovered = sorted(list(set(all_discovered) | historical_cnt))
-
 if all_discovered:
     new_ex = st.sidebar.multiselect("Escludi Nazioni:", options=all_discovered, default=[c for c in st.session_state.config.get("excluded", []) if c in all_discovered])
     if st.sidebar.button("💾 SALVA CONFIG"):
         st.session_state.config["excluded"] = new_ex
         save_config(); st.rerun()
-
-# Stato Snapshot nella sidebar
-if last_snap_ts:
-    st.sidebar.success(f"✅ SNAPSHOT: {last_snap_ts}")
-else:
-    st.sidebar.warning("⚠️ SNAPSHOT ASSENTE")
-
+if last_snap_ts: st.sidebar.success(f"✅ SNAPSHOT: {last_snap_ts}")
+else: st.sidebar.warning("⚠️ SNAPSHOT ASSENTE")
 c1, c2 = st.columns(2)
 if c1.button("📌 SNAP + SCAN"): run_full_scan(snap=True)
 if c2.button("🚀 SCAN VELOCE"): run_full_scan(snap=False)
-
 if st.session_state.scan_results:
     df = pd.DataFrame(st.session_state.scan_results)
-    # Filtro visualizzazione per data selezionata
-    view = df[df["Data"] == target_dates[HORIZON - 1]].drop(columns=["Data", "Fixture_ID"])
-    
-    if not view.empty:
+    full_view = df[df["Data"] == target_dates[HORIZON - 1]]
+    if not full_view.empty:
+        view = full_view.drop(columns=["Data", "Fixture_ID"])
         st.markdown("""
             <style>
-                .scroll-container { width: 100%; overflow-x: auto; display: block; border: 1px solid #444; margin: 10px 0; }
-                .mobile-table { width: 100%; min-width: 880px; border-collapse: collapse; font-family: sans-serif; font-size: 11px; }
-                .mobile-table th, .mobile-table td { white-space: nowrap; padding: 6px 4px; border: 1px solid #444; text-align: center; }
-                .mobile-table th { background: #222; color: #00e5ff; }
+                .main-container { width: 100%; max-height: 800px; overflow: auto; border: 1px solid #444; border-radius: 8px; background-color: #0e1117; }
+                .mobile-table { width: 100%; min-width: 1000px; border-collapse: separate; border-spacing: 0; font-family: sans-serif; font-size: 11px; }
+                .mobile-table th { position: sticky; top: 0; background: #1a1c23; color: #00e5ff; z-index: 10; padding: 12px 5px; border-bottom: 2px solid #333; border-right: 1px solid #333; }
+                .mobile-table td { padding: 8px 5px; border-bottom: 1px solid #333; border-right: 1px solid #333; text-align: center; white-space: nowrap; }
                 .row-dorato { background-color: #FFD700 !important; color: black !important; font-weight: bold; }
                 .row-boost { background-color: #FF0000 !important; color: white !important; font-weight: bold; }
                 .row-ggpt { background-color: #0000FF !important; color: white !important; font-weight: bold; }
                 .row-std { background-color: white !important; color: black !important; }
             </style>
         """, unsafe_allow_html=True)
-
         def get_row_class(info):
             if "⚽⭐" in info: return "row-dorato"
             if "🚀" in info: return "row-boost"
             if "🎯PT" in info: return "row-ggpt"
             return "row-std"
-
-        html = '<div class="scroll-container"><table class="mobile-table"><thead><tr>'
+        html = '<div class="main-container"><table class="mobile-table"><thead><tr>'
         html += ''.join(f'<th>{c}</th>' for c in view.columns) + '</tr></thead><tbody>'
         for _, row in view.iterrows():
             cls = get_row_class(row["Info"])
             html += f'<tr class="{cls}">' + ''.join(f'<td>{v}</td>' for v in row) + '</tr>'
         html += '</tbody></table></div>'
-        
         st.markdown(html, unsafe_allow_html=True)
         st.markdown("---")
         d1, d2 = st.columns(2)
-        d1.download_button("💾 CSV", view.to_csv(index=False).encode("utf-8"), f"arab_{target_dates[HORIZON-1]}.csv")
+        d1.download_button("💾 CSV", full_view.to_csv(index=False).encode("utf-8"), f"arab_{target_dates[HORIZON-1]}.csv")
         d2.download_button("🌐 HTML", html.encode("utf-8"), f"arab_{target_dates[HORIZON-1]}.html")
-    else:
-        st.info("Nessun match trovato per questa data.")
 else:
-    st.info("Pronto per lo scan.")
+    st.info("Esegui uno scan.")
