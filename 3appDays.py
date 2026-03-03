@@ -8,7 +8,7 @@ import time
 from pathlib import Path
 
 # ==========================================
-# CONFIGURAZIONE ARAB SNIPER V22.04.18 - VULNERABILITY REFINED
+# CONFIGURAZIONE ARAB SNIPER V22.04.19 - M-Ok PRIMARY FILTER
 # ==========================================
 BASE_DIR = Path(__file__).resolve().parent
 DB_FILE = str(BASE_DIR / "arab_sniper_database.json")
@@ -27,7 +27,7 @@ except Exception:
 def now_rome():
     return datetime.now(ROME_TZ) if ROME_TZ else datetime.now()
 
-st.set_page_config(page_title="ARAB SNIPER V22.04.18", layout="wide")
+st.set_page_config(page_title="ARAB SNIPER V22.04.19", layout="wide")
 
 if "config" not in st.session_state:
     if os.path.exists(CONFIG_FILE):
@@ -135,7 +135,7 @@ def get_team_performance(session, tid):
 
 def run_full_scan(snap=False):
     target_dates = [(now_rome().date() + timedelta(days=i)).strftime("%Y-%m-%d") for i in range(3)]
-    with st.spinner("🚀 Arab Sniper: Ricerca mercati e affinamento vulnerabilità..."):
+    with st.spinner("🚀 Arab Sniper: Ricerca mercati con filtro Match Ok..."):
         with requests.Session() as s:
             target_date = target_dates[HORIZON - 1]
             res = api_get(s, "fixtures", {"date": target_date, "timezone": "Europe/Rome"})
@@ -160,15 +160,23 @@ def run_full_scan(snap=False):
                 if not mk or mk == "SKIP" or mk["q1"] == 0: continue
                 s_h, s_a = get_team_performance(s, f["teams"]["home"]["id"]), get_team_performance(s, f["teams"]["away"]["id"])
                 if not s_h or not s_a: continue
+
+                # NUOVO FILTRO M-Ok (Somma medie HT / 2 >= 1.30)
+                combined_ht_avg = (s_h["avg_ht"] + s_a["avg_ht"]) / 2
+                if combined_ht_avg < 1.30:
+                    continue
+
                 fav = min(mk["q1"], mk["q2"])
                 is_gold = (1.40 <= fav <= 1.90)
-                tags = ["HT-OK"]
+                tags = ["M-Ok"] # TAG RINOMINATO
+                
                 if fid in st.session_state.odds_memory:
                     old_data = st.session_state.odds_memory[fid]
                     old_q = old_data["q1"] if mk["q1"] < mk["q2"] else old_data["q2"]
                     if old_q > fav:
                         diff = old_q - fav
                         if diff >= 0.05: tags.append(f"📉-{diff:.2f}")
+
                 h_p, h_o, h_g = False, False, False
                 if (fav < 1.75) and (s_h["avg_total"] >= 1.0 and s_a["avg_total"] >= 1.0): tags.append("🐟O"); h_p = True
                 if (2.0 <= mk["q1"] <= 3.5) and (2.0 <= mk["q2"] <= 3.5) and (s_h["avg_total"] >= 1.0 and s_a["avg_total"] >= 1.0): tags.append("🐟G"); h_p = True
@@ -176,12 +184,10 @@ def run_full_scan(snap=False):
                     if mk["o25"] > 1.80 and mk["o05ht"] > 1.30: tags.append("⚽"); h_o = True
                     elif mk["o25"] <= 1.80 and mk["o05ht"] <= 1.30: tags.append("🚀"); h_o = True
                 
-                # MODIFICA PARAMETRI VULNERABILITÀ
                 if (s_h["avg_total"] >= 1.6 and s_a["avg_total"] >= 1.6) and (s_h["avg_ht"] >= 1.1 and s_a["avg_ht"] >= 1.1):
                     tags.append("🎯PT")
                     h_g = True
                 
-                # MODIFICA BLOCCO GOLD
                 if h_p and h_o and h_g:
                     if (s_h["avg_ht"] >= 0.6 and s_a["avg_ht"] >= 0.6 and mk["o05ht"] > 1.25):
                         tags.insert(0, "⚽⭐")
@@ -205,7 +211,8 @@ def run_full_scan(snap=False):
             with open(DB_FILE, "w") as f: json.dump({"results": st.session_state.scan_results}, f)
             st.rerun()
 
-st.sidebar.header("👑 Arab Sniper V22.04.18")
+# --- UI ---
+st.sidebar.header("👑 Arab Sniper V22.04.19")
 HORIZON = st.sidebar.selectbox("Orizzonte Temporale:", options=[1, 2, 3], index=0)
 target_dates = [(now_rome().date() + timedelta(days=i)).strftime("%Y-%m-%d") for i in range(3)]
 all_discovered = sorted(list(set(st.session_state.get("available_countries", []))))
