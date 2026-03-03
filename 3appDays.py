@@ -8,7 +8,7 @@ import time
 from pathlib import Path
 
 # ==========================================
-# CONFIGURAZIONE ARAB SNIPER V22.04.19 - M-Ok PRIMARY FILTER
+# CONFIGURAZIONE ARAB SNIPER V22.04.20 - OVER & BOOST REFINED
 # ==========================================
 BASE_DIR = Path(__file__).resolve().parent
 DB_FILE = str(BASE_DIR / "arab_sniper_database.json")
@@ -27,7 +27,7 @@ except Exception:
 def now_rome():
     return datetime.now(ROME_TZ) if ROME_TZ else datetime.now()
 
-st.set_page_config(page_title="ARAB SNIPER V22.04.19", layout="wide")
+st.set_page_config(page_title="ARAB SNIPER V22.04.20", layout="wide")
 
 if "config" not in st.session_state:
     if os.path.exists(CONFIG_FILE):
@@ -135,7 +135,7 @@ def get_team_performance(session, tid):
 
 def run_full_scan(snap=False):
     target_dates = [(now_rome().date() + timedelta(days=i)).strftime("%Y-%m-%d") for i in range(3)]
-    with st.spinner("🚀 Arab Sniper: Ricerca mercati con filtro Match Ok..."):
+    with st.spinner("🚀 Arab Sniper: Analisi mercati e segnali Over..."):
         with requests.Session() as s:
             target_date = target_dates[HORIZON - 1]
             res = api_get(s, "fixtures", {"date": target_date, "timezone": "Europe/Rome"})
@@ -161,14 +161,14 @@ def run_full_scan(snap=False):
                 s_h, s_a = get_team_performance(s, f["teams"]["home"]["id"]), get_team_performance(s, f["teams"]["away"]["id"])
                 if not s_h or not s_a: continue
 
-                # NUOVO FILTRO M-Ok (Somma medie HT / 2 >= 1.30)
+                # FILTRO M-Ok (Soglia 1.05)
                 combined_ht_avg = (s_h["avg_ht"] + s_a["avg_ht"]) / 2
                 if combined_ht_avg < 1.05:
                     continue
 
                 fav = min(mk["q1"], mk["q2"])
-                is_gold = (1.40 <= fav <= 1.90)
-                tags = ["M-Ok"] # TAG RINOMINATO
+                is_gold_zone = (1.40 <= fav <= 1.90)
+                tags = ["M-Ok"]
                 
                 if fid in st.session_state.odds_memory:
                     old_data = st.session_state.odds_memory[fid]
@@ -178,16 +178,33 @@ def run_full_scan(snap=False):
                         if diff >= 0.05: tags.append(f"📉-{diff:.2f}")
 
                 h_p, h_o, h_g = False, False, False
+                # PESCE OVER E GOAL (Confermati)
                 if (fav < 1.75) and (s_h["avg_total"] >= 1.0 and s_a["avg_total"] >= 1.0): tags.append("🐟O"); h_p = True
                 if (2.0 <= mk["q1"] <= 3.5) and (2.0 <= mk["q2"] <= 3.5) and (s_h["avg_total"] >= 1.0 and s_a["avg_total"] >= 1.0): tags.append("🐟G"); h_p = True
-                if (s_h["avg_total"] >= 2.0 and s_a["avg_total"] >= 2.0):
-                    if mk["o25"] > 1.80 and mk["o05ht"] > 1.30: tags.append("⚽"); h_o = True
-                    elif mk["o25"] <= 1.80 and mk["o05ht"] <= 1.30: tags.append("🚀"); h_o = True
                 
+                # NUOVA LOGICA OVER STANDARD (⚽) E BOOST (🚀)
+                cond_ft_155 = (s_h["avg_total"] >= 1.55 and s_a["avg_total"] >= 1.55)
+                cond_q_o25 = (1.51 <= mk["o25"] <= 2.37)
+                cond_q_o05h = (1.21 <= mk["o05ht"] <= 1.40)
+                
+                if cond_ft_155 and cond_q_o25 and cond_q_o05h:
+                    # Verifica condizione BOOST aggiuntiva
+                    cond_boost_ht = (s_h["avg_ht"] >= 1.27 or s_a["avg_ht"] >= 1.27)
+                    cond_boost_ft = (s_h["avg_total"] > 1.85 or s_a["avg_total"] > 1.85)
+                    
+                    if cond_boost_ht and cond_boost_ft:
+                        tags.append("🚀")
+                        h_o = True
+                    else:
+                        tags.append("⚽")
+                        h_o = True
+                
+                # VULNERABILITÀ PT (Confermata 🎯PT)
                 if (s_h["avg_total"] >= 1.6 and s_a["avg_total"] >= 1.6) and (s_h["avg_ht"] >= 1.1 and s_a["avg_ht"] >= 1.1):
                     tags.append("🎯PT")
                     h_g = True
                 
+                # GOLD BLOCK (Confermato ⚽⭐)
                 if h_p and h_o and h_g:
                     if (s_h["avg_ht"] >= 0.6 and s_a["avg_ht"] >= 0.6 and mk["o05ht"] > 1.25):
                         tags.insert(0, "⚽⭐")
@@ -196,7 +213,7 @@ def run_full_scan(snap=False):
                     "Ora": f["fixture"]["date"][11:16],
                     "Lega": f"{f['league']['name']} ({cnt})",
                     "Match": f"{f['teams']['home']['name']} - {f['teams']['away']['name']}",
-                    "Gold": "✅" if is_gold else "❌",
+                    "Gold": "✅" if is_gold_zone else "❌",
                     "1X2": f"{mk['q1']:.1f}|{mk['qx']:.1f}|{mk['q2']:.1f}",
                     "O2.5": f"{mk['o25']:.2f}", "O0.5H": f"{mk['o05ht']:.2f}", "GGH": f"{mk['gght']:.2f}",
                     "AVG FT": f"{s_h['avg_total']:.1f}|{s_a['avg_total']:.1f}",
@@ -211,8 +228,8 @@ def run_full_scan(snap=False):
             with open(DB_FILE, "w") as f: json.dump({"results": st.session_state.scan_results}, f)
             st.rerun()
 
-# --- UI ---
-st.sidebar.header("👑 Arab Sniper V22.04.19")
+# --- UI (Invariata) ---
+st.sidebar.header("👑 Arab Sniper V22.04.20")
 HORIZON = st.sidebar.selectbox("Orizzonte Temporale:", options=[1, 2, 3], index=0)
 target_dates = [(now_rome().date() + timedelta(days=i)).strftime("%Y-%m-%d") for i in range(3)]
 all_discovered = sorted(list(set(st.session_state.get("available_countries", []))))
