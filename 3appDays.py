@@ -163,7 +163,7 @@ def run_full_scan(snap=False):
 
                 # NUOVO FILTRO M-Ok (Somma medie HT / 2 >= 1.30)
                 combined_ht_avg = (s_h["avg_ht"] + s_a["avg_ht"]) / 2
-                if combined_ht_avg < 1.30:
+                if combined_ht_avg < 1.05:
                     continue
 
                 fav = min(mk["q1"], mk["q2"])
