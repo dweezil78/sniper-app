@@ -262,7 +262,7 @@ if st.session_state.scan_results:
                 .row-gold { background-color: #FFD700 !important; color: black !important; font-weight: bold; }
                 .row-boost { background-color: #006400 !important; color: white !important; font-weight: bold; }
                 .row-over { background-color: #90EE90 !important; color: black !important; font-weight: bold; }
-                .row-std { background-color: transparent !important; }
+                .row-std { background-color: #FFFFFF !important; color: #000000 !important; }
             </style>
         """, unsafe_allow_html=True)
         def get_row_class(info):
