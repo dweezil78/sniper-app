@@ -8,7 +8,7 @@ import time
 from pathlib import Path
 
 # ==========================================
-# CONFIGURAZIONE ARAB SNIPER V22.04.22 - NEW COLORS & LABELS
+# CONFIGURAZIONE ARAB SNIPER V22.04.24 - ROBUSTNESS & PROGRESS FIX
 # ==========================================
 BASE_DIR = Path(__file__).resolve().parent
 DB_FILE = str(BASE_DIR / "arab_sniper_database.json")
@@ -27,7 +27,7 @@ except Exception:
 def now_rome():
     return datetime.now(ROME_TZ) if ROME_TZ else datetime.now()
 
-st.set_page_config(page_title="ARAB SNIPER V22.04.22", layout="wide")
+st.set_page_config(page_title="ARAB SNIPER V22.04.24", layout="wide")
 
 if "config" not in st.session_state:
     if os.path.exists(CONFIG_FILE):
@@ -66,10 +66,17 @@ API_KEY = st.secrets.get("API_SPORTS_KEY")
 HEADERS = {"x-apisports-key": API_KEY}
 
 def api_get(session, path, params):
-    try:
-        r = session.get(f"https://v3.football.api-sports.io/{path}", headers=HEADERS, params=params, timeout=20)
-        return r.json() if r.status_code == 200 else None
-    except: return None
+    # Sistema di Retry & Rate Limit Protection
+    for attempt in range(2): 
+        try:
+            r = session.get(f"https://v3.football.api-sports.io/{path}", headers=HEADERS, params=params, timeout=20)
+            if r.status_code == 200:
+                return r.json()
+            time.sleep(1) # Pausa prima del retry su errore 
+        except:
+            if attempt == 1: return None
+            time.sleep(1)
+    return None
 
 def _contains_ht(text):
     t = (text or "").lower()
@@ -141,22 +148,29 @@ def get_team_performance(session, tid):
 
 def run_full_scan(snap=False):
     target_dates = [(now_rome().date() + timedelta(days=i)).strftime("%Y-%m-%d") for i in range(3)]
-    with st.spinner("🚀 Arab Sniper: Analisi mercati V22.04.22..."):
+    with st.spinner("🚀 Arab Sniper: Analisi mercati V22.04.24..."):
         with requests.Session() as s:
             target_date = target_dates[HORIZON - 1]
             res = api_get(s, "fixtures", {"date": target_date, "timezone": "Europe/Rome"})
             if not res: return
             day_fx = [f for f in res.get("response", []) if f["fixture"]["status"]["short"] == "NS"]
             st.session_state.available_countries = sorted(list(set(st.session_state.available_countries) | {fx["league"]["country"] for fx in day_fx}))
+            
             if snap:
                 csnap = {}
-                for f in day_fx:
+                snap_bar = st.progress(0, text="📌 FISSAGGIO SNAPSHOT QUOTE...")
+                for i, f in enumerate(day_fx):
+                    snap_bar.progress((i+1)/len(day_fx))
                     m = extract_elite_markets(s, f["fixture"]["id"])
-                    if m and m != "SKIP": csnap[str(f["fixture"]["id"])] = {"q1": m["q1"], "q2": m["q2"]}
+                    if m and m != "SKIP": 
+                        csnap[str(f["fixture"]["id"])] = {"q1": m["q1"], "q2": m["q2"]}
+                    time.sleep(0.2) # Backoff API
                 st.session_state.odds_memory = csnap
                 with open(SNAP_FILE, "w") as f: json.dump({"odds": csnap, "timestamp": now_rome().strftime("%H:%M")}, f)
+                snap_bar.empty()
+
             final_list = []
-            pb = st.progress(0)
+            pb = st.progress(0, text="🚀 SCANSIONE PARTITE E ANALISI...")
             for i, f in enumerate(day_fx):
                 pb.progress((i+1)/len(day_fx))
                 cnt = f["league"]["country"]
@@ -208,7 +222,6 @@ def run_full_scan(snap=False):
                     tags.append("🎯PT")
                     h_g = True
                 
-                # LOGICA GOLD SEMPLIFICATA: BASTA OVER STANDARD
                 if h_p and h_o and h_g:
                     tags.insert(0, "⚽⭐ GOLD")
 
@@ -216,7 +229,7 @@ def run_full_scan(snap=False):
                     "Ora": f["fixture"]["date"][11:16],
                     "Lega": f"{f['league']['name']} ({cnt})",
                     "Match": f"{f['teams']['home']['name']} - {f['teams']['away']['name']}",
-                    "Fav": "✅" if is_gold_zone else "❌",
+                    "FAV": "✅" if is_gold_zone else "❌",
                     "1X2": f"{mk['q1']:.1f}|{mk['qx']:.1f}|{mk['q2']:.1f}",
                     "O2.5": f"{mk['o25']:.2f}", "O0.5H": f"{mk['o05ht']:.2f}", "GGH": f"{mk['gght']:.2f}",
                     "AVG FT": f"{s_h['avg_total']:.1f}|{s_a['avg_total']:.1f}",
@@ -224,6 +237,8 @@ def run_full_scan(snap=False):
                     "Info": " ".join(tags), "Data": f["fixture"]["date"][:10],
                     "Fixture_ID": f["fixture"]["id"]
                 })
+                time.sleep(0.2) # Backoff API
+
             current_db = {str(r["Fixture_ID"]): r for r in st.session_state.scan_results}
             for r in final_list:
                 current_db[str(r["Fixture_ID"])] = r
@@ -231,7 +246,7 @@ def run_full_scan(snap=False):
             with open(DB_FILE, "w") as f: json.dump({"results": st.session_state.scan_results}, f)
             st.rerun()
 
-st.sidebar.header("👑 Arab Sniper V22.04.22")
+st.sidebar.header("👑 Arab Sniper V22.04.24")
 HORIZON = st.sidebar.selectbox("Orizzonte Temporale:", options=[1, 2, 3], index=0)
 target_dates = [(now_rome().date() + timedelta(days=i)).strftime("%Y-%m-%d") for i in range(3)]
 all_discovered = sorted(list(set(st.session_state.get("available_countries", []))))
