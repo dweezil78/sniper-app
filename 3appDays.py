@@ -8,7 +8,7 @@ import time
 from pathlib import Path
 
 # ==========================================
-# CONFIGURAZIONE ARAB SNIPER V22.04.21 - PT LOGIC & LAST 2H ZERO
+# CONFIGURAZIONE ARAB SNIPER V22.04.22 - NEW COLORS & LABELS
 # ==========================================
 BASE_DIR = Path(__file__).resolve().parent
 DB_FILE = str(BASE_DIR / "arab_sniper_database.json")
@@ -27,7 +27,7 @@ except Exception:
 def now_rome():
     return datetime.now(ROME_TZ) if ROME_TZ else datetime.now()
 
-st.set_page_config(page_title="ARAB SNIPER V22.04.21", layout="wide")
+st.set_page_config(page_title="ARAB SNIPER V22.04.22", layout="wide")
 
 if "config" not in st.session_state:
     if os.path.exists(CONFIG_FILE):
@@ -130,7 +130,6 @@ def get_team_performance(session, tid):
         gf += (f["goals"]["home"] or 0) if is_home else (f["goals"]["away"] or 0)
         gs += (f["goals"]["away"] or 0) if is_home else (f["goals"]["home"] or 0)
     
-    # Verifica ultima partita: zero gol nel secondo tempo
     last_f = fx[0]
     ft_sum = (last_f.get("goals", {}).get("home") or 0) + (last_f.get("goals", {}).get("away") or 0)
     ht_sum = (last_f.get("score", {}).get("halftime", {}).get("home") or 0) + (last_f.get("score", {}).get("halftime", {}).get("away") or 0)
@@ -142,7 +141,7 @@ def get_team_performance(session, tid):
 
 def run_full_scan(snap=False):
     target_dates = [(now_rome().date() + timedelta(days=i)).strftime("%Y-%m-%d") for i in range(3)]
-    with st.spinner("🚀 Arab Sniper: Analisi mercati e segnali..."):
+    with st.spinner("🚀 Arab Sniper: Analisi mercati V22.04.22..."):
         with requests.Session() as s:
             target_date = target_dates[HORIZON - 1]
             res = api_get(s, "fixtures", {"date": target_date, "timezone": "Europe/Rome"})
@@ -193,10 +192,13 @@ def run_full_scan(snap=False):
                 if cond_ft_155 and cond_q_o25 and cond_q_o05h:
                     cond_boost_ht = (s_h["avg_ht"] >= 1.27 or s_a["avg_ht"] >= 1.27)
                     cond_boost_ft = (s_h["avg_total"] > 1.85 or s_a["avg_total"] > 1.85)
-                    if cond_boost_ht and cond_boost_ft: tags.append("🚀"); h_o = True
-                    else: tags.append("⚽"); h_o = True
+                    if cond_boost_ht and cond_boost_ft: 
+                        tags.append("🚀 BOOST")
+                        h_o = True
+                    else: 
+                        tags.append("⚽ OVER")
+                        h_o = True
                 
-                # LOGICA 🎯PT AGGIORNATA V21
                 cond_pt_ht = (s_h["avg_ht"] >= 1.1 and s_a["avg_ht"] >= 1.1)
                 cond_pt_ft = (s_h["avg_total"] >= 1.1 and s_a["avg_total"] >= 1.1)
                 cond_pt_odd = (1.20 <= mk["o05ht"] <= 1.40)
@@ -206,9 +208,9 @@ def run_full_scan(snap=False):
                     tags.append("🎯PT")
                     h_g = True
                 
+                # LOGICA GOLD SEMPLIFICATA: BASTA OVER STANDARD
                 if h_p and h_o and h_g:
-                    if (s_h["avg_ht"] >= 0.6 and s_a["avg_ht"] >= 0.6 and mk["o05ht"] > 1.25):
-                        tags.insert(0, "⚽⭐")
+                    tags.insert(0, "⚽⭐ GOLD")
 
                 final_list.append({
                     "Ora": f["fixture"]["date"][11:16],
@@ -229,7 +231,7 @@ def run_full_scan(snap=False):
             with open(DB_FILE, "w") as f: json.dump({"results": st.session_state.scan_results}, f)
             st.rerun()
 
-st.sidebar.header("👑 Arab Sniper V22.04.21")
+st.sidebar.header("👑 Arab Sniper V22.04.22")
 HORIZON = st.sidebar.selectbox("Orizzonte Temporale:", options=[1, 2, 3], index=0)
 target_dates = [(now_rome().date() + timedelta(days=i)).strftime("%Y-%m-%d") for i in range(3)]
 all_discovered = sorted(list(set(st.session_state.get("available_countries", []))))
@@ -257,16 +259,16 @@ if st.session_state.scan_results:
                 .mobile-table { width: 100%; min-width: 1000px; border-collapse: separate; border-spacing: 0; font-family: sans-serif; font-size: 11px; }
                 .mobile-table th { position: sticky; top: 0; background: #1a1c23; color: #00e5ff; z-index: 10; padding: 12px 5px; border-bottom: 2px solid #333; border-right: 1px solid #333; }
                 .mobile-table td { padding: 8px 5px; border-bottom: 1px solid #333; border-right: 1px solid #333; text-align: center; white-space: nowrap; }
-                .row-dorato { background-color: #FFD700 !important; color: black !important; font-weight: bold; }
-                .row-boost { background-color: #FF0000 !important; color: white !important; font-weight: bold; }
-                .row-ggpt { background-color: #0000FF !important; color: white !important; font-weight: bold; }
-                .row-std { background-color: white !important; color: black !important; }
+                .row-gold { background-color: #FFD700 !important; color: black !important; font-weight: bold; }
+                .row-boost { background-color: #006400 !important; color: white !important; font-weight: bold; }
+                .row-over { background-color: #90EE90 !important; color: black !important; font-weight: bold; }
+                .row-std { background-color: transparent !important; }
             </style>
         """, unsafe_allow_html=True)
         def get_row_class(info):
-            if "⚽⭐" in info: return "row-dorato"
-            if "🚀" in info: return "row-boost"
-            if "🎯PT" in info: return "row-ggpt"
+            if "GOLD" in info: return "row-gold"
+            if "BOOST" in info: return "row-boost"
+            if "OVER" in info: return "row-over"
             return "row-std"
         html = '<div class="main-container"><table class="mobile-table"><thead><tr>'
         html += ''.join(f'<th>{c}</th>' for c in view.columns) + '</tr></thead><tbody>'
