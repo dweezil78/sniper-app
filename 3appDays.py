@@ -216,7 +216,7 @@ def run_full_scan(snap=False):
                     "Ora": f["fixture"]["date"][11:16],
                     "Lega": f"{f['league']['name']} ({cnt})",
                     "Match": f"{f['teams']['home']['name']} - {f['teams']['away']['name']}",
-                    "Gold": "✅" if is_gold_zone else "❌",
+                    "Fav": "✅" if is_gold_zone else "❌",
                     "1X2": f"{mk['q1']:.1f}|{mk['qx']:.1f}|{mk['q2']:.1f}",
                     "O2.5": f"{mk['o25']:.2f}", "O0.5H": f"{mk['o05ht']:.2f}", "GGH": f"{mk['gght']:.2f}",
                     "AVG FT": f"{s_h['avg_total']:.1f}|{s_a['avg_total']:.1f}",
