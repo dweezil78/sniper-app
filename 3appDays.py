@@ -90,6 +90,22 @@ def _is_yes(text):
     t = (text or "").strip().lower()
     return t in ["yes", "si", "sì", "y", "1"]
 
+# ==========================
+# FIX: conversione robusta
+# ==========================
+def safe_float(x, default=0.0):
+    try:
+        if x is None:
+            return default
+        if isinstance(x, (int, float)):
+            return float(x)
+        s = str(x).strip()
+        if s in ("", "-", "None", "null"):
+            return default
+        return float(s)
+    except Exception:
+        return default
+
 def extract_elite_markets(session, fid):
     res = api_get(session, "odds", {"fixture": fid})
     if not res or not res.get("response"): return None
@@ -100,24 +116,31 @@ def extract_elite_markets(session, fid):
             bid = b.get("id")
             if bid == 1 and mk["q1"] == 0:
                 for v in b.get("values", []):
-                    vl = v["value"].lower()
-                    if "home" in vl: mk["q1"] = float(v["odd"])
-                    elif "draw" in vl: mk["qx"] = float(v["odd"])
-                    elif "away" in vl: mk["q2"] = float(v["odd"])
+                    # FIX: value può essere None/non-string
+                    vl = str(v.get("value", "")).lower()
+                    odd = safe_float(v.get("odd"), 0.0)
+                    if "home" in vl: mk["q1"] = odd
+                    elif "draw" in vl: mk["qx"] = odd
+                    elif "away" in vl: mk["q2"] = odd
             if bid == 5 and mk["o25"] == 0:
                 if any(j in name for j in ["corner", "card", "booking"]): continue
                 for v in b.get("values", []):
-                    if "over 2.5" in v["value"].lower(): mk["o25"] = float(v["odd"])
+                    # FIX: value può essere None/non-string
+                    if "over 2.5" in str(v.get("value", "")).lower():
+                        mk["o25"] = safe_float(v.get("odd"), 0.0)
             if mk["o05ht"] == 0 and _contains_ht(name) and any(k in name for k in ["total", "over/under", "ou", "goals"]):
                 if "team" in name: continue
                 for v in b.get("values", []):
-                    if "over 0.5" in v["value"].lower(): mk["o05ht"] = float(v["odd"])
+                    # FIX: value può essere None/non-string
+                    if "over 0.5" in str(v.get("value", "")).lower():
+                        mk["o05ht"] = safe_float(v.get("odd"), 0.0)
             if mk["gght"] == 0 and _contains_btts(name):
                 is_name_ht = _contains_ht(name)
                 for v in b.get("values", []):
-                    val_txt = v["value"].lower()
+                    # FIX: value può essere None/non-string
+                    val_txt = str(v.get("value", "")).lower()
                     if _is_yes(val_txt) and (is_name_ht or _contains_ht(val_txt) or bid in [40, 71]):
-                        mk["gght"] = float(v["odd"])
+                        mk["gght"] = safe_float(v.get("odd"), 0.0)
                         break
         if mk["q1"] > 0 and mk["o25"] > 0 and (mk["o05ht"] > 0 or mk["gght"] > 0): break
     if (1.01 <= mk["q1"] <= 1.10) or (1.01 <= mk["q2"] <= 1.10) or (1.01 <= mk["o25"] <= 1.30): return "SKIP"
