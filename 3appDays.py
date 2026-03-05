@@ -8,7 +8,7 @@ import time
 from pathlib import Path
 
 # ==========================================
-# CONFIGURAZIONE ARAB SNIPER V22.04.24 - ROBUSTNESS & PROGRESS FIX
+# CONFIGURAZIONE ARAB SNIPER V22.04.28 - O1.5H REPLACEMENT
 # ==========================================
 BASE_DIR = Path(__file__).resolve().parent
 DB_FILE = str(BASE_DIR / "arab_sniper_database.json")
@@ -27,7 +27,7 @@ except Exception:
 def now_rome():
     return datetime.now(ROME_TZ) if ROME_TZ else datetime.now()
 
-st.set_page_config(page_title="ARAB SNIPER V22.04.24", layout="wide")
+st.set_page_config(page_title="ARAB SNIPER V22.04.28", layout="wide")
 
 if "config" not in st.session_state:
     if os.path.exists(CONFIG_FILE):
@@ -66,57 +66,41 @@ API_KEY = st.secrets.get("API_SPORTS_KEY")
 HEADERS = {"x-apisports-key": API_KEY}
 
 def api_get(session, path, params):
-    # Sistema di Retry & Rate Limit Protection
     for attempt in range(2): 
         try:
             r = session.get(f"https://v3.football.api-sports.io/{path}", headers=HEADERS, params=params, timeout=20)
             if r.status_code == 200:
                 return r.json()
-            time.sleep(1) # Pausa prima del retry su errore 
+            time.sleep(1) 
         except:
             if attempt == 1: return None
             time.sleep(1)
     return None
 
 def _contains_ht(text):
-    t = (text or "").lower()
+    t = str(text or "").lower()
     return any(k in t for k in ["1st half", "first half", "1h", "ht", "half time", "halftime", "1° tempo"])
 
-def _contains_btts(text):
-    t = (text or "").lower()
-    return any(k in t for k in ["both teams", "btts", "gg", "to score", "gol/gol", "entrambe segnano"])
-
-def _is_yes(text):
-    t = (text or "").strip().lower()
-    return t in ["yes", "si", "sì", "y", "1"]
-
-# ==========================
-# FIX: conversione robusta
-# ==========================
 def safe_float(x, default=0.0):
     try:
-        if x is None:
-            return default
-        if isinstance(x, (int, float)):
-            return float(x)
+        if x is None: return default
+        if isinstance(x, (int, float)): return float(x)
         s = str(x).strip()
-        if s in ("", "-", "None", "null"):
-            return default
+        if s in ("", "-", "None", "null"): return default
         return float(s)
-    except Exception:
-        return default
+    except Exception: return default
 
 def extract_elite_markets(session, fid):
     res = api_get(session, "odds", {"fixture": fid})
     if not res or not res.get("response"): return None
-    mk = {"q1": 0.0, "qx": 0.0, "q2": 0.0, "o25": 0.0, "o05ht": 0.0, "gght": 0.0}
+    # Cambiato gght con o15ht
+    mk = {"q1": 0.0, "qx": 0.0, "q2": 0.0, "o25": 0.0, "o05ht": 0.0, "o15ht": 0.0}
     for bm in res["response"][0].get("bookmakers", []):
         for b in bm.get("bets", []):
             name = (b.get("name") or "").lower()
             bid = b.get("id")
             if bid == 1 and mk["q1"] == 0:
                 for v in b.get("values", []):
-                    # FIX: value può essere None/non-string
                     vl = str(v.get("value", "")).lower()
                     odd = safe_float(v.get("odd"), 0.0)
                     if "home" in vl: mk["q1"] = odd
@@ -125,24 +109,20 @@ def extract_elite_markets(session, fid):
             if bid == 5 and mk["o25"] == 0:
                 if any(j in name for j in ["corner", "card", "booking"]): continue
                 for v in b.get("values", []):
-                    # FIX: value può essere None/non-string
                     if "over 2.5" in str(v.get("value", "")).lower():
                         mk["o25"] = safe_float(v.get("odd"), 0.0)
-            if mk["o05ht"] == 0 and _contains_ht(name) and any(k in name for k in ["total", "over/under", "ou", "goals"]):
+            
+            # Parsing Over HT (0.5 e 1.5)
+            if _contains_ht(name) and any(k in name for k in ["total", "over/under", "ou", "goals"]):
                 if "team" in name: continue
                 for v in b.get("values", []):
-                    # FIX: value può essere None/non-string
-                    if "over 0.5" in str(v.get("value", "")).lower():
+                    val_txt = str(v.get("value", "")).lower().replace(",", ".")
+                    if "over 0.5" in val_txt and mk["o05ht"] == 0:
                         mk["o05ht"] = safe_float(v.get("odd"), 0.0)
-            if mk["gght"] == 0 and _contains_btts(name):
-                is_name_ht = _contains_ht(name)
-                for v in b.get("values", []):
-                    # FIX: value può essere None/non-string
-                    val_txt = str(v.get("value", "")).lower()
-                    if _is_yes(val_txt) and (is_name_ht or _contains_ht(val_txt) or bid in [40, 71]):
-                        mk["gght"] = safe_float(v.get("odd"), 0.0)
-                        break
-        if mk["q1"] > 0 and mk["o25"] > 0 and (mk["o05ht"] > 0 or mk["gght"] > 0): break
+                    if "over 1.5" in val_txt and mk["o15ht"] == 0:
+                        mk["o15ht"] = safe_float(v.get("odd"), 0.0)
+                        
+        if mk["q1"] > 0 and mk["o25"] > 0 and mk["o05ht"] > 0: break
     if (1.01 <= mk["q1"] <= 1.10) or (1.01 <= mk["q2"] <= 1.10) or (1.01 <= mk["o25"] <= 1.30): return "SKIP"
     return mk
 
@@ -171,7 +151,7 @@ def get_team_performance(session, tid):
 
 def run_full_scan(snap=False):
     target_dates = [(now_rome().date() + timedelta(days=i)).strftime("%Y-%m-%d") for i in range(3)]
-    with st.spinner("🚀 Arab Sniper: Analisi mercati V22.04.24..."):
+    with st.spinner("🚀 Arab Sniper: Analisi mercati V22.04.28..."):
         with requests.Session() as s:
             target_date = target_dates[HORIZON - 1]
             res = api_get(s, "fixtures", {"date": target_date, "timezone": "Europe/Rome"})
@@ -187,7 +167,7 @@ def run_full_scan(snap=False):
                     m = extract_elite_markets(s, f["fixture"]["id"])
                     if m and m != "SKIP": 
                         csnap[str(f["fixture"]["id"])] = {"q1": m["q1"], "q2": m["q2"]}
-                    time.sleep(0.2) # Backoff API
+                    time.sleep(0.2)
                 st.session_state.odds_memory = csnap
                 with open(SNAP_FILE, "w") as f: json.dump({"odds": csnap, "timestamp": now_rome().strftime("%H:%M")}, f)
                 snap_bar.empty()
@@ -218,6 +198,7 @@ def run_full_scan(snap=False):
                         diff = old_q - fav
                         if diff >= 0.05: tags.append(f"📉-{diff:.2f}")
 
+                # LOGICA SEGNALI INVARIATA
                 h_p, h_o, h_g = False, False, False
                 if (fav < 1.75) and (s_h["avg_total"] >= 1.0 and s_a["avg_total"] >= 1.0): tags.append("🐟O"); h_p = True
                 if (2.0 <= mk["q1"] <= 3.5) and (2.0 <= mk["q2"] <= 3.5) and (s_h["avg_total"] >= 1.0 and s_a["avg_total"] >= 1.0): tags.append("🐟G"); h_p = True
@@ -254,13 +235,15 @@ def run_full_scan(snap=False):
                     "Match": f"{f['teams']['home']['name']} - {f['teams']['away']['name']}",
                     "FAV": "✅" if is_gold_zone else "❌",
                     "1X2": f"{mk['q1']:.1f}|{mk['qx']:.1f}|{mk['q2']:.1f}",
-                    "O2.5": f"{mk['o25']:.2f}", "O0.5H": f"{mk['o05ht']:.2f}", "GGH": f"{mk['gght']:.2f}",
+                    "O2.5": f"{mk['o25']:.2f}", 
+                    "O0.5H": f"{mk['o05ht']:.2f}", 
+                    "O1.5H": f"{mk['o15ht']:.2f}", # Sostituita colonna GGH
                     "AVG FT": f"{s_h['avg_total']:.1f}|{s_a['avg_total']:.1f}",
                     "AVG HT": f"{s_h['avg_ht']:.1f}|{s_a['avg_ht']:.1f}",
                     "Info": " ".join(tags), "Data": f["fixture"]["date"][:10],
                     "Fixture_ID": f["fixture"]["id"]
                 })
-                time.sleep(0.2) # Backoff API
+                time.sleep(0.2)
 
             current_db = {str(r["Fixture_ID"]): r for r in st.session_state.scan_results}
             for r in final_list:
@@ -269,7 +252,8 @@ def run_full_scan(snap=False):
             with open(DB_FILE, "w") as f: json.dump({"results": st.session_state.scan_results}, f)
             st.rerun()
 
-st.sidebar.header("👑 Arab Sniper V22.04.24")
+# --- UI ---
+st.sidebar.header("👑 Arab Sniper V22.04.28")
 HORIZON = st.sidebar.selectbox("Orizzonte Temporale:", options=[1, 2, 3], index=0)
 target_dates = [(now_rome().date() + timedelta(days=i)).strftime("%Y-%m-%d") for i in range(3)]
 all_discovered = sorted(list(set(st.session_state.get("available_countries", []))))
