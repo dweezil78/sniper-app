@@ -8,7 +8,7 @@ import time
 from pathlib import Path
 
 # ==========================================
-# CONFIGURAZIONE ARAB SNIPER V22.04.28 - O1.5H REPLACEMENT
+# CONFIGURAZIONE ARAB SNIPER V22.04.28 - PERSISTENZA & SCALATA DATE
 # ==========================================
 BASE_DIR = Path(__file__).resolve().parent
 DB_FILE = str(BASE_DIR / "arab_sniper_database.json")
@@ -29,6 +29,7 @@ def now_rome():
 
 st.set_page_config(page_title="ARAB SNIPER V22.04.28", layout="wide")
 
+# --- Inizializzazione Session State ---
 if "config" not in st.session_state:
     if os.path.exists(CONFIG_FILE):
         with open(CONFIG_FILE, "r") as f: st.session_state.config = json.load(f)
@@ -42,6 +43,7 @@ if "odds_memory" not in st.session_state: st.session_state.odds_memory = {}
 def save_config():
     with open(CONFIG_FILE, "w") as f: json.dump(st.session_state.config, f)
 
+# === LOGICA ESTRATTA PER SALVATAGGIO E SCALATA DATE ===
 def load_db():
     today = now_rome().strftime("%Y-%m-%d")
     ts = None
@@ -49,6 +51,7 @@ def load_db():
         try:
             with open(DB_FILE, "r") as f:
                 data = json.load(f).get("results", [])
+                # Scalata automatica: tiene solo i dati da oggi in avanti (pulisce il passato)
                 st.session_state.scan_results = [r for r in data if r.get("Data", "") >= today]
         except: pass
     if os.path.exists(SNAP_FILE):
@@ -62,6 +65,9 @@ def load_db():
 
 last_snap_ts = load_db()
 
+# ==========================================
+# API CORE & ROBUSTNESS
+# ==========================================
 API_KEY = st.secrets.get("API_SPORTS_KEY")
 HEADERS = {"x-apisports-key": API_KEY}
 
@@ -88,12 +94,11 @@ def safe_float(x, default=0.0):
         s = str(x).strip()
         if s in ("", "-", "None", "null"): return default
         return float(s)
-    except Exception: return default
+    except: return default
 
 def extract_elite_markets(session, fid):
     res = api_get(session, "odds", {"fixture": fid})
     if not res or not res.get("response"): return None
-    # Cambiato gght con o15ht
     mk = {"q1": 0.0, "qx": 0.0, "q2": 0.0, "o25": 0.0, "o05ht": 0.0, "o15ht": 0.0}
     for bm in res["response"][0].get("bookmakers", []):
         for b in bm.get("bets", []):
@@ -111,8 +116,6 @@ def extract_elite_markets(session, fid):
                 for v in b.get("values", []):
                     if "over 2.5" in str(v.get("value", "")).lower():
                         mk["o25"] = safe_float(v.get("odd"), 0.0)
-            
-            # Parsing Over HT (0.5 e 1.5)
             if _contains_ht(name) and any(k in name for k in ["total", "over/under", "ou", "goals"]):
                 if "team" in name: continue
                 for v in b.get("values", []):
@@ -121,7 +124,6 @@ def extract_elite_markets(session, fid):
                         mk["o05ht"] = safe_float(v.get("odd"), 0.0)
                     if "over 1.5" in val_txt and mk["o15ht"] == 0:
                         mk["o15ht"] = safe_float(v.get("odd"), 0.0)
-                        
         if mk["q1"] > 0 and mk["o25"] > 0 and mk["o05ht"] > 0: break
     if (1.01 <= mk["q1"] <= 1.10) or (1.01 <= mk["q2"] <= 1.10) or (1.01 <= mk["o25"] <= 1.30): return "SKIP"
     return mk
@@ -149,9 +151,12 @@ def get_team_performance(session, tid):
     st.session_state.team_stats_cache[str(tid)] = stats
     return stats
 
+# ==========================================
+# SCAN CORE CON AGGIORNAMENTO PERSISTENTE
+# ==========================================
 def run_full_scan(snap=False):
     target_dates = [(now_rome().date() + timedelta(days=i)).strftime("%Y-%m-%d") for i in range(3)]
-    with st.spinner("🚀 Arab Sniper: Analisi mercati V22.04.28..."):
+    with st.spinner(f"🚀 Arab Sniper: Analisi mercati {target_dates[HORIZON-1]}..."):
         with requests.Session() as s:
             target_date = target_dates[HORIZON - 1]
             res = api_get(s, "fixtures", {"date": target_date, "timezone": "Europe/Rome"})
@@ -198,7 +203,6 @@ def run_full_scan(snap=False):
                         diff = old_q - fav
                         if diff >= 0.05: tags.append(f"📉-{diff:.2f}")
 
-                # LOGICA SEGNALI INVARIATA
                 h_p, h_o, h_g = False, False, False
                 if (fav < 1.75) and (s_h["avg_total"] >= 1.0 and s_a["avg_total"] >= 1.0): tags.append("🐟O"); h_p = True
                 if (2.0 <= mk["q1"] <= 3.5) and (2.0 <= mk["q2"] <= 3.5) and (s_h["avg_total"] >= 1.0 and s_a["avg_total"] >= 1.0): tags.append("🐟G"); h_p = True
@@ -211,11 +215,9 @@ def run_full_scan(snap=False):
                     cond_boost_ht = (s_h["avg_ht"] >= 1.27 or s_a["avg_ht"] >= 1.27)
                     cond_boost_ft = (s_h["avg_total"] > 1.85 or s_a["avg_total"] > 1.85)
                     if cond_boost_ht and cond_boost_ft: 
-                        tags.append("🚀 BOOST")
-                        h_o = True
+                        tags.append("🚀 BOOST"); h_o = True
                     else: 
-                        tags.append("⚽ OVER")
-                        h_o = True
+                        tags.append("⚽ OVER"); h_o = True
                 
                 cond_pt_ht = (s_h["avg_ht"] >= 1.1 and s_a["avg_ht"] >= 1.1)
                 cond_pt_ft = (s_h["avg_total"] >= 1.1 and s_a["avg_total"] >= 1.1)
@@ -223,8 +225,7 @@ def run_full_scan(snap=False):
                 cond_pt_last = (s_h["last_2h_zero"] or s_a["last_2h_zero"])
                 
                 if cond_pt_ht and cond_pt_ft and cond_pt_odd and cond_pt_last:
-                    tags.append("🎯PT")
-                    h_g = True
+                    tags.append("🎯PT"); h_g = True
                 
                 if h_p and h_o and h_g:
                     tags.insert(0, "⚽⭐ GOLD")
@@ -235,9 +236,7 @@ def run_full_scan(snap=False):
                     "Match": f"{f['teams']['home']['name']} - {f['teams']['away']['name']}",
                     "FAV": "✅" if is_gold_zone else "❌",
                     "1X2": f"{mk['q1']:.1f}|{mk['qx']:.1f}|{mk['q2']:.1f}",
-                    "O2.5": f"{mk['o25']:.2f}", 
-                    "O0.5H": f"{mk['o05ht']:.2f}", 
-                    "O1.5H": f"{mk['o15ht']:.2f}", # Sostituita colonna GGH
+                    "O2.5": f"{mk['o25']:.2f}", "O0.5H": f"{mk['o05ht']:.2f}", "O1.5H": f"{mk['o15ht']:.2f}",
                     "AVG FT": f"{s_h['avg_total']:.1f}|{s_a['avg_total']:.1f}",
                     "AVG HT": f"{s_h['avg_ht']:.1f}|{s_a['avg_ht']:.1f}",
                     "Info": " ".join(tags), "Data": f["fixture"]["date"][:10],
@@ -245,6 +244,7 @@ def run_full_scan(snap=False):
                 })
                 time.sleep(0.2)
 
+            # === AGGIORNAMENTO PERSISTENTE DEL DATABASE ===
             current_db = {str(r["Fixture_ID"]): r for r in st.session_state.scan_results}
             for r in final_list:
                 current_db[str(r["Fixture_ID"])] = r
@@ -252,10 +252,11 @@ def run_full_scan(snap=False):
             with open(DB_FILE, "w") as f: json.dump({"results": st.session_state.scan_results}, f)
             st.rerun()
 
-# --- UI ---
+# --- UI Sidebar ---
 st.sidebar.header("👑 Arab Sniper V22.04.28")
 HORIZON = st.sidebar.selectbox("Orizzonte Temporale:", options=[1, 2, 3], index=0)
 target_dates = [(now_rome().date() + timedelta(days=i)).strftime("%Y-%m-%d") for i in range(3)]
+
 all_discovered = sorted(list(set(st.session_state.get("available_countries", []))))
 if st.session_state.scan_results:
     historical_cnt = {r["Lega"].split('(')[-1].replace(')', '') for r in st.session_state.scan_results}
@@ -267,9 +268,11 @@ if all_discovered:
         save_config(); st.rerun()
 if last_snap_ts: st.sidebar.success(f"✅ SNAPSHOT: {last_snap_ts}")
 else: st.sidebar.warning("⚠️ SNAPSHOT ASSENTE")
+
 c1, c2 = st.columns(2)
 if c1.button("📌 SNAP + SCAN"): run_full_scan(snap=True)
 if c2.button("🚀 SCAN VELOCE"): run_full_scan(snap=False)
+
 if st.session_state.scan_results:
     df = pd.DataFrame(st.session_state.scan_results)
     full_view = df[df["Data"] == target_dates[HORIZON - 1]]
