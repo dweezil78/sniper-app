@@ -5,18 +5,40 @@ from datetime import datetime, timedelta
 import json
 import os
 import time
+import sys
 from pathlib import Path
+from github import Github
 
 # ==========================================
-# CONFIGURAZIONE ARAB SNIPER V22.04.28 - O1.5H REPLACEMENT
+# CONFIGURAZIONE ARAB SNIPER V24 MULTI-DAY WEB
+# Base derivata dalla V23 produzione
+# Migliorie:
+# - scoring interno PT / OVER / BOOST / GOLD
+# - uso reale del drop quota
+# - lettura migliore simmetria home/away
+# - details arricchiti con score debug
+# - struttura UI / GitHub / workflow invariata
 # ==========================================
 BASE_DIR = Path(__file__).resolve().parent
 DB_FILE = str(BASE_DIR / "arab_sniper_database.json")
 SNAP_FILE = str(BASE_DIR / "arab_snapshot_database.json")
 CONFIG_FILE = str(BASE_DIR / "nazioni_config.json")
+DETAILS_FILE = str(BASE_DIR / "match_details.json")
 
 DEFAULT_EXCLUDED = ["Thailand", "Indonesia", "India", "Kenya", "Morocco", "Rwanda", "Nigeria", "Oman", "Algeria", "UAE"]
 LEAGUE_BLACKLIST = ["u19", "u20", "youth", "women", "friendly", "carioca", "paulista", "mineiro"]
+
+REMOTE_MAIN_FILE = "data.json"
+REMOTE_DAY_FILES = {
+    1: "data_day1.json",
+    2: "data_day2.json",
+    3: "data_day3.json",
+}
+REMOTE_DETAILS_FILES = {
+    1: "details_day1.json",
+    2: "details_day2.json",
+    3: "details_day3.json",
+}
 
 try:
     from zoneinfo import ZoneInfo
@@ -24,257 +46,908 @@ try:
 except Exception:
     ROME_TZ = None
 
+
 def now_rome():
     return datetime.now(ROME_TZ) if ROME_TZ else datetime.now()
 
-st.set_page_config(page_title="ARAB SNIPER V22.04.28", layout="wide")
 
+st.set_page_config(page_title="ARAB SNIPER V24 MULTI-DAY WEB", layout="wide")
+
+# ==========================================
+# GITHUB UPDATE CORE
+# ==========================================
+def github_write_json(filename, payload, commit_message):
+    try:
+        token = os.getenv("GITHUB_TOKEN") or st.secrets.get("GITHUB_TOKEN")
+        if not token:
+            return "MISSING_TOKEN"
+
+        g = Github(token)
+        repo = g.get_repo("Arabsnipertech-bet/arabsniper")
+        content_str = json.dumps(payload, indent=4, ensure_ascii=False)
+
+        try:
+            contents = repo.get_contents(filename)
+            repo.update_file(contents.path, commit_message, content_str, contents.sha)
+            return "SUCCESS"
+        except Exception:
+            repo.create_file(filename, commit_message, content_str)
+            return "SUCCESS"
+
+    except Exception as e:
+        return str(e)
+
+
+def upload_to_github_main(results):
+    return github_write_json(
+        REMOTE_MAIN_FILE,
+        results,
+        "Update Arab Sniper Data"
+    )
+
+
+def upload_day_to_github(day_num, results):
+    return github_write_json(
+        REMOTE_DAY_FILES[day_num],
+        results,
+        f"Update Arab Sniper Day {day_num} Data"
+    )
+
+
+def upload_details_to_github(day_num, payload):
+    return github_write_json(
+        REMOTE_DETAILS_FILES[day_num],
+        payload,
+        f"Update Arab Sniper Day {day_num} Details"
+    )
+
+# ==========================================
+# SESSION STATE
+# ==========================================
 if "config" not in st.session_state:
     if os.path.exists(CONFIG_FILE):
-        with open(CONFIG_FILE, "r") as f: st.session_state.config = json.load(f)
-    else: st.session_state.config = {"excluded": DEFAULT_EXCLUDED}
+        try:
+            with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+                st.session_state.config = json.load(f)
+        except Exception:
+            st.session_state.config = {"excluded": DEFAULT_EXCLUDED}
+    else:
+        st.session_state.config = {"excluded": DEFAULT_EXCLUDED}
 
-if "team_stats_cache" not in st.session_state: st.session_state.team_stats_cache = {}
-if "available_countries" not in st.session_state: st.session_state.available_countries = []
-if "scan_results" not in st.session_state: st.session_state.scan_results = []
-if "odds_memory" not in st.session_state: st.session_state.odds_memory = {}
+if "team_stats_cache" not in st.session_state:
+    st.session_state.team_stats_cache = {}
+
+if "team_last_matches_cache" not in st.session_state:
+    st.session_state.team_last_matches_cache = {}
+
+if "available_countries" not in st.session_state:
+    st.session_state.available_countries = []
+
+if "scan_results" not in st.session_state:
+    st.session_state.scan_results = []
+
+if "odds_memory" not in st.session_state:
+    st.session_state.odds_memory = {}
+
+if "match_details" not in st.session_state:
+    st.session_state.match_details = {}
+
+if "selected_fixture_for_modal" not in st.session_state:
+    st.session_state.selected_fixture_for_modal = None
+
 
 def save_config():
-    with open(CONFIG_FILE, "w") as f: json.dump(st.session_state.config, f)
+    with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+        json.dump(st.session_state.config, f, indent=4, ensure_ascii=False)
+
 
 def load_db():
     today = now_rome().strftime("%Y-%m-%d")
     ts = None
+
     if os.path.exists(DB_FILE):
         try:
-            with open(DB_FILE, "r") as f:
+            with open(DB_FILE, "r", encoding="utf-8") as f:
                 data = json.load(f).get("results", [])
                 st.session_state.scan_results = [r for r in data if r.get("Data", "") >= today]
-        except: pass
+        except Exception:
+            pass
+
     if os.path.exists(SNAP_FILE):
         try:
-            with open(SNAP_FILE, "r") as f:
+            with open(SNAP_FILE, "r", encoding="utf-8") as f:
                 snap_data = json.load(f)
                 st.session_state.odds_memory = snap_data.get("odds", {})
                 ts = snap_data.get("timestamp", "N/D")
-        except: pass
+        except Exception:
+            pass
+
+    if os.path.exists(DETAILS_FILE):
+        try:
+            with open(DETAILS_FILE, "r", encoding="utf-8") as f:
+                details_data = json.load(f)
+                st.session_state.match_details = details_data.get("details", {})
+        except Exception:
+            pass
+
     return ts
+
 
 last_snap_ts = load_db()
 
-API_KEY = st.secrets.get("API_SPORTS_KEY")
-HEADERS = {"x-apisports-key": API_KEY}
+# ==========================================
+# API CORE & ROBUSTNESS
+# ==========================================
+API_KEY = os.getenv("API_SPORTS_KEY")
+
+if not API_KEY:
+    try:
+        API_KEY = st.secrets.get("API_SPORTS_KEY", None)
+    except Exception:
+        pass
+
+HEADERS = {"x-apisports-key": API_KEY} if API_KEY else {}
+
 
 def api_get(session, path, params):
-    for attempt in range(2): 
+    if not API_KEY:
+        return None
+
+    for attempt in range(2):
         try:
-            r = session.get(f"https://v3.football.api-sports.io/{path}", headers=HEADERS, params=params, timeout=20)
+            r = session.get(
+                f"https://v3.football.api-sports.io/{path}",
+                headers=HEADERS,
+                params=params,
+                timeout=20
+            )
             if r.status_code == 200:
                 return r.json()
-            time.sleep(1) 
-        except:
-            if attempt == 1: return None
+            time.sleep(1)
+        except Exception:
+            if attempt == 1:
+                return None
             time.sleep(1)
     return None
+
 
 def _contains_ht(text):
     t = str(text or "").lower()
     return any(k in t for k in ["1st half", "first half", "1h", "ht", "half time", "halftime", "1° tempo"])
 
+
 def safe_float(x, default=0.0):
     try:
-        if x is None: return default
-        if isinstance(x, (int, float)): return float(x)
-        s = str(x).strip()
-        if s in ("", "-", "None", "null"): return default
+        if x is None:
+            return default
+        if isinstance(x, (int, float)):
+            return float(x)
+        s = str(x).strip().replace(",", ".")
+        if s in ("", "-", "None", "null"):
+            return default
         return float(s)
-    except Exception: return default
+    except Exception:
+        return default
+
+
+def is_blacklisted_league(league_name):
+    name = str(league_name or "").lower()
+    return any(k in name for k in LEAGUE_BLACKLIST)
+
 
 def extract_elite_markets(session, fid):
     res = api_get(session, "odds", {"fixture": fid})
-    if not res or not res.get("response"): return None
-    # Cambiato gght con o15ht
+    if not res or not res.get("response"):
+        return None
+
     mk = {"q1": 0.0, "qx": 0.0, "q2": 0.0, "o25": 0.0, "o05ht": 0.0, "o15ht": 0.0}
+
     for bm in res["response"][0].get("bookmakers", []):
         for b in bm.get("bets", []):
             name = (b.get("name") or "").lower()
             bid = b.get("id")
+
             if bid == 1 and mk["q1"] == 0:
                 for v in b.get("values", []):
                     vl = str(v.get("value", "")).lower()
                     odd = safe_float(v.get("odd"), 0.0)
-                    if "home" in vl: mk["q1"] = odd
-                    elif "draw" in vl: mk["qx"] = odd
-                    elif "away" in vl: mk["q2"] = odd
+                    if "home" in vl:
+                        mk["q1"] = odd
+                    elif "draw" in vl:
+                        mk["qx"] = odd
+                    elif "away" in vl:
+                        mk["q2"] = odd
+
             if bid == 5 and mk["o25"] == 0:
-                if any(j in name for j in ["corner", "card", "booking"]): continue
+                if any(j in name for j in ["corner", "card", "booking"]):
+                    continue
                 for v in b.get("values", []):
                     if "over 2.5" in str(v.get("value", "")).lower():
                         mk["o25"] = safe_float(v.get("odd"), 0.0)
-            
-            # Parsing Over HT (0.5 e 1.5)
+
             if _contains_ht(name) and any(k in name for k in ["total", "over/under", "ou", "goals"]):
-                if "team" in name: continue
+                if "team" in name:
+                    continue
                 for v in b.get("values", []):
                     val_txt = str(v.get("value", "")).lower().replace(",", ".")
                     if "over 0.5" in val_txt and mk["o05ht"] == 0:
                         mk["o05ht"] = safe_float(v.get("odd"), 0.0)
                     if "over 1.5" in val_txt and mk["o15ht"] == 0:
                         mk["o15ht"] = safe_float(v.get("odd"), 0.0)
-                        
-        if mk["q1"] > 0 and mk["o25"] > 0 and mk["o05ht"] > 0: break
-    if (1.01 <= mk["q1"] <= 1.10) or (1.01 <= mk["q2"] <= 1.10) or (1.01 <= mk["o25"] <= 1.30): return "SKIP"
+
+        if mk["q1"] > 0 and mk["o25"] > 0 and mk["o05ht"] > 0:
+            break
+
+    if (1.01 <= mk["q1"] <= 1.10) or (1.01 <= mk["q2"] <= 1.10) or (1.01 <= mk["o25"] <= 1.30):
+        return "SKIP"
+
     return mk
 
-def get_team_performance(session, tid):
-    if str(tid) in st.session_state.team_stats_cache: return st.session_state.team_stats_cache[str(tid)]
+
+def get_team_last_matches(session, tid):
+    cache_key = str(tid)
+    if cache_key in st.session_state.team_last_matches_cache:
+        return st.session_state.team_last_matches_cache[cache_key]
+
     res = api_get(session, "fixtures", {"team": tid, "last": 8, "status": "FT"})
     fx = res.get("response", []) if res else []
-    if not fx: return None
+
+    last_matches = []
+    for f in fx:
+        home_name = f.get("teams", {}).get("home", {}).get("name", "N/D")
+        away_name = f.get("teams", {}).get("away", {}).get("name", "N/D")
+        gh = f.get("goals", {}).get("home", 0)
+        ga = f.get("goals", {}).get("away", 0)
+        hth = f.get("score", {}).get("halftime", {}).get("home", 0)
+        hta = f.get("score", {}).get("halftime", {}).get("away", 0)
+
+        last_matches.append({
+            "date": str(f.get("fixture", {}).get("date", ""))[:10],
+            "league": f.get("league", {}).get("name", "N/D"),
+            "match": f"{home_name} - {away_name}",
+            "ht": f"{hth}-{hta}",
+            "ft": f"{gh}-{ga}",
+            "total_ht_goals": (hth or 0) + (hta or 0),
+            "total_ft_goals": (gh or 0) + (ga or 0)
+        })
+
+    st.session_state.team_last_matches_cache[cache_key] = last_matches
+    return last_matches
+
+
+def get_team_performance(session, tid):
+    if str(tid) in st.session_state.team_stats_cache:
+        return st.session_state.team_stats_cache[str(tid)]
+
+    res = api_get(session, "fixtures", {"team": tid, "last": 8, "status": "FT"})
+    fx = res.get("response", []) if res else []
+    if not fx:
+        return None
+
     act = len(fx)
     tht, gf, gs = 0, 0, 0
+
     for f in fx:
         ht_data = f.get("score", {}).get("halftime", {})
         tht += (ht_data.get("home") or 0) + (ht_data.get("away") or 0)
+
         is_home = f["teams"]["home"]["id"] == tid
         gf += (f["goals"]["home"] or 0) if is_home else (f["goals"]["away"] or 0)
         gs += (f["goals"]["away"] or 0) if is_home else (f["goals"]["home"] or 0)
-    
+
     last_f = fx[0]
     ft_sum = (last_f.get("goals", {}).get("home") or 0) + (last_f.get("goals", {}).get("away") or 0)
     ht_sum = (last_f.get("score", {}).get("halftime", {}).get("home") or 0) + (last_f.get("score", {}).get("halftime", {}).get("away") or 0)
     last_2h_zero = ((ft_sum - ht_sum) == 0)
 
-    stats = {"avg_ht": tht/act, "avg_total": (gf+gs)/act, "last_2h_zero": last_2h_zero}
+    stats = {
+        "avg_ht": tht / act,
+        "avg_total": (gf + gs) / act,
+        "last_2h_zero": last_2h_zero
+    }
+
     st.session_state.team_stats_cache[str(tid)] = stats
     return stats
 
-def run_full_scan(snap=False):
-    target_dates = [(now_rome().date() + timedelta(days=i)).strftime("%Y-%m-%d") for i in range(3)]
-    with st.spinner("🚀 Arab Sniper: Analisi mercati V22.04.28..."):
+# ==========================================
+# SCORING HELPERS V24
+# ==========================================
+def round3(x):
+    return round(float(x), 3)
+
+
+def symmetry_bonus(a, b, tight=0.22, medium=0.45):
+    diff = abs(float(a) - float(b))
+    if diff <= tight:
+        return 0.8
+    if diff <= medium:
+        return 0.4
+    return 0.0
+
+
+def band_score(value, core_low, core_high, soft_low=None, soft_high=None, core_pts=1.0, soft_pts=0.45):
+    v = safe_float(value, 0.0)
+    if core_low <= v <= core_high:
+        return core_pts
+    if soft_low is not None and soft_high is not None and soft_low <= v <= soft_high:
+        return soft_pts
+    return 0.0
+
+
+def compute_drop_diff(fid, mk):
+    if fid not in st.session_state.odds_memory:
+        return 0.0
+
+    old_data = st.session_state.odds_memory.get(fid, {})
+    fav_is_home = mk["q1"] <= mk["q2"]
+    old_q = safe_float(old_data.get("q1") if fav_is_home else old_data.get("q2"), 0.0)
+    fav_now = min(mk["q1"], mk["q2"])
+
+    if old_q > 0 and fav_now > 0 and old_q > fav_now:
+        return round(old_q - fav_now, 3)
+    return 0.0
+
+
+def score_drop(drop_diff):
+    if drop_diff >= 0.15:
+        return 1.2
+    if drop_diff >= 0.10:
+        return 0.9
+    if drop_diff >= 0.05:
+        return 0.5
+    return 0.0
+
+
+def score_pt_signal(mk, s_h, s_a, combined_ht_avg):
+    score = 0.0
+
+    score += band_score(combined_ht_avg, 1.12, 1.70, 1.05, 1.90, core_pts=1.5, soft_pts=0.8)
+
+    if s_h["avg_ht"] >= 1.10 and s_a["avg_ht"] >= 1.10:
+        score += 1.6
+    elif (s_h["avg_ht"] >= 1.25 and s_a["avg_ht"] >= 0.95) or (s_a["avg_ht"] >= 1.25 and s_h["avg_ht"] >= 0.95):
+        score += 1.0
+
+    score += symmetry_bonus(s_h["avg_ht"], s_a["avg_ht"], tight=0.20, medium=0.40)
+
+    score += band_score(mk["o05ht"], 1.20, 1.40, 1.15, 1.48, core_pts=1.6, soft_pts=0.7)
+    score += band_score(mk["o15ht"], 2.00, 3.60, 1.80, 4.20, core_pts=0.8, soft_pts=0.3)
+
+    if s_h["last_2h_zero"] or s_a["last_2h_zero"]:
+        score += 0.8
+
+    if s_h["avg_total"] >= 1.20 and s_a["avg_total"] >= 1.20:
+        score += 0.5
+
+    return round3(score)
+
+
+def score_over_signal(mk, s_h, s_a, combined_ht_avg, fav, drop_diff):
+    score = 0.0
+
+    if s_h["avg_total"] >= 1.55 and s_a["avg_total"] >= 1.55:
+        score += 2.2
+    elif s_h["avg_total"] >= 1.45 and s_a["avg_total"] >= 1.45:
+        score += 1.4
+    elif (s_h["avg_total"] >= 1.80 and s_a["avg_total"] >= 1.20) or (s_a["avg_total"] >= 1.80 and s_h["avg_total"] >= 1.20):
+        score += 1.0
+
+    score += symmetry_bonus(s_h["avg_total"], s_a["avg_total"], tight=0.28, medium=0.50)
+
+    score += band_score(mk["o25"], 1.51, 2.37, 1.40, 2.55, core_pts=1.8, soft_pts=0.8)
+
+    if combined_ht_avg >= 1.10:
+        score += 0.7
+    if combined_ht_avg >= 1.20:
+        score += 0.3
+
+    if 1.35 <= fav <= 2.20:
+        score += 0.4
+
+    score += score_drop(drop_diff) * 0.7
+
+    return round3(score)
+
+
+def score_boost_signal(mk, s_h, s_a, pt_score, over_score, drop_diff):
+    score = 0.0
+    score += pt_score * 0.45
+    score += over_score * 0.55
+
+    if (s_h["avg_ht"] >= 1.27 or s_a["avg_ht"] >= 1.27):
+        score += 0.8
+
+    if (s_h["avg_total"] > 1.85 or s_a["avg_total"] > 1.85):
+        score += 0.8
+
+    if 1.55 <= mk["o25"] <= 2.20 and 1.21 <= mk["o05ht"] <= 1.38:
+        score += 0.8
+
+    score += score_drop(drop_diff) * 0.8
+
+    return round3(score)
+
+
+def score_gold_signal(mk, s_h, s_a, pt_score, over_score, boost_score, fav, drop_diff, is_gold_zone, combined_ht_avg):
+    score = 0.0
+    score += pt_score * 0.28
+    score += over_score * 0.40
+    score += boost_score * 0.32
+
+    if is_gold_zone:
+        score += 1.2
+
+    if combined_ht_avg >= 1.15 and s_h["avg_total"] >= 1.45 and s_a["avg_total"] >= 1.45:
+        score += 0.6
+
+    if 1.35 <= fav <= 1.95:
+        score += 0.5
+
+    score += score_drop(drop_diff)
+
+    return round3(score)
+
+
+def build_signal_package(fid, mk, s_h, s_a, combined_ht_avg):
+    fav = min(mk["q1"], mk["q2"])
+    is_gold_zone = (1.40 <= fav <= 1.90)
+    drop_diff = compute_drop_diff(fid, mk)
+
+    pt_score = score_pt_signal(mk, s_h, s_a, combined_ht_avg)
+    over_score = score_over_signal(mk, s_h, s_a, combined_ht_avg, fav, drop_diff)
+    boost_score = score_boost_signal(mk, s_h, s_a, pt_score, over_score, drop_diff)
+    gold_score = score_gold_signal(mk, s_h, s_a, pt_score, over_score, boost_score, fav, drop_diff, is_gold_zone, combined_ht_avg)
+
+    tags = []
+    probe_tags = []
+
+    # Probe / contesto
+    if (fav < 1.75) and (s_h["avg_total"] >= 1.0 and s_a["avg_total"] >= 1.0):
+        probe_tags.append("🐟O")
+
+    if (2.0 <= mk["q1"] <= 3.5) and (2.0 <= mk["q2"] <= 3.5) and (s_h["avg_total"] >= 1.0 and s_a["avg_total"] >= 1.0):
+        probe_tags.append("🐟G")
+
+    # Tag primari
+    if pt_score >= 4.1:
+        tags.append("🎯PT")
+
+    if over_score >= 4.0:
+        tags.append("⚽ OVER")
+
+    if boost_score >= 5.2 and pt_score >= 3.8 and over_score >= 3.8:
+        tags.append("🚀 BOOST")
+
+    if gold_score >= 5.9 and pt_score >= 3.7 and over_score >= 4.0 and is_gold_zone:
+        tags.insert(0, "⚽⭐ GOLD")
+
+    if drop_diff >= 0.05:
+        tags.append(f"📉-{drop_diff:.2f}")
+
+    # Aggiungo probe dopo i tag forti
+    tags.extend(probe_tags)
+
+    primary_signal_count = sum(1 for t in tags if any(k in t for k in ["GOLD", "BOOST", "OVER", "PT"]))
+    max_score = max(pt_score, over_score, boost_score, gold_score)
+
+    return {
+        "tags": tags,
+        "scores": {
+            "pt": pt_score,
+            "over": over_score,
+            "boost": boost_score,
+            "gold": gold_score,
+            "max": round3(max_score),
+        },
+        "drop_diff": round3(drop_diff),
+        "fav_quote": round3(fav),
+        "is_gold_zone": is_gold_zone,
+        "primary_signal_count": primary_signal_count
+    }
+
+
+def should_keep_match(signal_pack):
+    """
+    Manteniamo il match se:
+    - ha almeno un tag primario
+    - oppure ha probe + score max discreto
+    """
+    if signal_pack["primary_signal_count"] >= 1:
+        return True
+
+    has_probe = any(t in signal_pack["tags"] for t in ["🐟O", "🐟G"])
+    if has_probe and signal_pack["scores"]["max"] >= 3.4:
+        return True
+
+    return False
+
+# ==========================================
+# DETAILS / DAY PAYLOAD HELPERS
+# ==========================================
+def save_match_details_file():
+    payload = {
+        "updated_at": now_rome().strftime("%Y-%m-%d %H:%M:%S"),
+        "details": st.session_state.match_details
+    }
+    with open(DETAILS_FILE, "w", encoding="utf-8") as f:
+        json.dump(payload, f, indent=4, ensure_ascii=False)
+    return payload
+
+
+def get_target_dates():
+    return [(now_rome().date() + timedelta(days=i)).strftime("%Y-%m-%d") for i in range(3)]
+
+
+def build_day_results(day_num):
+    target_date = get_target_dates()[day_num - 1]
+    results = [r for r in st.session_state.scan_results if r.get("Data") == target_date]
+    results.sort(key=lambda x: x.get("Ora", "99:99"))
+    return results
+
+
+def build_day_details_payload(day_num):
+    target_date = get_target_dates()[day_num - 1]
+    details = {
+        k: v for k, v in st.session_state.match_details.items()
+        if v.get("date") == target_date
+    }
+    return {
+        "updated_at": now_rome().strftime("%Y-%m-%d %H:%M:%S"),
+        "day": day_num,
+        "date": target_date,
+        "details": details
+    }
+
+
+def sync_day_outputs_to_github(day_num, update_main=False):
+    day_results = build_day_results(day_num)
+    details_payload = build_day_details_payload(day_num)
+
+    status_day = upload_day_to_github(day_num, day_results)
+    status_details = upload_details_to_github(day_num, details_payload)
+
+    if update_main:
+        status_main = upload_to_github_main(day_results)
+    else:
+        status_main = None
+
+    return status_main, status_day, status_details
+
+# ==========================================
+# MODAL DETTAGLI MATCH
+# ==========================================
+@st.dialog("🔎 Dettagli partita", width="large")
+def show_match_modal(fixture_id: str):
+    detail = st.session_state.match_details.get(str(fixture_id))
+
+    if not detail:
+        st.warning("Dettagli non disponibili per questa partita.")
+        return
+
+    st.markdown(f"## {detail['match']}")
+    st.write(f"**Data:** {detail['date']}  |  **Ora:** {detail['time']}")
+    st.write(f"**Lega:** {detail['league']} ({detail['country']})")
+    st.write(f"**Tag:** {' '.join(detail.get('tags', []))}")
+
+    m1, m2, m3 = st.columns(3)
+    m1.metric("1", f"{detail['markets'].get('q1', 0):.2f}")
+    m2.metric("X", f"{detail['markets'].get('qx', 0):.2f}")
+    m3.metric("2", f"{detail['markets'].get('q2', 0):.2f}")
+
+    m4, m5, m6 = st.columns(3)
+    m4.metric("O2.5", f"{detail['markets'].get('o25', 0):.2f}")
+    m5.metric("O0.5 HT", f"{detail['markets'].get('o05ht', 0):.2f}")
+    m6.metric("O1.5 HT", f"{detail['markets'].get('o15ht', 0):.2f}")
+
+    st.markdown("---")
+    st.subheader("📊 Medie e flag")
+
+    a1, a2, a3 = st.columns(3)
+    a1.metric("AVG FT Home", f"{detail['averages'].get('home_avg_ft', 0):.2f}")
+    a2.metric("AVG FT Away", f"{detail['averages'].get('away_avg_ft', 0):.2f}")
+    a3.metric("AVG HT Combo", f"{detail['averages'].get('combined_ht_avg', 0):.2f}")
+
+    st.write(
+        f"**AVG HT Home/Away:** "
+        f"{detail['averages'].get('home_avg_ht', 0):.2f} | "
+        f"{detail['averages'].get('away_avg_ht', 0):.2f}"
+    )
+
+    st.write(
+        f"**Fav quota:** {detail['flags'].get('fav_quote', 0):.2f} | "
+        f"**Gold zone:** {'✅' if detail['flags'].get('is_gold_zone') else '❌'} | "
+        f"**Home last 2H zero:** {'✅' if detail['flags'].get('home_last_2h_zero') else '❌'} | "
+        f"**Away last 2H zero:** {'✅' if detail['flags'].get('away_last_2h_zero') else '❌'} | "
+        f"**Drop:** {detail['flags'].get('drop_diff', 0):.2f}"
+    )
+
+    scores = detail.get("scores", {})
+    if scores:
+        st.markdown("---")
+        st.subheader("🧠 Score interni V24")
+        s1, s2, s3, s4 = st.columns(4)
+        s1.metric("PT", f"{scores.get('pt', 0):.2f}")
+        s2.metric("OVER", f"{scores.get('over', 0):.2f}")
+        s3.metric("BOOST", f"{scores.get('boost', 0):.2f}")
+        s4.metric("GOLD", f"{scores.get('gold', 0):.2f}")
+
+    st.markdown("---")
+    c_home, c_away = st.columns(2)
+
+    with c_home:
+        st.markdown(f"### 🏠 Ultime 8 {detail['home_team']}")
+        df_home = pd.DataFrame(detail.get("home_last_8", []))
+        if not df_home.empty:
+            st.dataframe(df_home, use_container_width=True, hide_index=True)
+        else:
+            st.info("Nessun dato home disponibile.")
+
+    with c_away:
+        st.markdown(f"### ✈️ Ultime 8 {detail['away_team']}")
+        df_away = pd.DataFrame(detail.get("away_last_8", []))
+        if not df_away.empty:
+            st.dataframe(df_away, use_container_width=True, hide_index=True)
+        else:
+            st.info("Nessun dato away disponibile.")
+
+# ==========================================
+# SCAN CORE
+# ==========================================
+def run_full_scan(horizon=None, snap=False, update_main_site=False, show_success=True):
+    use_horizon = horizon if horizon is not None else HORIZON
+    target_dates = get_target_dates()
+
+    with st.spinner(f"🚀 Analisi mercati {target_dates[use_horizon - 1]}..."):
         with requests.Session() as s:
-            target_date = target_dates[HORIZON - 1]
+            target_date = target_dates[use_horizon - 1]
             res = api_get(s, "fixtures", {"date": target_date, "timezone": "Europe/Rome"})
-            if not res: return
-            day_fx = [f for f in res.get("response", []) if f["fixture"]["status"]["short"] == "NS"]
-            st.session_state.available_countries = sorted(list(set(st.session_state.available_countries) | {fx["league"]["country"] for fx in day_fx}))
-            
-            if snap:
+            if not res:
+                st.error("❌ Nessuna risposta valida dall'API.")
+                return
+
+            day_fx = [
+                f for f in res.get("response", [])
+                if f["fixture"]["status"]["short"] == "NS"
+                and not is_blacklisted_league(f.get("league", {}).get("name", ""))
+            ]
+
+            st.session_state.available_countries = sorted(
+                list(set(st.session_state.available_countries) | {fx["league"]["country"] for fx in day_fx})
+            )
+
+            if snap and use_horizon == 1:
                 csnap = {}
-                snap_bar = st.progress(0, text="📌 FISSAGGIO SNAPSHOT QUOTE...")
+                snap_bar = st.progress(0, text="📌 SNAPSHOT IN CORSO...")
+
                 for i, f in enumerate(day_fx):
-                    snap_bar.progress((i+1)/len(day_fx))
+                    snap_bar.progress((i + 1) / len(day_fx) if day_fx else 1.0)
                     m = extract_elite_markets(s, f["fixture"]["id"])
-                    if m and m != "SKIP": 
+                    if m and m != "SKIP":
                         csnap[str(f["fixture"]["id"])] = {"q1": m["q1"], "q2": m["q2"]}
                     time.sleep(0.2)
+
                 st.session_state.odds_memory = csnap
-                with open(SNAP_FILE, "w") as f: json.dump({"odds": csnap, "timestamp": now_rome().strftime("%H:%M")}, f)
+                with open(SNAP_FILE, "w", encoding="utf-8") as f:
+                    json.dump(
+                        {"odds": csnap, "timestamp": now_rome().strftime("%H:%M")},
+                        f,
+                        indent=4,
+                        ensure_ascii=False
+                    )
                 snap_bar.empty()
 
             final_list = []
-            pb = st.progress(0, text="🚀 SCANSIONE PARTITE E ANALISI...")
+            details_map = dict(st.session_state.match_details)
+
+            pb = st.progress(0, text="🚀 ANALISI SEGNALI E MEDIE...")
             for i, f in enumerate(day_fx):
-                pb.progress((i+1)/len(day_fx))
+                pb.progress((i + 1) / len(day_fx) if day_fx else 1.0)
+
                 cnt = f["league"]["country"]
-                if cnt in st.session_state.config["excluded"]: continue
+                if cnt in st.session_state.config["excluded"]:
+                    continue
+
                 fid = str(f["fixture"]["id"])
                 mk = extract_elite_markets(s, fid)
-                if not mk or mk == "SKIP" or mk["q1"] == 0: continue
-                s_h, s_a = get_team_performance(s, f["teams"]["home"]["id"]), get_team_performance(s, f["teams"]["away"]["id"])
-                if not s_h or not s_a: continue
+                if not mk or mk == "SKIP" or mk["q1"] == 0:
+                    continue
+
+                home_team = f["teams"]["home"]
+                away_team = f["teams"]["away"]
+
+                s_h = get_team_performance(s, home_team["id"])
+                s_a = get_team_performance(s, away_team["id"])
+                if not s_h or not s_a:
+                    continue
 
                 combined_ht_avg = (s_h["avg_ht"] + s_a["avg_ht"]) / 2
-                if combined_ht_avg < 1.05: continue
+                if combined_ht_avg < 1.03:
+                    continue
 
-                fav = min(mk["q1"], mk["q2"])
-                is_gold_zone = (1.40 <= fav <= 1.90)
-                tags = ["M-Ok"]
-                
-                if fid in st.session_state.odds_memory:
-                    old_data = st.session_state.odds_memory[fid]
-                    old_q = old_data["q1"] if mk["q1"] < mk["q2"] else old_data["q2"]
-                    if old_q > fav:
-                        diff = old_q - fav
-                        if diff >= 0.05: tags.append(f"📉-{diff:.2f}")
+                signal_pack = build_signal_package(fid, mk, s_h, s_a, combined_ht_avg)
+                tags = signal_pack["tags"]
 
-                # LOGICA SEGNALI INVARIATA
-                h_p, h_o, h_g = False, False, False
-                if (fav < 1.75) and (s_h["avg_total"] >= 1.0 and s_a["avg_total"] >= 1.0): tags.append("🐟O"); h_p = True
-                if (2.0 <= mk["q1"] <= 3.5) and (2.0 <= mk["q2"] <= 3.5) and (s_h["avg_total"] >= 1.0 and s_a["avg_total"] >= 1.0): tags.append("🐟G"); h_p = True
-                
-                cond_ft_155 = (s_h["avg_total"] >= 1.55 and s_a["avg_total"] >= 1.55)
-                cond_q_o25 = (1.51 <= mk["o25"] <= 2.37)
-                cond_q_o05h = (1.21 <= mk["o05ht"] <= 1.40)
-                
-                if cond_ft_155 and cond_q_o25 and cond_q_o05h:
-                    cond_boost_ht = (s_h["avg_ht"] >= 1.27 or s_a["avg_ht"] >= 1.27)
-                    cond_boost_ft = (s_h["avg_total"] > 1.85 or s_a["avg_total"] > 1.85)
-                    if cond_boost_ht and cond_boost_ft: 
-                        tags.append("🚀 BOOST")
-                        h_o = True
-                    else: 
-                        tags.append("⚽ OVER")
-                        h_o = True
-                
-                cond_pt_ht = (s_h["avg_ht"] >= 1.1 and s_a["avg_ht"] >= 1.1)
-                cond_pt_ft = (s_h["avg_total"] >= 1.1 and s_a["avg_total"] >= 1.1)
-                cond_pt_odd = (1.20 <= mk["o05ht"] <= 1.40)
-                cond_pt_last = (s_h["last_2h_zero"] or s_a["last_2h_zero"])
-                
-                if cond_pt_ht and cond_pt_ft and cond_pt_odd and cond_pt_last:
-                    tags.append("🎯PT")
-                    h_g = True
-                
-                if h_p and h_o and h_g:
-                    tags.insert(0, "⚽⭐ GOLD")
+                if not should_keep_match(signal_pack):
+                    continue
 
-                final_list.append({
+                fav = signal_pack["fav_quote"]
+                is_gold_zone = signal_pack["is_gold_zone"]
+
+                row = {
                     "Ora": f["fixture"]["date"][11:16],
                     "Lega": f"{f['league']['name']} ({cnt})",
-                    "Match": f"{f['teams']['home']['name']} - {f['teams']['away']['name']}",
+                    "Match": f"{home_team['name']} - {away_team['name']}",
                     "FAV": "✅" if is_gold_zone else "❌",
                     "1X2": f"{mk['q1']:.1f}|{mk['qx']:.1f}|{mk['q2']:.1f}",
-                    "O2.5": f"{mk['o25']:.2f}", 
-                    "O0.5H": f"{mk['o05ht']:.2f}", 
-                    "O1.5H": f"{mk['o15ht']:.2f}", # Sostituita colonna GGH
+                    "O2.5": f"{mk['o25']:.2f}",
+                    "O0.5H": f"{mk['o05ht']:.2f}",
+                    "O1.5H": f"{mk['o15ht']:.2f}",
                     "AVG FT": f"{s_h['avg_total']:.1f}|{s_a['avg_total']:.1f}",
                     "AVG HT": f"{s_h['avg_ht']:.1f}|{s_a['avg_ht']:.1f}",
-                    "Info": " ".join(tags), "Data": f["fixture"]["date"][:10],
+                    "Info": " ".join(tags),
+                    "Data": f["fixture"]["date"][:10],
                     "Fixture_ID": f["fixture"]["id"]
-                })
+                }
+                final_list.append(row)
+
+                details_map[fid] = {
+                    "fixture_id": f["fixture"]["id"],
+                    "date": f["fixture"]["date"][:10],
+                    "time": f["fixture"]["date"][11:16],
+                    "league": f["league"]["name"],
+                    "country": cnt,
+                    "match": f"{home_team['name']} - {away_team['name']}",
+                    "home_team": home_team["name"],
+                    "away_team": away_team["name"],
+                    "markets": {
+                        "q1": mk["q1"],
+                        "qx": mk["qx"],
+                        "q2": mk["q2"],
+                        "o25": mk["o25"],
+                        "o05ht": mk["o05ht"],
+                        "o15ht": mk["o15ht"]
+                    },
+                    "averages": {
+                        "home_avg_ft": round(s_h["avg_total"], 3),
+                        "away_avg_ft": round(s_a["avg_total"], 3),
+                        "home_avg_ht": round(s_h["avg_ht"], 3),
+                        "away_avg_ht": round(s_a["avg_ht"], 3),
+                        "combined_ht_avg": round(combined_ht_avg, 3)
+                    },
+                    "flags": {
+                        "fav_quote": round(fav, 3),
+                        "is_gold_zone": is_gold_zone,
+                        "home_last_2h_zero": s_h["last_2h_zero"],
+                        "away_last_2h_zero": s_a["last_2h_zero"],
+                        "drop_diff": signal_pack["drop_diff"]
+                    },
+                    "scores": signal_pack["scores"],
+                    "tags": tags,
+                    "home_last_8": get_team_last_matches(s, home_team["id"]),
+                    "away_last_8": get_team_last_matches(s, away_team["id"])
+                }
+
                 time.sleep(0.2)
 
             current_db = {str(r["Fixture_ID"]): r for r in st.session_state.scan_results}
+            target_date_ids = {str(r["Fixture_ID"]) for r in final_list}
+
+            for existing in list(current_db.keys()):
+                existing_row = current_db[existing]
+                if existing_row.get("Data") == target_date and existing not in target_date_ids:
+                    del current_db[existing]
+
             for r in final_list:
                 current_db[str(r["Fixture_ID"])] = r
-            st.session_state.scan_results = list(current_db.values())
-            with open(DB_FILE, "w") as f: json.dump({"results": st.session_state.scan_results}, f)
-            st.rerun()
 
-# --- UI ---
-st.sidebar.header("👑 Arab Sniper V22.04.28")
+            st.session_state.scan_results = list(current_db.values())
+            st.session_state.scan_results.sort(key=lambda x: (x.get("Data", ""), x.get("Ora", "99:99")))
+
+            with open(DB_FILE, "w", encoding="utf-8") as f:
+                json.dump({"results": st.session_state.scan_results}, f, indent=4, ensure_ascii=False)
+
+            st.session_state.match_details = details_map
+            save_match_details_file()
+
+            status_main, status_day, status_details = sync_day_outputs_to_github(
+                day_num=use_horizon,
+                update_main=update_main_site
+            )
+
+            if show_success:
+                if update_main_site:
+                    if status_main == "SUCCESS":
+                        st.success("✅ data.json aggiornato!")
+                    else:
+                        st.error(f"❌ Errore data.json: {status_main}")
+
+                if status_day == "SUCCESS":
+                    st.success(f"✅ {REMOTE_DAY_FILES[use_horizon]} aggiornato!")
+                else:
+                    st.error(f"❌ Errore {REMOTE_DAY_FILES[use_horizon]}: {status_day}")
+
+                if status_details == "SUCCESS":
+                    st.success(f"✅ {REMOTE_DETAILS_FILES[use_horizon]} aggiornato!")
+                else:
+                    st.error(f"❌ Errore {REMOTE_DETAILS_FILES[use_horizon]}: {status_details}")
+
+            pb.empty()
+
+            if "--auto" not in sys.argv and "--fast" not in sys.argv and "--day2-refresh" not in sys.argv:
+                time.sleep(2)
+                st.rerun()
+
+# ==========================================
+# AUTO BUILD 3 GIORNI
+# ==========================================
+def run_nightly_multiday_build():
+    print("🚀 Avvio scan notturno multi-day...")
+
+    print("📌 DAY 1: SNAP + SCAN + update data.json/data_day1/details_day1")
+    run_full_scan(horizon=1, snap=True, update_main_site=True, show_success=False)
+
+    print("📆 DAY 2: scan statico + update data_day2/details_day2")
+    run_full_scan(horizon=2, snap=False, update_main_site=False, show_success=False)
+
+    print("📆 DAY 3: scan statico + update data_day3/details_day3")
+    run_full_scan(horizon=3, snap=False, update_main_site=False, show_success=False)
+
+    print("✅ Build multi-day completata.")
+
+# ==========================================
+# UI SIDEBAR
+# ==========================================
+st.sidebar.header("👑 Arab Sniper V24 Multi-Day WEB")
 HORIZON = st.sidebar.selectbox("Orizzonte Temporale:", options=[1, 2, 3], index=0)
-target_dates = [(now_rome().date() + timedelta(days=i)).strftime("%Y-%m-%d") for i in range(3)]
+target_dates = get_target_dates()
+
 all_discovered = sorted(list(set(st.session_state.get("available_countries", []))))
 if st.session_state.scan_results:
-    historical_cnt = {r["Lega"].split('(')[-1].replace(')', '') for r in st.session_state.scan_results}
+    historical_cnt = {r["Lega"].split("(")[-1].replace(")", "") for r in st.session_state.scan_results}
     all_discovered = sorted(list(set(all_discovered) | historical_cnt))
+
 if all_discovered:
-    new_ex = st.sidebar.multiselect("Escludi Nazioni:", options=all_discovered, default=[c for c in st.session_state.config.get("excluded", []) if c in all_discovered])
+    new_ex = st.sidebar.multiselect(
+        "Escludi Nazioni:",
+        options=all_discovered,
+        default=[c for c in st.session_state.config.get("excluded", []) if c in all_discovered]
+    )
     if st.sidebar.button("💾 SALVA CONFIG"):
         st.session_state.config["excluded"] = new_ex
-        save_config(); st.rerun()
-if last_snap_ts: st.sidebar.success(f"✅ SNAPSHOT: {last_snap_ts}")
-else: st.sidebar.warning("⚠️ SNAPSHOT ASSENTE")
+        save_config()
+        st.rerun()
+
+if last_snap_ts:
+    st.sidebar.success(f"✅ SNAPSHOT: {last_snap_ts}")
+else:
+    st.sidebar.warning("⚠️ SNAPSHOT ASSENTE")
+
+st.sidebar.markdown("---")
+st.sidebar.caption(f"DB: {Path(DB_FILE).name}")
+st.sidebar.caption(f"SNAP: {Path(SNAP_FILE).name}")
+st.sidebar.caption(f"DETAILS: {Path(DETAILS_FILE).name}")
+st.sidebar.caption("GitHub: data.json + data_day1/2/3 + details_day1/2/3")
+
+# ==========================================
+# UI MAIN
+# ==========================================
 c1, c2 = st.columns(2)
-if c1.button("📌 SNAP + SCAN"): run_full_scan(snap=True)
-if c2.button("🚀 SCAN VELOCE"): run_full_scan(snap=False)
+if c1.button("📌 SNAP + SCAN"):
+    run_full_scan(horizon=HORIZON, snap=(HORIZON == 1), update_main_site=(HORIZON == 1))
+if c2.button("🚀 SCAN VELOCE"):
+    run_full_scan(horizon=HORIZON, snap=False, update_main_site=(HORIZON == 1))
+
+if st.session_state.selected_fixture_for_modal:
+    show_match_modal(st.session_state.selected_fixture_for_modal)
+
 if st.session_state.scan_results:
     df = pd.DataFrame(st.session_state.scan_results)
     full_view = df[df["Data"] == target_dates[HORIZON - 1]]
+
     if not full_view.empty:
+        full_view = full_view.sort_values(by=["Ora", "Match"])
         view = full_view.drop(columns=["Data", "Fixture_ID"])
+
         st.markdown("""
             <style>
                 .main-container { width: 100%; max-height: 800px; overflow: auto; border: 1px solid #444; border-radius: 8px; background-color: #0e1117; }
@@ -287,21 +960,93 @@ if st.session_state.scan_results:
                 .row-std { background-color: #FFFFFF !important; color: #000000 !important; }
             </style>
         """, unsafe_allow_html=True)
+
         def get_row_class(info):
-            if "GOLD" in info: return "row-gold"
-            if "BOOST" in info: return "row-boost"
-            if "OVER" in info: return "row-over"
+            if "GOLD" in info:
+                return "row-gold"
+            if "BOOST" in info:
+                return "row-boost"
+            if "OVER" in info:
+                return "row-over"
             return "row-std"
+
         html = '<div class="main-container"><table class="mobile-table"><thead><tr>'
-        html += ''.join(f'<th>{c}</th>' for c in view.columns) + '</tr></thead><tbody>'
+        html += ''.join(f'<th>{c}</th>' for c in view.columns)
+        html += '</tr></thead><tbody>'
+
         for _, row in view.iterrows():
             cls = get_row_class(row["Info"])
             html += f'<tr class="{cls}">' + ''.join(f'<td>{v}</td>' for v in row) + '</tr>'
+
         html += '</tbody></table></div>'
         st.markdown(html, unsafe_allow_html=True)
+
         st.markdown("---")
-        d1, d2 = st.columns(2)
-        d1.download_button("💾 CSV", full_view.to_csv(index=False).encode("utf-8"), f"arab_{target_dates[HORIZON-1]}.csv")
-        d2.download_button("🌐 HTML", html.encode("utf-8"), f"arab_{target_dates[HORIZON-1]}.html")
+        st.subheader("🔎 Dettagli partite")
+
+        for _, row in full_view.iterrows():
+            fid = str(row["Fixture_ID"])
+            c_btn, c_ora, c_match, c_lega = st.columns([1, 1.3, 4, 3])
+
+            with c_btn:
+                if st.button("🔎", key=f"open_modal_{fid}", help="Apri dettagli match"):
+                    st.session_state.selected_fixture_for_modal = fid
+                    st.rerun()
+
+            with c_ora:
+                st.write(row["Ora"])
+
+            with c_match:
+                st.write(row["Match"])
+
+            with c_lega:
+                st.write(row["Lega"])
+
+        st.markdown("---")
+        d1, d2, d3 = st.columns(3)
+        d1.download_button(
+            "💾 CSV",
+            full_view.to_csv(index=False).encode("utf-8"),
+            f"arab_{target_dates[HORIZON - 1]}.csv"
+        )
+        d2.download_button(
+            "🌐 HTML",
+            html.encode("utf-8"),
+            f"arab_{target_dates[HORIZON - 1]}.html"
+        )
+        d3.download_button(
+            "🧠 DETAILS JSON",
+            json.dumps(
+                {
+                    k: v for k, v in st.session_state.match_details.items()
+                    if v.get("date") == target_dates[HORIZON - 1]
+                },
+                indent=4,
+                ensure_ascii=False
+            ).encode("utf-8"),
+            f"details_{target_dates[HORIZON - 1]}.json"
+        )
 else:
     st.info("Esegui uno scan.")
+
+# ==========================================
+# LOGICA ESECUZIONE AUTOMATICA GITHUB ACTIONS
+# ==========================================
+if __name__ == "__main__":
+    if "--auto" in sys.argv:
+        print("🚀 Avvio Scan Automatico Notturno Multi-Day...")
+        HORIZON = 1
+        run_nightly_multiday_build()
+        print("✅ Scan completo terminato: data.json + data_day1/2/3 + details_day1/2/3 aggiornati.")
+
+    elif "--fast" in sys.argv:
+        HORIZON = 1
+        print("⚡ Avvio Scan Veloce Automatico (solo Day 1)...")
+        run_full_scan(horizon=1, snap=False, update_main_site=True, show_success=False)
+        print("✅ Scan veloce terminato: data.json + data_day1 + details_day1 aggiornati.")
+
+    elif "--day2-refresh" in sys.argv:
+        HORIZON = 2
+        print("🌙 Avvio Refresh Serale Day 2...")
+        run_full_scan(horizon=2, snap=False, update_main_site=False, show_success=False)
+        print("✅ Refresh Day 2 terminato: data_day2 + details_day2 aggiornati.")
