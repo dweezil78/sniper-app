@@ -10,14 +10,12 @@ from pathlib import Path
 from github import Github
 
 # ==========================================
-# CONFIGURAZIONE ARAB SNIPER V24 MULTI-DAY WEB
-# Base derivata dalla V23 produzione
-# Migliorie:
-# - scoring interno PT / OVER / BOOST / GOLD
-# - uso reale del drop quota
-# - lettura migliore simmetria home/away
-# - details arricchiti con score debug
-# - struttura UI / GitHub / workflow invariata
+# CONFIGURAZIONE ARAB SNIPER V24.1 MULTI-DAY WEB
+# Base derivata dalla V24 test
+# Stretta selettiva su:
+# - BOOST
+# - GOLD
+# Tutto il resto invariato
 # ==========================================
 BASE_DIR = Path(__file__).resolve().parent
 DB_FILE = str(BASE_DIR / "arab_sniper_database.json")
@@ -51,7 +49,7 @@ def now_rome():
     return datetime.now(ROME_TZ) if ROME_TZ else datetime.now()
 
 
-st.set_page_config(page_title="ARAB SNIPER V24 MULTI-DAY WEB", layout="wide")
+st.set_page_config(page_title="ARAB SNIPER V24.1 MULTI-DAY WEB", layout="wide")
 
 # ==========================================
 # GITHUB UPDATE CORE
@@ -350,7 +348,7 @@ def get_team_performance(session, tid):
     return stats
 
 # ==========================================
-# SCORING HELPERS V24
+# SCORING HELPERS V24.1
 # ==========================================
 def round3(x):
     return round(float(x), 3)
@@ -449,41 +447,68 @@ def score_over_signal(mk, s_h, s_a, combined_ht_avg, fav, drop_diff):
     return round3(score)
 
 
-def score_boost_signal(mk, s_h, s_a, pt_score, over_score, drop_diff):
+def score_boost_signal(mk, s_h, s_a, pt_score, over_score, drop_diff, combined_ht_avg):
+    """
+    BOOST più selettivo:
+    - pesa meno il semplice accumulo score
+    - richiede migliore convergenza HT/FT
+    - bonus più stretti
+    """
     score = 0.0
-    score += pt_score * 0.45
-    score += over_score * 0.55
+    score += pt_score * 0.38
+    score += over_score * 0.48
 
-    if (s_h["avg_ht"] >= 1.27 or s_a["avg_ht"] >= 1.27):
-        score += 0.8
+    # Bonus solo se c'è vera struttura HT
+    if (s_h["avg_ht"] >= 1.30 and s_a["avg_ht"] >= 1.00) or (s_a["avg_ht"] >= 1.30 and s_h["avg_ht"] >= 1.00):
+        score += 0.55
+    elif s_h["avg_ht"] >= 1.15 and s_a["avg_ht"] >= 1.15:
+        score += 0.35
 
-    if (s_h["avg_total"] > 1.85 or s_a["avg_total"] > 1.85):
-        score += 0.8
+    # Bonus FT solo se c'è convergenza reale
+    if s_h["avg_total"] >= 1.65 and s_a["avg_total"] >= 1.65:
+        score += 0.55
+    elif (s_h["avg_total"] >= 1.95 and s_a["avg_total"] >= 1.35) or (s_a["avg_total"] >= 1.95 and s_h["avg_total"] >= 1.35):
+        score += 0.25
 
-    if 1.55 <= mk["o25"] <= 2.20 and 1.21 <= mk["o05ht"] <= 1.38:
-        score += 0.8
+    # Mercati più stretti
+    if 1.60 <= mk["o25"] <= 2.12 and 1.22 <= mk["o05ht"] <= 1.36:
+        score += 0.55
+    elif 1.55 <= mk["o25"] <= 2.20 and 1.20 <= mk["o05ht"] <= 1.38:
+        score += 0.20
 
-    score += score_drop(drop_diff) * 0.8
+    if combined_ht_avg >= 1.16:
+        score += 0.35
+
+    score += score_drop(drop_diff) * 0.45
 
     return round3(score)
 
 
 def score_gold_signal(mk, s_h, s_a, pt_score, over_score, boost_score, fav, drop_diff, is_gold_zone, combined_ht_avg):
+    """
+    GOLD più selettivo:
+    - meno bonus automatici
+    - dipende di più da BOOST forte
+    - drop pesa meno se il resto non è già buono
+    """
     score = 0.0
-    score += pt_score * 0.28
-    score += over_score * 0.40
-    score += boost_score * 0.32
+    score += pt_score * 0.22
+    score += over_score * 0.30
+    score += boost_score * 0.34
 
     if is_gold_zone:
-        score += 1.2
+        score += 0.85
 
-    if combined_ht_avg >= 1.15 and s_h["avg_total"] >= 1.45 and s_a["avg_total"] >= 1.45:
-        score += 0.6
+    if combined_ht_avg >= 1.18 and s_h["avg_total"] >= 1.55 and s_a["avg_total"] >= 1.50:
+        score += 0.45
 
-    if 1.35 <= fav <= 1.95:
-        score += 0.5
+    if 1.42 <= fav <= 1.82:
+        score += 0.35
 
-    score += score_drop(drop_diff)
+    if drop_diff >= 0.10:
+        score += 0.55
+    elif drop_diff >= 0.05:
+        score += 0.25
 
     return round3(score)
 
@@ -495,7 +520,7 @@ def build_signal_package(fid, mk, s_h, s_a, combined_ht_avg):
 
     pt_score = score_pt_signal(mk, s_h, s_a, combined_ht_avg)
     over_score = score_over_signal(mk, s_h, s_a, combined_ht_avg, fav, drop_diff)
-    boost_score = score_boost_signal(mk, s_h, s_a, pt_score, over_score, drop_diff)
+    boost_score = score_boost_signal(mk, s_h, s_a, pt_score, over_score, drop_diff, combined_ht_avg)
     gold_score = score_gold_signal(mk, s_h, s_a, pt_score, over_score, boost_score, fav, drop_diff, is_gold_zone, combined_ht_avg)
 
     tags = []
@@ -515,10 +540,55 @@ def build_signal_package(fid, mk, s_h, s_a, combined_ht_avg):
     if over_score >= 4.0:
         tags.append("⚽ OVER")
 
-    if boost_score >= 5.2 and pt_score >= 3.8 and over_score >= 3.8:
+    # BOOST più selettivo
+    boost_gate_ht = (
+        (s_h["avg_ht"] >= 1.28 and s_a["avg_ht"] >= 1.00) or
+        (s_a["avg_ht"] >= 1.28 and s_h["avg_ht"] >= 1.00) or
+        (s_h["avg_ht"] >= 1.12 and s_a["avg_ht"] >= 1.12)
+    )
+    boost_gate_ft = (
+        (s_h["avg_total"] >= 1.60 and s_a["avg_total"] >= 1.55) or
+        (s_a["avg_total"] >= 1.60 and s_h["avg_total"] >= 1.55)
+    )
+    boost_gate_market = (1.58 <= mk["o25"] <= 2.18 and 1.21 <= mk["o05ht"] <= 1.37)
+
+    if (
+        boost_score >= 5.85
+        and pt_score >= 4.00
+        and over_score >= 4.15
+        and combined_ht_avg >= 1.14
+        and boost_gate_ht
+        and boost_gate_ft
+        and boost_gate_market
+    ):
         tags.append("🚀 BOOST")
 
-    if gold_score >= 5.9 and pt_score >= 3.7 and over_score >= 4.0 and is_gold_zone:
+    # GOLD molto più selettivo
+    gold_gate_core = (
+        (s_h["avg_total"] >= 1.55 and s_a["avg_total"] >= 1.50)
+        and (s_h["avg_ht"] >= 1.05 and s_a["avg_ht"] >= 1.05)
+        and combined_ht_avg >= 1.16
+    )
+    gold_gate_quote = (1.42 <= fav <= 1.85)
+    gold_gate_extra = (
+        drop_diff >= 0.05 or
+        (
+            s_h["avg_total"] >= 1.75 and
+            s_a["avg_total"] >= 1.65 and
+            combined_ht_avg >= 1.20
+        )
+    )
+
+    if (
+        gold_score >= 6.75
+        and boost_score >= 5.95
+        and pt_score >= 4.00
+        and over_score >= 4.20
+        and is_gold_zone
+        and gold_gate_core
+        and gold_gate_quote
+        and gold_gate_extra
+    ):
         tags.insert(0, "⚽⭐ GOLD")
 
     if drop_diff >= 0.05:
@@ -664,7 +734,7 @@ def show_match_modal(fixture_id: str):
     scores = detail.get("scores", {})
     if scores:
         st.markdown("---")
-        st.subheader("🧠 Score interni V24")
+        st.subheader("🧠 Score interni V24.1")
         s1, s2, s3, s4 = st.columns(4)
         s1.metric("PT", f"{scores.get('pt', 0):.2f}")
         s2.metric("OVER", f"{scores.get('over', 0):.2f}")
@@ -897,7 +967,7 @@ def run_nightly_multiday_build():
 # ==========================================
 # UI SIDEBAR
 # ==========================================
-st.sidebar.header("👑 Arab Sniper V24 Multi-Day WEB")
+st.sidebar.header("👑 Arab Sniper V24.1 Multi-Day WEB")
 HORIZON = st.sidebar.selectbox("Orizzonte Temporale:", options=[1, 2, 3], index=0)
 target_dates = get_target_dates()
 
