@@ -551,7 +551,13 @@ def build_signal_package(fid, mk, s_h, s_a, combined_ht_avg):
         (s_a["avg_total"] >= 1.60 and s_h["avg_total"] >= 1.55)
     )
     boost_gate_market = (1.58 <= mk["o25"] <= 2.18 and 1.21 <= mk["o05ht"] <= 1.37)
-
+    ft_convergence = (
+    (s_h["avg_total"] >= 1.45 and s_a["avg_total"] >= 1.45)
+    or
+    (s_h["avg_total"] >= 1.80 and s_a["avg_total"] >= 1.20)
+    or
+    (s_a["avg_total"] >= 1.80 and s_h["avg_total"] >= 1.20)
+)
     if (
         boost_score >= 5.85
         and pt_score >= 4.00
@@ -560,6 +566,7 @@ def build_signal_package(fid, mk, s_h, s_a, combined_ht_avg):
         and boost_gate_ht
         and boost_gate_ft
         and boost_gate_market
+        and ft_convergence
     ):
         tags.append("🚀 BOOST")
 
