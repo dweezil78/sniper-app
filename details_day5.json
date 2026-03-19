@@ -1,0 +1,3751 @@
+{
+  "updated_at": "2026-03-19 10:09:01",
+  "day": 5,
+  "date": "2026-03-23",
+  "details": {
+    "1490179": {
+      "fixture_id": 1490179,
+      "date": "2026-03-23",
+      "time": "00:00",
+      "league": "Major League Soccer",
+      "country": "USA",
+      "match": "San Diego - Real Salt Lake",
+      "home_team": "San Diego",
+      "away_team": "Real Salt Lake",
+      "markets": {
+        "q1": 1.67,
+        "qx": 3.95,
+        "q2": 4.65,
+        "o25": 1.57,
+        "o05ht": 1.28,
+        "o15ht": 2.2
+      },
+      "averages": {
+        "home_avg_ft": 3.625,
+        "away_avg_ft": 3.125,
+        "home_avg_ht": 1.375,
+        "away_avg_ht": 1.25,
+        "combined_ht_avg": 1.312
+      },
+      "flags": {
+        "fav_quote": 1.67,
+        "is_gold_zone": true,
+        "home_last_2h_zero": false,
+        "away_last_2h_zero": false,
+        "drop_diff": 0.0,
+        "open_q1": 1.67,
+        "open_qx": 3.95,
+        "open_q2": 4.65,
+        "open_o25": 1.57,
+        "curr_q1": 1.67,
+        "curr_qx": 3.95,
+        "curr_q2": 4.65,
+        "curr_o25": 1.57,
+        "drop_q1": 0.0,
+        "drop_qx": 0.0,
+        "drop_q2": 0.0,
+        "drop_o25": 0.0,
+        "drop_last_q1": 0.0,
+        "drop_last_qx": 0.0,
+        "drop_last_q2": 0.0,
+        "drop_last_o25": 0.0,
+        "drop_side": "",
+        "drop_strength": "none",
+        "inversion": false,
+        "inversion_from": "1",
+        "inversion_to": "1",
+        "open_fav_side": "1",
+        "curr_fav_side": "1",
+        "open_fav_quote": 1.67,
+        "curr_fav_quote": 1.67,
+        "history_points": 1,
+        "first_seen_at": "2026-03-19T10:09:09",
+        "last_seen_at": "2026-03-19T10:09:09"
+      },
+      "scores": {
+        "pt": 6.8,
+        "over": 5.8,
+        "boost": 7.018,
+        "gold": 7.272,
+        "max": 7.272
+      },
+      "tags": [
+        "⚽⭐ GOLD",
+        "🎯PT",
+        "⚽ OVER",
+        "🐟O"
+      ],
+      "home_last_8": [
+        {
+          "date": "2026-03-19",
+          "league": "CONCACAF Champions League",
+          "match": "Toluca - San Diego",
+          "ht": "1-0",
+          "ft": "4-0",
+          "total_ht_goals": 1,
+          "total_ft_goals": 4
+        },
+        {
+          "date": "2026-03-15",
+          "league": "Major League Soccer",
+          "match": "FC Dallas - San Diego",
+          "ht": "1-2",
+          "ft": "3-3",
+          "total_ht_goals": 3,
+          "total_ft_goals": 6
+        },
+        {
+          "date": "2026-03-12",
+          "league": "CONCACAF Champions League",
+          "match": "San Diego - Toluca",
+          "ht": "1-1",
+          "ft": "3-2",
+          "total_ht_goals": 2,
+          "total_ft_goals": 5
+        },
+        {
+          "date": "2026-03-08",
+          "league": "Major League Soccer",
+          "match": "Sporting Kansas City - San Diego",
+          "ht": "0-1",
+          "ft": "0-1",
+          "total_ht_goals": 1,
+          "total_ft_goals": 1
+        },
+        {
+          "date": "2026-03-02",
+          "league": "Major League Soccer",
+          "match": "San Diego - St. Louis City",
+          "ht": "1-0",
+          "ft": "2-0",
+          "total_ht_goals": 1,
+          "total_ft_goals": 2
+        },
+        {
+          "date": "2026-02-22",
+          "league": "Major League Soccer",
+          "match": "San Diego - CF Montreal",
+          "ht": "2-0",
+          "ft": "5-0",
+          "total_ht_goals": 2,
+          "total_ft_goals": 5
+        },
+        {
+          "date": "2026-02-11",
+          "league": "CONCACAF Champions League",
+          "match": "U.N.A.M. - Pumas - San Diego",
+          "ht": "0-0",
+          "ft": "1-0",
+          "total_ht_goals": 0,
+          "total_ft_goals": 1
+        },
+        {
+          "date": "2026-02-04",
+          "league": "CONCACAF Champions League",
+          "match": "San Diego - U.N.A.M. - Pumas",
+          "ht": "0-1",
+          "ft": "4-1",
+          "total_ht_goals": 1,
+          "total_ft_goals": 5
+        }
+      ],
+      "away_last_8": [
+        {
+          "date": "2026-03-15",
+          "league": "Major League Soccer",
+          "match": "Real Salt Lake - Austin",
+          "ht": "1-1",
+          "ft": "2-1",
+          "total_ht_goals": 2,
+          "total_ft_goals": 3
+        },
+        {
+          "date": "2026-03-08",
+          "league": "Major League Soccer",
+          "match": "Atlanta United FC - Real Salt Lake",
+          "ht": "1-3",
+          "ft": "2-3",
+          "total_ht_goals": 4,
+          "total_ft_goals": 5
+        },
+        {
+          "date": "2026-03-01",
+          "league": "Major League Soccer",
+          "match": "Real Salt Lake - Seattle Sounders",
+          "ht": "1-0",
+          "ft": "2-1",
+          "total_ht_goals": 1,
+          "total_ft_goals": 3
+        },
+        {
+          "date": "2026-02-22",
+          "league": "Major League Soccer",
+          "match": "Vancouver Whitecaps - Real Salt Lake",
+          "ht": "0-0",
+          "ft": "1-0",
+          "total_ht_goals": 0,
+          "total_ft_goals": 1
+        },
+        {
+          "date": "2026-02-13",
+          "league": "Friendlies Clubs",
+          "match": "Los Angeles Galaxy - Real Salt Lake",
+          "ht": "None-None",
+          "ft": "3-3",
+          "total_ht_goals": 0,
+          "total_ft_goals": 6
+        },
+        {
+          "date": "2026-02-06",
+          "league": "Friendlies Clubs",
+          "match": "Real Salt Lake - Orange County SC",
+          "ht": "1-0",
+          "ft": "1-1",
+          "total_ht_goals": 1,
+          "total_ft_goals": 2
+        },
+        {
+          "date": "2026-01-30",
+          "league": "The Atlantic Cup",
+          "match": "Real Salt Lake - FC Dallas",
+          "ht": "0-0",
+          "ft": "0-2",
+          "total_ht_goals": 0,
+          "total_ft_goals": 2
+        },
+        {
+          "date": "2026-01-26",
+          "league": "The Atlantic Cup",
+          "match": "Brondby - Real Salt Lake",
+          "ht": "1-1",
+          "ft": "1-2",
+          "total_ht_goals": 2,
+          "total_ft_goals": 3
+        }
+      ]
+    },
+    "1492569": {
+      "fixture_id": 1492569,
+      "date": "2026-03-23",
+      "time": "00:00",
+      "league": "Liga MX",
+      "country": "Mexico",
+      "match": "Santos Laguna - Puebla",
+      "home_team": "Santos Laguna",
+      "away_team": "Puebla",
+      "markets": {
+        "q1": 2.46,
+        "qx": 3.5,
+        "q2": 2.64,
+        "o25": 1.7,
+        "o05ht": 1.33,
+        "o15ht": 2.45
+      },
+      "averages": {
+        "home_avg_ft": 3.625,
+        "away_avg_ft": 2.125,
+        "home_avg_ht": 2.375,
+        "away_avg_ht": 0.625,
+        "combined_ht_avg": 1.5
+      },
+      "flags": {
+        "fav_quote": 2.46,
+        "is_gold_zone": false,
+        "home_last_2h_zero": false,
+        "away_last_2h_zero": true,
+        "drop_diff": 0.0,
+        "open_q1": 2.46,
+        "open_qx": 3.5,
+        "open_q2": 2.64,
+        "open_o25": 1.7,
+        "curr_q1": 2.46,
+        "curr_qx": 3.5,
+        "curr_q2": 2.64,
+        "curr_o25": 1.7,
+        "drop_q1": 0.0,
+        "drop_qx": 0.0,
+        "drop_q2": 0.0,
+        "drop_o25": 0.0,
+        "drop_last_q1": 0.0,
+        "drop_last_qx": 0.0,
+        "drop_last_q2": 0.0,
+        "drop_last_o25": 0.0,
+        "drop_side": "",
+        "drop_strength": "none",
+        "inversion": false,
+        "inversion_from": "1",
+        "inversion_to": "1",
+        "open_fav_side": "1",
+        "curr_fav_side": "1",
+        "open_fav_quote": 2.46,
+        "curr_fav_quote": 2.46,
+        "history_points": 1,
+        "first_seen_at": "2026-03-19T10:09:09",
+        "last_seen_at": "2026-03-19T10:09:09"
+      },
+      "scores": {
+        "pt": 5.2,
+        "over": 5.0,
+        "boost": 5.826,
+        "gold": 5.075,
+        "max": 5.826
+      },
+      "tags": [
+        "🎯PT",
+        "⚽ OVER",
+        "🐟G"
+      ],
+      "home_last_8": [
+        {
+          "date": "2026-03-14",
+          "league": "Liga MX",
+          "match": "Guadalajara Chivas - Santos Laguna",
+          "ht": "2-0",
+          "ft": "3-0",
+          "total_ht_goals": 2,
+          "total_ft_goals": 3
+        },
+        {
+          "date": "2026-03-09",
+          "league": "Liga MX",
+          "match": "Club Tijuana - Santos Laguna",
+          "ht": "0-0",
+          "ft": "1-2",
+          "total_ht_goals": 0,
+          "total_ft_goals": 3
+        },
+        {
+          "date": "2026-03-04",
+          "league": "Liga MX",
+          "match": "Santos Laguna - Cruz Azul",
+          "ht": "0-1",
+          "ft": "1-2",
+          "total_ht_goals": 1,
+          "total_ft_goals": 3
+        },
+        {
+          "date": "2026-02-28",
+          "league": "Liga MX",
+          "match": "Club Queretaro - Santos Laguna",
+          "ht": "2-2",
+          "ft": "2-2",
+          "total_ht_goals": 4,
+          "total_ft_goals": 4
+        },
+        {
+          "date": "2026-02-22",
+          "league": "Liga MX",
+          "match": "Leon - Santos Laguna",
+          "ht": "2-1",
+          "ft": "2-1",
+          "total_ht_goals": 3,
+          "total_ft_goals": 3
+        },
+        {
+          "date": "2026-02-15",
+          "league": "Liga MX",
+          "match": "Santos Laguna - Mazatlán",
+          "ht": "1-1",
+          "ft": "1-2",
+          "total_ht_goals": 2,
+          "total_ft_goals": 3
+        },
+        {
+          "date": "2026-02-07",
+          "league": "Liga MX",
+          "match": "Tigres UANL - Santos Laguna",
+          "ht": "2-1",
+          "ft": "5-1",
+          "total_ht_goals": 3,
+          "total_ft_goals": 6
+        },
+        {
+          "date": "2026-01-31",
+          "league": "Liga MX",
+          "match": "U.N.A.M. - Pumas - Santos Laguna",
+          "ht": "4-0",
+          "ft": "4-0",
+          "total_ht_goals": 4,
+          "total_ft_goals": 4
+        }
+      ],
+      "away_last_8": [
+        {
+          "date": "2026-03-14",
+          "league": "Liga MX",
+          "match": "Puebla - Necaxa",
+          "ht": "0-0",
+          "ft": "0-0",
+          "total_ht_goals": 0,
+          "total_ft_goals": 0
+        },
+        {
+          "date": "2026-03-08",
+          "league": "Liga MX",
+          "match": "Pachuca - Puebla",
+          "ht": "0-0",
+          "ft": "2-1",
+          "total_ht_goals": 0,
+          "total_ft_goals": 3
+        },
+        {
+          "date": "2026-03-05",
+          "league": "Liga MX",
+          "match": "Puebla - Tigres UANL",
+          "ht": "1-0",
+          "ft": "3-1",
+          "total_ht_goals": 1,
+          "total_ft_goals": 4
+        },
+        {
+          "date": "2026-02-28",
+          "league": "Liga MX",
+          "match": "Atletico San Luis - Puebla",
+          "ht": "0-0",
+          "ft": "0-1",
+          "total_ht_goals": 0,
+          "total_ft_goals": 1
+        },
+        {
+          "date": "2026-02-21",
+          "league": "Liga MX",
+          "match": "Puebla - Club America",
+          "ht": "0-1",
+          "ft": "0-4",
+          "total_ht_goals": 1,
+          "total_ft_goals": 4
+        },
+        {
+          "date": "2026-02-14",
+          "league": "Liga MX",
+          "match": "Puebla - U.N.A.M. - Pumas",
+          "ht": "2-1",
+          "ft": "2-3",
+          "total_ht_goals": 3,
+          "total_ft_goals": 5
+        },
+        {
+          "date": "2026-02-07",
+          "league": "Liga MX",
+          "match": "Club Tijuana - Puebla",
+          "ht": "0-0",
+          "ft": "0-0",
+          "total_ht_goals": 0,
+          "total_ft_goals": 0
+        },
+        {
+          "date": "2026-01-31",
+          "league": "Liga MX",
+          "match": "Puebla - Toluca",
+          "ht": "0-0",
+          "ft": "0-0",
+          "total_ht_goals": 0,
+          "total_ft_goals": 0
+        }
+      ]
+    },
+    "1494468": {
+      "fixture_id": 1494468,
+      "date": "2026-03-23",
+      "time": "00:00",
+      "league": "Liga de Expansión MX",
+      "country": "Mexico",
+      "match": "Tapatío - Monarcas",
+      "home_team": "Tapatío",
+      "away_team": "Monarcas",
+      "markets": {
+        "q1": 2.3,
+        "qx": 3.55,
+        "q2": 2.82,
+        "o25": 1.65,
+        "o05ht": 1.3,
+        "o15ht": 2.4
+      },
+      "averages": {
+        "home_avg_ft": 4.0,
+        "away_avg_ft": 2.375,
+        "home_avg_ht": 1.75,
+        "away_avg_ht": 1.375,
+        "combined_ht_avg": 1.562
+      },
+      "flags": {
+        "fav_quote": 2.3,
+        "is_gold_zone": false,
+        "home_last_2h_zero": false,
+        "away_last_2h_zero": false,
+        "drop_diff": 0.0,
+        "open_q1": 2.3,
+        "open_qx": 3.55,
+        "open_q2": 2.82,
+        "open_o25": 1.65,
+        "curr_q1": 2.3,
+        "curr_qx": 3.55,
+        "curr_q2": 2.82,
+        "curr_o25": 1.65,
+        "drop_q1": 0.0,
+        "drop_qx": 0.0,
+        "drop_q2": 0.0,
+        "drop_o25": 0.0,
+        "drop_last_q1": 0.0,
+        "drop_last_qx": 0.0,
+        "drop_last_q2": 0.0,
+        "drop_last_o25": 0.0,
+        "drop_side": "",
+        "drop_strength": "none",
+        "inversion": false,
+        "inversion_from": "1",
+        "inversion_to": "1",
+        "open_fav_side": "1",
+        "curr_fav_side": "1",
+        "open_fav_quote": 2.3,
+        "curr_fav_quote": 2.3,
+        "history_points": 1,
+        "first_seen_at": "2026-03-19T10:09:09",
+        "last_seen_at": "2026-03-19T10:09:09"
+      },
+      "scores": {
+        "pt": 6.4,
+        "over": 5.0,
+        "boost": 6.832,
+        "gold": 5.681,
+        "max": 6.832
+      },
+      "tags": [
+        "🎯PT",
+        "⚽ OVER",
+        "🚀 BOOST",
+        "🐟G"
+      ],
+      "home_last_8": [
+        {
+          "date": "2026-03-13",
+          "league": "Liga de Expansión MX",
+          "match": "Alebrijes de Oaxaca - Tapatío",
+          "ht": "3-1",
+          "ft": "4-3",
+          "total_ht_goals": 4,
+          "total_ft_goals": 7
+        },
+        {
+          "date": "2026-03-06",
+          "league": "Liga de Expansión MX",
+          "match": "Tapatío - Cancún",
+          "ht": "0-2",
+          "ft": "1-2",
+          "total_ht_goals": 2,
+          "total_ft_goals": 3
+        },
+        {
+          "date": "2026-02-28",
+          "league": "Liga de Expansión MX",
+          "match": "Correcaminos Uat - Tapatío",
+          "ht": "0-1",
+          "ft": "2-2",
+          "total_ht_goals": 1,
+          "total_ft_goals": 4
+        },
+        {
+          "date": "2026-02-13",
+          "league": "Liga de Expansión MX",
+          "match": "Tapatío - CDS Tampico Madero",
+          "ht": "1-0",
+          "ft": "3-1",
+          "total_ht_goals": 1,
+          "total_ft_goals": 4
+        },
+        {
+          "date": "2026-02-07",
+          "league": "Liga de Expansión MX",
+          "match": "Atlante FC - Tapatío",
+          "ht": "0-2",
+          "ft": "1-3",
+          "total_ht_goals": 2,
+          "total_ft_goals": 4
+        },
+        {
+          "date": "2026-01-30",
+          "league": "Liga de Expansión MX",
+          "match": "Tapatío - Leones Negros UDG",
+          "ht": "1-0",
+          "ft": "2-0",
+          "total_ht_goals": 1,
+          "total_ft_goals": 2
+        },
+        {
+          "date": "2026-01-24",
+          "league": "Liga de Expansión MX",
+          "match": "Tepatitlán - Tapatío",
+          "ht": "1-0",
+          "ft": "2-0",
+          "total_ht_goals": 1,
+          "total_ft_goals": 2
+        },
+        {
+          "date": "2026-01-16",
+          "league": "Liga de Expansión MX",
+          "match": "Tapatío - Venados FC",
+          "ht": "1-1",
+          "ft": "4-2",
+          "total_ht_goals": 2,
+          "total_ft_goals": 6
+        }
+      ],
+      "away_last_8": [
+        {
+          "date": "2026-03-15",
+          "league": "Liga de Expansión MX",
+          "match": "Monarcas - Tepatitlán",
+          "ht": "1-2",
+          "ft": "3-2",
+          "total_ht_goals": 3,
+          "total_ft_goals": 5
+        },
+        {
+          "date": "2026-03-07",
+          "league": "Liga de Expansión MX",
+          "match": "Atlante FC - Monarcas",
+          "ht": "2-1",
+          "ft": "2-1",
+          "total_ht_goals": 3,
+          "total_ft_goals": 3
+        },
+        {
+          "date": "2026-03-01",
+          "league": "Liga de Expansión MX",
+          "match": "Monarcas - CA La Paz",
+          "ht": "0-0",
+          "ft": "1-0",
+          "total_ht_goals": 0,
+          "total_ft_goals": 1
+        },
+        {
+          "date": "2026-02-21",
+          "league": "Liga de Expansión MX",
+          "match": "Dorados - Monarcas",
+          "ht": "0-0",
+          "ft": "0-1",
+          "total_ht_goals": 0,
+          "total_ft_goals": 1
+        },
+        {
+          "date": "2026-02-15",
+          "league": "Liga de Expansión MX",
+          "match": "Monarcas - Venados FC",
+          "ht": "1-0",
+          "ft": "2-1",
+          "total_ht_goals": 1,
+          "total_ft_goals": 3
+        },
+        {
+          "date": "2026-02-07",
+          "league": "Liga de Expansión MX",
+          "match": "Mineros de Zacatecas - Monarcas",
+          "ht": "1-1",
+          "ft": "1-1",
+          "total_ht_goals": 2,
+          "total_ft_goals": 2
+        },
+        {
+          "date": "2026-02-01",
+          "league": "Liga de Expansión MX",
+          "match": "Monarcas - Cancún",
+          "ht": "0-0",
+          "ft": "0-1",
+          "total_ht_goals": 0,
+          "total_ft_goals": 1
+        },
+        {
+          "date": "2026-01-17",
+          "league": "Liga de Expansión MX",
+          "match": "Alebrijes de Oaxaca - Monarcas",
+          "ht": "0-2",
+          "ft": "0-3",
+          "total_ht_goals": 2,
+          "total_ft_goals": 3
+        }
+      ]
+    },
+    "1494474": {
+      "fixture_id": 1494474,
+      "date": "2026-03-23",
+      "time": "00:00",
+      "league": "Liga de Expansión MX",
+      "country": "Mexico",
+      "match": "CDS Tampico Madero - Tlaxcala",
+      "home_team": "CDS Tampico Madero",
+      "away_team": "Tlaxcala",
+      "markets": {
+        "q1": 1.84,
+        "qx": 3.55,
+        "q2": 4.0,
+        "o25": 1.83,
+        "o05ht": 1.36,
+        "o15ht": 2.65
+      },
+      "averages": {
+        "home_avg_ft": 2.125,
+        "away_avg_ft": 2.375,
+        "home_avg_ht": 1.125,
+        "away_avg_ht": 1.625,
+        "combined_ht_avg": 1.375
+      },
+      "flags": {
+        "fav_quote": 1.84,
+        "is_gold_zone": true,
+        "home_last_2h_zero": false,
+        "away_last_2h_zero": true,
+        "drop_diff": 0.0,
+        "open_q1": 1.84,
+        "open_qx": 3.55,
+        "open_q2": 4.0,
+        "open_o25": 1.83,
+        "curr_q1": 1.84,
+        "curr_qx": 3.55,
+        "curr_q2": 4.0,
+        "curr_o25": 1.83,
+        "drop_q1": 0.0,
+        "drop_qx": 0.0,
+        "drop_q2": 0.0,
+        "drop_o25": 0.0,
+        "drop_last_q1": 0.0,
+        "drop_last_qx": 0.0,
+        "drop_last_q2": 0.0,
+        "drop_last_o25": 0.0,
+        "drop_side": "",
+        "drop_strength": "none",
+        "inversion": false,
+        "inversion_from": "1",
+        "inversion_to": "1",
+        "open_fav_side": "1",
+        "curr_fav_side": "1",
+        "open_fav_quote": 1.84,
+        "curr_fav_quote": 1.84,
+        "history_points": 1,
+        "first_seen_at": "2026-03-19T10:09:09",
+        "last_seen_at": "2026-03-19T10:09:09"
+      },
+      "scores": {
+        "pt": 6.8,
+        "over": 6.2,
+        "boost": 7.56,
+        "gold": 7.226,
+        "max": 7.56
+      },
+      "tags": [
+        "⚽⭐ GOLD",
+        "🎯PT",
+        "⚽ OVER",
+        "🚀 BOOST"
+      ],
+      "home_last_8": [
+        {
+          "date": "2026-03-19",
+          "league": "Liga de Expansión MX",
+          "match": "CDS Tampico Madero - Correcaminos Uat",
+          "ht": "1-1",
+          "ft": "3-1",
+          "total_ht_goals": 2,
+          "total_ft_goals": 4
+        },
+        {
+          "date": "2026-03-14",
+          "league": "Liga de Expansión MX",
+          "match": "Mineros de Zacatecas - CDS Tampico Madero",
+          "ht": "1-0",
+          "ft": "1-0",
+          "total_ht_goals": 1,
+          "total_ft_goals": 1
+        },
+        {
+          "date": "2026-03-08",
+          "league": "Liga de Expansión MX",
+          "match": "CDS Tampico Madero - Dorados",
+          "ht": "1-0",
+          "ft": "2-0",
+          "total_ht_goals": 1,
+          "total_ft_goals": 2
+        },
+        {
+          "date": "2026-03-01",
+          "league": "Liga de Expansión MX",
+          "match": "Cancún - CDS Tampico Madero",
+          "ht": "1-1",
+          "ft": "1-2",
+          "total_ht_goals": 2,
+          "total_ft_goals": 3
+        },
+        {
+          "date": "2026-02-13",
+          "league": "Liga de Expansión MX",
+          "match": "Tapatío - CDS Tampico Madero",
+          "ht": "1-0",
+          "ft": "3-1",
+          "total_ht_goals": 1,
+          "total_ft_goals": 4
+        },
+        {
+          "date": "2026-02-08",
+          "league": "Liga de Expansión MX",
+          "match": "CDS Tampico Madero - Irapuato",
+          "ht": "0-1",
+          "ft": "0-1",
+          "total_ht_goals": 1,
+          "total_ft_goals": 1
+        },
+        {
+          "date": "2026-01-24",
+          "league": "Liga de Expansión MX",
+          "match": "Atlante FC - CDS Tampico Madero",
+          "ht": "0-1",
+          "ft": "0-1",
+          "total_ht_goals": 1,
+          "total_ft_goals": 1
+        },
+        {
+          "date": "2026-01-18",
+          "league": "Liga de Expansión MX",
+          "match": "CDS Tampico Madero - Tepatitlán",
+          "ht": "0-0",
+          "ft": "0-1",
+          "total_ht_goals": 0,
+          "total_ft_goals": 1
+        }
+      ],
+      "away_last_8": [
+        {
+          "date": "2026-03-19",
+          "league": "Liga de Expansión MX",
+          "match": "Tlaxcala - Atlante FC",
+          "ht": "1-1",
+          "ft": "1-1",
+          "total_ht_goals": 2,
+          "total_ft_goals": 2
+        },
+        {
+          "date": "2026-03-08",
+          "league": "Liga de Expansión MX",
+          "match": "CA La Paz - Tlaxcala",
+          "ht": "1-0",
+          "ft": "2-0",
+          "total_ht_goals": 1,
+          "total_ft_goals": 2
+        },
+        {
+          "date": "2026-03-01",
+          "league": "Liga de Expansión MX",
+          "match": "Tlaxcala - Tepatitlán",
+          "ht": "0-0",
+          "ft": "1-0",
+          "total_ht_goals": 0,
+          "total_ft_goals": 1
+        },
+        {
+          "date": "2026-02-14",
+          "league": "Liga de Expansión MX",
+          "match": "Alebrijes de Oaxaca - Tlaxcala",
+          "ht": "0-0",
+          "ft": "0-0",
+          "total_ht_goals": 0,
+          "total_ft_goals": 0
+        },
+        {
+          "date": "2026-02-08",
+          "league": "Liga de Expansión MX",
+          "match": "Tlaxcala - Leones Negros UDG",
+          "ht": "4-1",
+          "ft": "5-2",
+          "total_ht_goals": 5,
+          "total_ft_goals": 7
+        },
+        {
+          "date": "2026-01-31",
+          "league": "Liga de Expansión MX",
+          "match": "Correcaminos Uat - Tlaxcala",
+          "ht": "2-0",
+          "ft": "2-1",
+          "total_ht_goals": 2,
+          "total_ft_goals": 3
+        },
+        {
+          "date": "2026-01-25",
+          "league": "Liga de Expansión MX",
+          "match": "Tlaxcala - Irapuato",
+          "ht": "2-1",
+          "ft": "2-1",
+          "total_ht_goals": 3,
+          "total_ft_goals": 3
+        },
+        {
+          "date": "2026-01-17",
+          "league": "Liga de Expansión MX",
+          "match": "Tlaxcala - Cancún",
+          "ht": "0-0",
+          "ft": "1-0",
+          "total_ht_goals": 0,
+          "total_ft_goals": 1
+        }
+      ]
+    },
+    "1520607": {
+      "fixture_id": 1520607,
+      "date": "2026-03-23",
+      "time": "00:00",
+      "league": "Serie B",
+      "country": "Brazil",
+      "match": "Novorizontino - Londrina",
+      "home_team": "Novorizontino",
+      "away_team": "Londrina",
+      "markets": {
+        "q1": 1.68,
+        "qx": 3.55,
+        "q2": 5.25,
+        "o25": 2.15,
+        "o05ht": 1.42,
+        "o15ht": 2.95
+      },
+      "averages": {
+        "home_avg_ft": 2.625,
+        "away_avg_ft": 2.0,
+        "home_avg_ht": 1.0,
+        "away_avg_ht": 1.375,
+        "combined_ht_avg": 1.188
+      },
+      "flags": {
+        "fav_quote": 1.68,
+        "is_gold_zone": true,
+        "home_last_2h_zero": false,
+        "away_last_2h_zero": true,
+        "drop_diff": 0.0,
+        "open_q1": 1.68,
+        "open_qx": 3.55,
+        "open_q2": 5.25,
+        "open_o25": 2.15,
+        "curr_q1": 1.68,
+        "curr_qx": 3.55,
+        "curr_q2": 5.25,
+        "curr_o25": 2.15,
+        "drop_q1": 0.0,
+        "drop_qx": 0.0,
+        "drop_q2": 0.0,
+        "drop_o25": 0.0,
+        "drop_last_q1": 0.0,
+        "drop_last_qx": 0.0,
+        "drop_last_q2": 0.0,
+        "drop_last_o25": 0.0,
+        "drop_side": "",
+        "drop_strength": "none",
+        "inversion": false,
+        "inversion_from": "1",
+        "inversion_to": "1",
+        "open_fav_side": "1",
+        "curr_fav_side": "1",
+        "open_fav_quote": 1.68,
+        "curr_fav_quote": 1.68,
+        "history_points": 1,
+        "first_seen_at": "2026-03-19T10:09:09",
+        "last_seen_at": "2026-03-19T10:09:09"
+      },
+      "scores": {
+        "pt": 5.7,
+        "over": 5.1,
+        "boost": 6.064,
+        "gold": 6.496,
+        "max": 6.496
+      },
+      "tags": [
+        "🎯PT",
+        "⚽ OVER",
+        "🐟O"
+      ],
+      "home_last_8": [
+        {
+          "date": "2026-03-12",
+          "league": "Copa Do Brasil",
+          "match": "Mixto - Novorizontino",
+          "ht": "0-1",
+          "ft": "0-3",
+          "total_ht_goals": 1,
+          "total_ft_goals": 3
+        },
+        {
+          "date": "2026-03-08",
+          "league": "Paulista - A1",
+          "match": "Novorizontino - Palmeiras",
+          "ht": "1-1",
+          "ft": "1-2",
+          "total_ht_goals": 2,
+          "total_ft_goals": 3
+        },
+        {
+          "date": "2026-03-04",
+          "league": "Paulista - A1",
+          "match": "Palmeiras - Novorizontino",
+          "ht": "1-0",
+          "ft": "1-0",
+          "total_ht_goals": 1,
+          "total_ft_goals": 1
+        },
+        {
+          "date": "2026-02-28",
+          "league": "Paulista - A1",
+          "match": "Novorizontino - Corinthians",
+          "ht": "0-0",
+          "ft": "1-0",
+          "total_ht_goals": 0,
+          "total_ft_goals": 1
+        },
+        {
+          "date": "2026-02-25",
+          "league": "Copa Do Brasil",
+          "match": "Novorizontino - Nacional AM",
+          "ht": "0-0",
+          "ft": "4-0",
+          "total_ht_goals": 0,
+          "total_ft_goals": 4
+        },
+        {
+          "date": "2026-02-22",
+          "league": "Paulista - A1",
+          "match": "Novorizontino - Santos",
+          "ht": "1-0",
+          "ft": "2-1",
+          "total_ht_goals": 1,
+          "total_ft_goals": 3
+        },
+        {
+          "date": "2026-02-15",
+          "league": "Paulista - A1",
+          "match": "RB Bragantino - Novorizontino",
+          "ht": "1-0",
+          "ft": "3-0",
+          "total_ht_goals": 1,
+          "total_ft_goals": 3
+        },
+        {
+          "date": "2026-02-07",
+          "league": "Paulista - A1",
+          "match": "Novorizontino - São Bernardo",
+          "ht": "1-1",
+          "ft": "2-1",
+          "total_ht_goals": 2,
+          "total_ft_goals": 3
+        }
+      ],
+      "away_last_8": [
+        {
+          "date": "2026-03-18",
+          "league": "Copa Do Brasil",
+          "match": "Londrina - Operario-PR",
+          "ht": "0-1",
+          "ft": "0-1",
+          "total_ht_goals": 1,
+          "total_ft_goals": 1
+        },
+        {
+          "date": "2026-02-28",
+          "league": "Paranaense - 1",
+          "match": "Operario-PR - Londrina",
+          "ht": "0-0",
+          "ft": "0-0",
+          "total_ht_goals": 0,
+          "total_ft_goals": 0
+        },
+        {
+          "date": "2026-02-25",
+          "league": "Copa Do Brasil",
+          "match": "Londrina - Penedense",
+          "ht": "1-0",
+          "ft": "1-0",
+          "total_ht_goals": 1,
+          "total_ft_goals": 1
+        },
+        {
+          "date": "2026-02-22",
+          "league": "Paranaense - 1",
+          "match": "Atletico Paranaense - Londrina",
+          "ht": "0-1",
+          "ft": "0-1",
+          "total_ht_goals": 1,
+          "total_ft_goals": 1
+        },
+        {
+          "date": "2026-02-15",
+          "league": "Paranaense - 1",
+          "match": "Londrina - Atletico Paranaense",
+          "ht": "1-2",
+          "ft": "2-2",
+          "total_ht_goals": 3,
+          "total_ft_goals": 4
+        },
+        {
+          "date": "2026-02-01",
+          "league": "Paranaense - 1",
+          "match": "Independiente FSJ - Londrina",
+          "ht": "0-1",
+          "ft": "1-1",
+          "total_ht_goals": 1,
+          "total_ft_goals": 2
+        },
+        {
+          "date": "2026-01-24",
+          "league": "Paranaense - 1",
+          "match": "Londrina - Cianorte",
+          "ht": "0-0",
+          "ft": "0-0",
+          "total_ht_goals": 0,
+          "total_ft_goals": 0
+        },
+        {
+          "date": "2026-01-20",
+          "league": "Paranaense - 1",
+          "match": "Andraus Brasil - Londrina",
+          "ht": "0-4",
+          "ft": "1-6",
+          "total_ht_goals": 4,
+          "total_ft_goals": 7
+        }
+      ]
+    },
+    "1510102": {
+      "fixture_id": 1510102,
+      "date": "2026-03-23",
+      "time": "00:15",
+      "league": "Liga Panameña de Fútbol",
+      "country": "Panama",
+      "match": "Sporting San Miguelito - Veraguas",
+      "home_team": "Sporting San Miguelito",
+      "away_team": "Veraguas",
+      "markets": {
+        "q1": 1.74,
+        "qx": 3.65,
+        "q2": 4.2,
+        "o25": 1.83,
+        "o05ht": 1.36,
+        "o15ht": 2.65
+      },
+      "averages": {
+        "home_avg_ft": 2.0,
+        "away_avg_ft": 3.5,
+        "home_avg_ht": 1.25,
+        "away_avg_ht": 2.25,
+        "combined_ht_avg": 1.75
+      },
+      "flags": {
+        "fav_quote": 1.74,
+        "is_gold_zone": true,
+        "home_last_2h_zero": false,
+        "away_last_2h_zero": true,
+        "drop_diff": 0.0,
+        "open_q1": 1.74,
+        "open_qx": 3.65,
+        "open_q2": 4.2,
+        "open_o25": 1.83,
+        "curr_q1": 1.74,
+        "curr_qx": 3.65,
+        "curr_q2": 4.2,
+        "curr_o25": 1.83,
+        "drop_q1": 0.0,
+        "drop_qx": 0.0,
+        "drop_q2": 0.0,
+        "drop_o25": 0.0,
+        "drop_last_q1": 0.0,
+        "drop_last_qx": 0.0,
+        "drop_last_q2": 0.0,
+        "drop_last_o25": 0.0,
+        "drop_side": "",
+        "drop_strength": "none",
+        "inversion": false,
+        "inversion_from": "1",
+        "inversion_to": "1",
+        "open_fav_side": "1",
+        "curr_fav_side": "1",
+        "open_fav_quote": 1.74,
+        "curr_fav_quote": 1.74,
+        "history_points": 1,
+        "first_seen_at": "2026-03-19T10:09:09",
+        "last_seen_at": "2026-03-19T10:09:09"
+      },
+      "scores": {
+        "pt": 6.1,
+        "over": 5.4,
+        "boost": 6.91,
+        "gold": 6.961,
+        "max": 6.961
+      },
+      "tags": [
+        "⚽⭐ GOLD",
+        "🎯PT",
+        "⚽ OVER",
+        "🚀 BOOST",
+        "🐟O"
+      ],
+      "home_last_8": [
+        {
+          "date": "2026-03-15",
+          "league": "Liga Panameña de Fútbol",
+          "match": "Herrera - Sporting San Miguelito",
+          "ht": "0-1",
+          "ft": "1-1",
+          "total_ht_goals": 1,
+          "total_ft_goals": 2
+        },
+        {
+          "date": "2026-03-08",
+          "league": "Liga Panameña de Fútbol",
+          "match": "Union Cocle - Sporting San Miguelito",
+          "ht": "1-2",
+          "ft": "1-2",
+          "total_ht_goals": 3,
+          "total_ft_goals": 3
+        },
+        {
+          "date": "2026-03-05",
+          "league": "Liga Panameña de Fútbol",
+          "match": "Deportivo Universitario - Sporting San Miguelito",
+          "ht": "1-0",
+          "ft": "1-1",
+          "total_ht_goals": 1,
+          "total_ft_goals": 2
+        },
+        {
+          "date": "2026-03-01",
+          "league": "Liga Panameña de Fútbol",
+          "match": "Sporting San Miguelito - Independiente de La Chorrera",
+          "ht": "1-1",
+          "ft": "1-1",
+          "total_ht_goals": 2,
+          "total_ft_goals": 2
+        },
+        {
+          "date": "2026-02-26",
+          "league": "CONCACAF Champions League",
+          "match": "Los Angeles Galaxy - Sporting San Miguelito",
+          "ht": "0-0",
+          "ft": "0-0",
+          "total_ht_goals": 0,
+          "total_ft_goals": 0
+        },
+        {
+          "date": "2026-02-20",
+          "league": "CONCACAF Champions League",
+          "match": "Sporting San Miguelito - Los Angeles Galaxy",
+          "ht": "1-0",
+          "ft": "1-1",
+          "total_ht_goals": 1,
+          "total_ft_goals": 2
+        },
+        {
+          "date": "2026-02-12",
+          "league": "Liga Panameña de Fútbol",
+          "match": "Sporting San Miguelito - Alianza FC",
+          "ht": "0-0",
+          "ft": "1-0",
+          "total_ht_goals": 0,
+          "total_ft_goals": 1
+        },
+        {
+          "date": "2026-02-07",
+          "league": "Liga Panameña de Fútbol",
+          "match": "UMECIT - Sporting San Miguelito",
+          "ht": "1-1",
+          "ft": "2-2",
+          "total_ht_goals": 2,
+          "total_ft_goals": 4
+        }
+      ],
+      "away_last_8": [
+        {
+          "date": "2026-03-14",
+          "league": "Liga Panameña de Fútbol",
+          "match": "Veraguas - Tauro FC",
+          "ht": "1-1",
+          "ft": "1-1",
+          "total_ht_goals": 2,
+          "total_ft_goals": 2
+        },
+        {
+          "date": "2026-03-10",
+          "league": "Liga Panameña de Fútbol",
+          "match": "CD Arabe Unido - Veraguas",
+          "ht": "1-2",
+          "ft": "2-3",
+          "total_ht_goals": 3,
+          "total_ft_goals": 5
+        },
+        {
+          "date": "2026-03-01",
+          "league": "Liga Panameña de Fútbol",
+          "match": "Veraguas - Plaza Amador",
+          "ht": "1-0",
+          "ft": "1-1",
+          "total_ht_goals": 1,
+          "total_ft_goals": 2
+        },
+        {
+          "date": "2026-02-22",
+          "league": "Liga Panameña de Fútbol",
+          "match": "Alianza FC - Veraguas",
+          "ht": "4-1",
+          "ft": "5-3",
+          "total_ht_goals": 5,
+          "total_ft_goals": 8
+        },
+        {
+          "date": "2026-02-12",
+          "league": "Liga Panameña de Fútbol",
+          "match": "Independiente de La Chorrera - Veraguas",
+          "ht": "0-0",
+          "ft": "1-0",
+          "total_ht_goals": 0,
+          "total_ft_goals": 1
+        },
+        {
+          "date": "2026-02-08",
+          "league": "Liga Panameña de Fútbol",
+          "match": "Veraguas - Herrera",
+          "ht": "3-0",
+          "ft": "5-0",
+          "total_ht_goals": 3,
+          "total_ft_goals": 5
+        },
+        {
+          "date": "2026-02-03",
+          "league": "Liga Panameña de Fútbol",
+          "match": "Veraguas - San Francisco FC",
+          "ht": "1-0",
+          "ft": "1-0",
+          "total_ht_goals": 1,
+          "total_ft_goals": 1
+        },
+        {
+          "date": "2026-01-25",
+          "league": "Liga Panameña de Fútbol",
+          "match": "Union Cocle - Veraguas",
+          "ht": "1-2",
+          "ft": "2-2",
+          "total_ht_goals": 3,
+          "total_ft_goals": 4
+        }
+      ]
+    },
+    "1526660": {
+      "fixture_id": 1526660,
+      "date": "2026-03-23",
+      "time": "00:15",
+      "league": "Liga Nacional",
+      "country": "Honduras",
+      "match": "CD Motagua - Real Espana",
+      "home_team": "CD Motagua",
+      "away_team": "Real Espana",
+      "markets": {
+        "q1": 1.85,
+        "qx": 3.5,
+        "q2": 3.4,
+        "o25": 1.95,
+        "o05ht": 1.36,
+        "o15ht": 2.79
+      },
+      "averages": {
+        "home_avg_ft": 2.625,
+        "away_avg_ft": 4.0,
+        "home_avg_ht": 0.75,
+        "away_avg_ht": 1.375,
+        "combined_ht_avg": 1.062
+      },
+      "flags": {
+        "fav_quote": 1.85,
+        "is_gold_zone": true,
+        "home_last_2h_zero": false,
+        "away_last_2h_zero": false,
+        "drop_diff": 0.0,
+        "open_q1": 1.85,
+        "open_qx": 3.5,
+        "open_q2": 3.4,
+        "open_o25": 1.95,
+        "curr_q1": 1.85,
+        "curr_qx": 3.5,
+        "curr_q2": 3.4,
+        "curr_o25": 1.95,
+        "drop_q1": 0.0,
+        "drop_qx": 0.0,
+        "drop_q2": 0.0,
+        "drop_o25": 0.0,
+        "drop_last_q1": 0.0,
+        "drop_last_qx": 0.0,
+        "drop_last_q2": 0.0,
+        "drop_last_o25": 0.0,
+        "drop_side": "",
+        "drop_strength": "none",
+        "inversion": false,
+        "inversion_from": "1",
+        "inversion_to": "1",
+        "open_fav_side": "1",
+        "curr_fav_side": "1",
+        "open_fav_quote": 1.85,
+        "curr_fav_quote": 1.85,
+        "history_points": 1,
+        "first_seen_at": "2026-03-19T10:09:09",
+        "last_seen_at": "2026-03-19T10:09:09"
+      },
+      "scores": {
+        "pt": 3.7,
+        "over": 4.4,
+        "boost": 4.618,
+        "gold": 4.554,
+        "max": 4.618
+      },
+      "tags": [
+        "⚽ OVER"
+      ],
+      "home_last_8": [
+        {
+          "date": "2026-03-11",
+          "league": "Liga Nacional",
+          "match": "CD Motagua - Lobos Upnfm",
+          "ht": "1-0",
+          "ft": "2-0",
+          "total_ht_goals": 1,
+          "total_ft_goals": 2
+        },
+        {
+          "date": "2026-03-08",
+          "league": "Liga Nacional",
+          "match": "Atlético Choloma - CD Motagua",
+          "ht": "1-1",
+          "ft": "1-3",
+          "total_ht_goals": 2,
+          "total_ft_goals": 4
+        },
+        {
+          "date": "2026-03-01",
+          "league": "Liga Nacional",
+          "match": "CD Motagua - Olancho",
+          "ht": "0-0",
+          "ft": "1-1",
+          "total_ht_goals": 0,
+          "total_ft_goals": 2
+        },
+        {
+          "date": "2026-02-25",
+          "league": "Liga Nacional",
+          "match": "Juticalpa - CD Motagua",
+          "ht": "0-0",
+          "ft": "1-2",
+          "total_ht_goals": 0,
+          "total_ft_goals": 3
+        },
+        {
+          "date": "2026-02-23",
+          "league": "Liga Nacional",
+          "match": "CD Olimpia - CD Motagua",
+          "ht": "0-0",
+          "ft": "0-1",
+          "total_ht_goals": 0,
+          "total_ft_goals": 1
+        },
+        {
+          "date": "2026-02-15",
+          "league": "Liga Nacional",
+          "match": "CD Motagua - CD Marathon",
+          "ht": "1-0",
+          "ft": "1-1",
+          "total_ht_goals": 1,
+          "total_ft_goals": 2
+        },
+        {
+          "date": "2026-02-11",
+          "league": "Liga Nacional",
+          "match": "Génesis - CD Motagua",
+          "ht": "0-0",
+          "ft": "0-5",
+          "total_ht_goals": 0,
+          "total_ft_goals": 5
+        },
+        {
+          "date": "2026-02-08",
+          "league": "Liga Nacional",
+          "match": "CD Motagua - Victoria",
+          "ht": "1-1",
+          "ft": "1-1",
+          "total_ht_goals": 2,
+          "total_ft_goals": 2
+        }
+      ],
+      "away_last_8": [
+        {
+          "date": "2026-03-19",
+          "league": "Liga Nacional",
+          "match": "Real Espana - Génesis",
+          "ht": "1-0",
+          "ft": "2-1",
+          "total_ht_goals": 1,
+          "total_ft_goals": 3
+        },
+        {
+          "date": "2026-03-14",
+          "league": "Liga Nacional",
+          "match": "Olancho - Real Espana",
+          "ht": "0-0",
+          "ft": "3-0",
+          "total_ht_goals": 0,
+          "total_ft_goals": 3
+        },
+        {
+          "date": "2026-03-12",
+          "league": "Liga Nacional",
+          "match": "Real Espana - Victoria",
+          "ht": "1-0",
+          "ft": "4-1",
+          "total_ht_goals": 1,
+          "total_ft_goals": 5
+        },
+        {
+          "date": "2026-03-08",
+          "league": "Liga Nacional",
+          "match": "CD Olimpia - Real Espana",
+          "ht": "0-0",
+          "ft": "1-1",
+          "total_ht_goals": 0,
+          "total_ft_goals": 2
+        },
+        {
+          "date": "2026-03-02",
+          "league": "Liga Nacional",
+          "match": "Platense FC - Real Espana",
+          "ht": "1-1",
+          "ft": "2-2",
+          "total_ht_goals": 2,
+          "total_ft_goals": 4
+        },
+        {
+          "date": "2026-02-25",
+          "league": "CONCACAF Champions League",
+          "match": "Los Angeles FC - Real Espana",
+          "ht": "0-0",
+          "ft": "1-0",
+          "total_ht_goals": 0,
+          "total_ft_goals": 1
+        },
+        {
+          "date": "2026-02-21",
+          "league": "Liga Nacional",
+          "match": "Real Espana - Lobos Upnfm",
+          "ht": "2-0",
+          "ft": "4-3",
+          "total_ht_goals": 2,
+          "total_ft_goals": 7
+        },
+        {
+          "date": "2026-02-18",
+          "league": "CONCACAF Champions League",
+          "match": "Real Espana - Los Angeles FC",
+          "ht": "0-5",
+          "ft": "1-6",
+          "total_ht_goals": 5,
+          "total_ft_goals": 7
+        }
+      ]
+    },
+    "1492182": {
+      "fixture_id": 1492182,
+      "date": "2026-03-23",
+      "time": "00:30",
+      "league": "Serie A",
+      "country": "Brazil",
+      "match": "Corinthians - Flamengo",
+      "home_team": "Corinthians",
+      "away_team": "Flamengo",
+      "markets": {
+        "q1": 3.4,
+        "qx": 3.25,
+        "q2": 2.14,
+        "o25": 2.1,
+        "o05ht": 1.42,
+        "o15ht": 2.9
+      },
+      "averages": {
+        "home_avg_ft": 1.5,
+        "away_avg_ft": 3.875,
+        "home_avg_ht": 0.625,
+        "away_avg_ht": 1.625,
+        "combined_ht_avg": 1.125
+      },
+      "flags": {
+        "fav_quote": 2.14,
+        "is_gold_zone": false,
+        "home_last_2h_zero": true,
+        "away_last_2h_zero": false,
+        "drop_diff": 0.0,
+        "open_q1": 3.4,
+        "open_qx": 3.25,
+        "open_q2": 2.14,
+        "open_o25": 2.1,
+        "curr_q1": 3.4,
+        "curr_qx": 3.25,
+        "curr_q2": 2.14,
+        "curr_o25": 2.1,
+        "drop_q1": 0.0,
+        "drop_qx": 0.0,
+        "drop_q2": 0.0,
+        "drop_o25": 0.0,
+        "drop_last_q1": 0.0,
+        "drop_last_qx": 0.0,
+        "drop_last_q2": 0.0,
+        "drop_last_o25": 0.0,
+        "drop_side": "",
+        "drop_strength": "none",
+        "inversion": false,
+        "inversion_from": "2",
+        "inversion_to": "2",
+        "open_fav_side": "2",
+        "curr_fav_side": "2",
+        "open_fav_quote": 2.14,
+        "curr_fav_quote": 2.14,
+        "history_points": 1,
+        "first_seen_at": "2026-03-19T10:09:09",
+        "last_seen_at": "2026-03-19T10:09:09"
+      },
+      "scores": {
+        "pt": 4.3,
+        "over": 4.3,
+        "boost": 3.948,
+        "gold": 3.578,
+        "max": 4.3
+      },
+      "tags": [
+        "🎯PT",
+        "⚽ OVER",
+        "🐟G"
+      ],
+      "home_last_8": [
+        {
+          "date": "2026-03-15",
+          "league": "Serie A",
+          "match": "Santos - Corinthians",
+          "ht": "1-1",
+          "ft": "1-1",
+          "total_ht_goals": 2,
+          "total_ft_goals": 2
+        },
+        {
+          "date": "2026-03-12",
+          "league": "Serie A",
+          "match": "Corinthians - Coritiba",
+          "ht": "0-1",
+          "ft": "0-2",
+          "total_ht_goals": 1,
+          "total_ft_goals": 2
+        },
+        {
+          "date": "2026-02-28",
+          "league": "Paulista - A1",
+          "match": "Novorizontino - Corinthians",
+          "ht": "0-0",
+          "ft": "1-0",
+          "total_ht_goals": 0,
+          "total_ft_goals": 1
+        },
+        {
+          "date": "2026-02-25",
+          "league": "Serie A",
+          "match": "Cruzeiro - Corinthians",
+          "ht": "1-0",
+          "ft": "1-1",
+          "total_ht_goals": 1,
+          "total_ft_goals": 2
+        },
+        {
+          "date": "2026-02-19",
+          "league": "Serie A",
+          "match": "Atletico Paranaense - Corinthians",
+          "ht": "0-1",
+          "ft": "0-1",
+          "total_ht_goals": 1,
+          "total_ft_goals": 1
+        },
+        {
+          "date": "2026-02-15",
+          "league": "Paulista - A1",
+          "match": "São Bernardo - Corinthians",
+          "ht": "0-0",
+          "ft": "0-1",
+          "total_ht_goals": 0,
+          "total_ft_goals": 1
+        },
+        {
+          "date": "2026-02-12",
+          "league": "Serie A",
+          "match": "Corinthians - RB Bragantino",
+          "ht": "0-0",
+          "ft": "2-0",
+          "total_ht_goals": 0,
+          "total_ft_goals": 2
+        },
+        {
+          "date": "2026-02-08",
+          "league": "Paulista - A1",
+          "match": "Corinthians - Palmeiras",
+          "ht": "0-0",
+          "ft": "0-1",
+          "total_ht_goals": 0,
+          "total_ft_goals": 1
+        }
+      ],
+      "away_last_8": [
+        {
+          "date": "2026-03-14",
+          "league": "Serie A",
+          "match": "Botafogo - Flamengo",
+          "ht": "0-2",
+          "ft": "0-3",
+          "total_ht_goals": 2,
+          "total_ft_goals": 3
+        },
+        {
+          "date": "2026-03-12",
+          "league": "Serie A",
+          "match": "Flamengo - Cruzeiro",
+          "ht": "1-0",
+          "ft": "2-0",
+          "total_ht_goals": 1,
+          "total_ft_goals": 2
+        },
+        {
+          "date": "2026-03-03",
+          "league": "Carioca - 1",
+          "match": "Madureira - Flamengo",
+          "ht": "0-4",
+          "ft": "0-8",
+          "total_ht_goals": 4,
+          "total_ft_goals": 8
+        },
+        {
+          "date": "2026-02-22",
+          "league": "Carioca - 1",
+          "match": "Flamengo - Madureira",
+          "ht": "0-0",
+          "ft": "3-0",
+          "total_ht_goals": 0,
+          "total_ft_goals": 3
+        },
+        {
+          "date": "2026-02-20",
+          "league": "CONMEBOL Recopa",
+          "match": "Lanus - Flamengo",
+          "ht": "0-0",
+          "ft": "1-0",
+          "total_ht_goals": 0,
+          "total_ft_goals": 1
+        },
+        {
+          "date": "2026-02-15",
+          "league": "Carioca - 1",
+          "match": "Botafogo - Flamengo",
+          "ht": "0-1",
+          "ft": "1-2",
+          "total_ht_goals": 1,
+          "total_ft_goals": 3
+        },
+        {
+          "date": "2026-02-11",
+          "league": "Serie A",
+          "match": "Vitoria - Flamengo",
+          "ht": "0-2",
+          "ft": "1-2",
+          "total_ht_goals": 2,
+          "total_ft_goals": 3
+        },
+        {
+          "date": "2026-02-08",
+          "league": "Carioca - 1",
+          "match": "Flamengo - Sampaio Corrêa RJ",
+          "ht": "2-1",
+          "ft": "7-1",
+          "total_ht_goals": 3,
+          "total_ft_goals": 8
+        }
+      ]
+    },
+    "1511524": {
+      "fixture_id": 1511524,
+      "date": "2026-03-23",
+      "time": "00:30",
+      "league": "Primera B",
+      "country": "Chile",
+      "match": "Deportes Temuco - San Luis",
+      "home_team": "Deportes Temuco",
+      "away_team": "San Luis",
+      "markets": {
+        "q1": 2.2,
+        "qx": 3.25,
+        "q2": 2.88,
+        "o25": 2.15,
+        "o05ht": 1.4,
+        "o15ht": 3.02
+      },
+      "averages": {
+        "home_avg_ft": 2.75,
+        "away_avg_ft": 2.0,
+        "home_avg_ht": 1.375,
+        "away_avg_ht": 0.75,
+        "combined_ht_avg": 1.062
+      },
+      "flags": {
+        "fav_quote": 2.2,
+        "is_gold_zone": false,
+        "home_last_2h_zero": true,
+        "away_last_2h_zero": false,
+        "drop_diff": 0.0,
+        "open_q1": 2.2,
+        "open_qx": 3.25,
+        "open_q2": 2.88,
+        "open_o25": 2.15,
+        "curr_q1": 2.2,
+        "curr_qx": 3.25,
+        "curr_q2": 2.88,
+        "curr_o25": 2.15,
+        "drop_q1": 0.0,
+        "drop_qx": 0.0,
+        "drop_q2": 0.0,
+        "drop_o25": 0.0,
+        "drop_last_q1": 0.0,
+        "drop_last_qx": 0.0,
+        "drop_last_q2": 0.0,
+        "drop_last_o25": 0.0,
+        "drop_side": "",
+        "drop_strength": "none",
+        "inversion": false,
+        "inversion_from": "1",
+        "inversion_to": "1",
+        "open_fav_side": "1",
+        "curr_fav_side": "1",
+        "open_fav_quote": 2.2,
+        "curr_fav_quote": 2.2,
+        "history_points": 1,
+        "first_seen_at": "2026-03-19T10:09:09",
+        "last_seen_at": "2026-03-19T10:09:09"
+      },
+      "scores": {
+        "pt": 4.5,
+        "over": 4.4,
+        "boost": 4.372,
+        "gold": 3.796,
+        "max": 4.5
+      },
+      "tags": [
+        "🎯PT",
+        "⚽ OVER",
+        "🐟G"
+      ],
+      "home_last_8": [
+        {
+          "date": "2026-03-14",
+          "league": "Primera B",
+          "match": "Magallanes - Deportes Temuco",
+          "ht": "0-1",
+          "ft": "0-1",
+          "total_ht_goals": 1,
+          "total_ft_goals": 1
+        },
+        {
+          "date": "2026-03-09",
+          "league": "Primera B",
+          "match": "Deportes Copiapo - Deportes Temuco",
+          "ht": "0-0",
+          "ft": "1-1",
+          "total_ht_goals": 0,
+          "total_ft_goals": 2
+        },
+        {
+          "date": "2026-03-01",
+          "league": "Primera B",
+          "match": "Deportes Temuco - Deportes Iquique",
+          "ht": "0-0",
+          "ft": "1-1",
+          "total_ht_goals": 0,
+          "total_ft_goals": 2
+        },
+        {
+          "date": "2026-02-23",
+          "league": "Primera B",
+          "match": "Cobreloa - Deportes Temuco",
+          "ht": "3-1",
+          "ft": "3-1",
+          "total_ht_goals": 4,
+          "total_ft_goals": 4
+        },
+        {
+          "date": "2026-02-07",
+          "league": "Copa Chile",
+          "match": "Deportes Temuco - D. Puerto Montt",
+          "ht": "0-0",
+          "ft": "2-1",
+          "total_ht_goals": 0,
+          "total_ft_goals": 3
+        },
+        {
+          "date": "2026-01-31",
+          "league": "Copa Chile",
+          "match": "D. Puerto Montt - Deportes Temuco",
+          "ht": "1-0",
+          "ft": "1-1",
+          "total_ht_goals": 1,
+          "total_ft_goals": 2
+        },
+        {
+          "date": "2025-10-31",
+          "league": "Primera B",
+          "match": "Deportes Temuco - Recoleta",
+          "ht": "2-0",
+          "ft": "3-0",
+          "total_ht_goals": 2,
+          "total_ft_goals": 3
+        },
+        {
+          "date": "2025-10-24",
+          "league": "Primera B",
+          "match": "Universidad de Concepcion - Deportes Temuco",
+          "ht": "2-1",
+          "ft": "3-2",
+          "total_ht_goals": 3,
+          "total_ft_goals": 5
+        }
+      ],
+      "away_last_8": [
+        {
+          "date": "2026-03-14",
+          "league": "Primera B",
+          "match": "San Luis - Deportes Copiapo",
+          "ht": "0-1",
+          "ft": "2-2",
+          "total_ht_goals": 1,
+          "total_ft_goals": 4
+        },
+        {
+          "date": "2026-03-08",
+          "league": "Primera B",
+          "match": "Rangers de Talca - San Luis",
+          "ht": "1-0",
+          "ft": "1-1",
+          "total_ht_goals": 1,
+          "total_ft_goals": 2
+        },
+        {
+          "date": "2026-03-02",
+          "league": "Primera B",
+          "match": "San Luis - Curico Unido",
+          "ht": "1-0",
+          "ft": "1-1",
+          "total_ht_goals": 1,
+          "total_ft_goals": 2
+        },
+        {
+          "date": "2026-02-21",
+          "league": "Primera B",
+          "match": "Union Espanola - San Luis",
+          "ht": "1-0",
+          "ft": "2-0",
+          "total_ht_goals": 1,
+          "total_ft_goals": 2
+        },
+        {
+          "date": "2026-02-07",
+          "league": "Copa Chile",
+          "match": "San Luis - Deportes Copiapo",
+          "ht": "0-0",
+          "ft": "1-1",
+          "total_ht_goals": 0,
+          "total_ft_goals": 2
+        },
+        {
+          "date": "2026-01-31",
+          "league": "Copa Chile",
+          "match": "Deportes Copiapo - San Luis",
+          "ht": "0-0",
+          "ft": "1-0",
+          "total_ht_goals": 0,
+          "total_ft_goals": 1
+        },
+        {
+          "date": "2025-11-02",
+          "league": "Primera B",
+          "match": "Santiago Morning - San Luis",
+          "ht": "2-0",
+          "ft": "3-0",
+          "total_ht_goals": 2,
+          "total_ft_goals": 3
+        },
+        {
+          "date": "2025-10-24",
+          "league": "Primera B",
+          "match": "San Luis - Deportes Copiapo",
+          "ht": "0-0",
+          "ft": "0-0",
+          "total_ht_goals": 0,
+          "total_ft_goals": 0
+        }
+      ]
+    },
+    "1489157": {
+      "fixture_id": 1489157,
+      "date": "2026-03-23",
+      "time": "01:00",
+      "league": "Primera División",
+      "country": "Costa-Rica",
+      "match": "San Carlos - Deportivo Saprissa",
+      "home_team": "San Carlos",
+      "away_team": "Deportivo Saprissa",
+      "markets": {
+        "q1": 4.0,
+        "qx": 3.2,
+        "q2": 1.75,
+        "o25": 1.95,
+        "o05ht": 1.36,
+        "o15ht": 2.7
+      },
+      "averages": {
+        "home_avg_ft": 2.125,
+        "away_avg_ft": 3.0,
+        "home_avg_ht": 1.375,
+        "away_avg_ht": 1.5,
+        "combined_ht_avg": 1.438
+      },
+      "flags": {
+        "fav_quote": 1.75,
+        "is_gold_zone": true,
+        "home_last_2h_zero": false,
+        "away_last_2h_zero": false,
+        "drop_diff": 0.0,
+        "open_q1": 4.0,
+        "open_qx": 3.2,
+        "open_q2": 1.75,
+        "open_o25": 1.95,
+        "curr_q1": 4.0,
+        "curr_qx": 3.2,
+        "curr_q2": 1.75,
+        "curr_o25": 1.95,
+        "drop_q1": 0.0,
+        "drop_qx": 0.0,
+        "drop_q2": 0.0,
+        "drop_o25": 0.0,
+        "drop_last_q1": 0.0,
+        "drop_last_qx": 0.0,
+        "drop_last_q2": 0.0,
+        "drop_last_o25": 0.0,
+        "drop_side": "",
+        "drop_strength": "none",
+        "inversion": false,
+        "inversion_from": "2",
+        "inversion_to": "2",
+        "open_fav_side": "2",
+        "curr_fav_side": "2",
+        "open_fav_quote": 1.75,
+        "curr_fav_quote": 1.75,
+        "history_points": 1,
+        "first_seen_at": "2026-03-19T10:09:09",
+        "last_seen_at": "2026-03-19T10:09:09"
+      },
+      "scores": {
+        "pt": 6.8,
+        "over": 5.4,
+        "boost": 7.176,
+        "gold": 7.206,
+        "max": 7.206
+      },
+      "tags": [
+        "⚽⭐ GOLD",
+        "🎯PT",
+        "⚽ OVER",
+        "🚀 BOOST"
+      ],
+      "home_last_8": [
+        {
+          "date": "2026-03-15",
+          "league": "Primera División",
+          "match": "Sporting San Jose - San Carlos",
+          "ht": "0-0",
+          "ft": "1-0",
+          "total_ht_goals": 0,
+          "total_ft_goals": 1
+        },
+        {
+          "date": "2026-03-08",
+          "league": "Primera División",
+          "match": "San Carlos - LD Alajuelense",
+          "ht": "0-1",
+          "ft": "0-2",
+          "total_ht_goals": 1,
+          "total_ft_goals": 2
+        },
+        {
+          "date": "2026-03-05",
+          "league": "Primera División",
+          "match": "Puntarenas FC - San Carlos",
+          "ht": "0-0",
+          "ft": "0-0",
+          "total_ht_goals": 0,
+          "total_ft_goals": 0
+        },
+        {
+          "date": "2026-03-02",
+          "league": "Primera División",
+          "match": "San Carlos - CS Cartagines",
+          "ht": "1-0",
+          "ft": "1-1",
+          "total_ht_goals": 1,
+          "total_ft_goals": 2
+        },
+        {
+          "date": "2026-02-23",
+          "league": "Primera División",
+          "match": "San Carlos - CS Herediano",
+          "ht": "1-0",
+          "ft": "1-0",
+          "total_ht_goals": 1,
+          "total_ft_goals": 1
+        },
+        {
+          "date": "2026-02-14",
+          "league": "Primera División",
+          "match": "Guadalupe FC - San Carlos",
+          "ht": "3-2",
+          "ft": "3-4",
+          "total_ht_goals": 5,
+          "total_ft_goals": 7
+        },
+        {
+          "date": "2026-02-08",
+          "league": "Primera División",
+          "match": "Deportivo Saprissa - San Carlos",
+          "ht": "2-1",
+          "ft": "2-1",
+          "total_ht_goals": 3,
+          "total_ft_goals": 3
+        },
+        {
+          "date": "2026-01-29",
+          "league": "Primera División",
+          "match": "San Carlos - Municipal Liberia",
+          "ht": "0-0",
+          "ft": "1-0",
+          "total_ht_goals": 0,
+          "total_ft_goals": 1
+        }
+      ],
+      "away_last_8": [
+        {
+          "date": "2026-03-15",
+          "league": "Primera División",
+          "match": "CS Cartagines - Deportivo Saprissa",
+          "ht": "0-1",
+          "ft": "2-1",
+          "total_ht_goals": 1,
+          "total_ft_goals": 3
+        },
+        {
+          "date": "2026-03-08",
+          "league": "Primera División",
+          "match": "Deportivo Saprissa - CS Herediano",
+          "ht": "0-0",
+          "ft": "2-1",
+          "total_ht_goals": 0,
+          "total_ft_goals": 3
+        },
+        {
+          "date": "2026-03-06",
+          "league": "Primera División",
+          "match": "Deportivo Saprissa - Sporting San Jose",
+          "ht": "1-1",
+          "ft": "1-2",
+          "total_ht_goals": 2,
+          "total_ft_goals": 3
+        },
+        {
+          "date": "2026-03-01",
+          "league": "Primera División",
+          "match": "Guadalupe FC - Deportivo Saprissa",
+          "ht": "0-0",
+          "ft": "0-2",
+          "total_ht_goals": 0,
+          "total_ft_goals": 2
+        },
+        {
+          "date": "2026-02-22",
+          "league": "Primera División",
+          "match": "Deportivo Saprissa - LD Alajuelense",
+          "ht": "1-1",
+          "ft": "2-1",
+          "total_ht_goals": 2,
+          "total_ft_goals": 3
+        },
+        {
+          "date": "2026-02-15",
+          "league": "Primera División",
+          "match": "Municipal Liberia - Deportivo Saprissa",
+          "ht": "0-0",
+          "ft": "0-1",
+          "total_ht_goals": 0,
+          "total_ft_goals": 1
+        },
+        {
+          "date": "2026-02-12",
+          "league": "Copa Costa Rica",
+          "match": "AD Carmelita - Deportivo Saprissa",
+          "ht": "1-3",
+          "ft": "2-4",
+          "total_ht_goals": 4,
+          "total_ft_goals": 6
+        },
+        {
+          "date": "2026-02-08",
+          "league": "Primera División",
+          "match": "Deportivo Saprissa - San Carlos",
+          "ht": "2-1",
+          "ft": "2-1",
+          "total_ht_goals": 3,
+          "total_ft_goals": 3
+        }
+      ]
+    },
+    "1492570": {
+      "fixture_id": 1492570,
+      "date": "2026-03-23",
+      "time": "02:00",
+      "league": "Liga MX",
+      "country": "Mexico",
+      "match": "FC Juarez - Tigres UANL",
+      "home_team": "FC Juarez",
+      "away_team": "Tigres UANL",
+      "markets": {
+        "q1": 3.3,
+        "qx": 3.5,
+        "q2": 2.06,
+        "o25": 1.9,
+        "o05ht": 1.35,
+        "o15ht": 2.65
+      },
+      "averages": {
+        "home_avg_ft": 4.125,
+        "away_avg_ft": 3.0,
+        "home_avg_ht": 2.0,
+        "away_avg_ht": 0.75,
+        "combined_ht_avg": 1.375
+      },
+      "flags": {
+        "fav_quote": 2.06,
+        "is_gold_zone": false,
+        "home_last_2h_zero": false,
+        "away_last_2h_zero": true,
+        "drop_diff": 0.0,
+        "open_q1": 3.3,
+        "open_qx": 3.5,
+        "open_q2": 2.06,
+        "open_o25": 1.9,
+        "curr_q1": 3.3,
+        "curr_qx": 3.5,
+        "curr_q2": 2.06,
+        "curr_o25": 1.9,
+        "drop_q1": 0.0,
+        "drop_qx": 0.0,
+        "drop_q2": 0.0,
+        "drop_o25": 0.0,
+        "drop_last_q1": 0.0,
+        "drop_last_qx": 0.0,
+        "drop_last_q2": 0.0,
+        "drop_last_o25": 0.0,
+        "drop_side": "",
+        "drop_strength": "none",
+        "inversion": false,
+        "inversion_from": "2",
+        "inversion_to": "2",
+        "open_fav_side": "2",
+        "curr_fav_side": "2",
+        "open_fav_quote": 2.06,
+        "curr_fav_quote": 2.06,
+        "history_points": 1,
+        "first_seen_at": "2026-03-19T10:09:09",
+        "last_seen_at": "2026-03-19T10:09:09"
+      },
+      "scores": {
+        "pt": 5.2,
+        "over": 5.4,
+        "boost": 6.018,
+        "gold": 5.26,
+        "max": 6.018
+      },
+      "tags": [
+        "🎯PT",
+        "⚽ OVER",
+        "🐟G"
+      ],
+      "home_last_8": [
+        {
+          "date": "2026-03-14",
+          "league": "Liga MX",
+          "match": "FC Juarez - Monterrey",
+          "ht": "0-2",
+          "ft": "2-2",
+          "total_ht_goals": 2,
+          "total_ft_goals": 4
+        },
+        {
+          "date": "2026-03-08",
+          "league": "Liga MX",
+          "match": "Toluca - FC Juarez",
+          "ht": "0-0",
+          "ft": "3-1",
+          "total_ht_goals": 0,
+          "total_ft_goals": 4
+        },
+        {
+          "date": "2026-03-05",
+          "league": "Liga MX",
+          "match": "Club America - FC Juarez",
+          "ht": "0-1",
+          "ft": "1-2",
+          "total_ht_goals": 1,
+          "total_ft_goals": 3
+        },
+        {
+          "date": "2026-02-28",
+          "league": "Liga MX",
+          "match": "FC Juarez - Atlas",
+          "ht": "2-1",
+          "ft": "3-1",
+          "total_ht_goals": 3,
+          "total_ft_goals": 4
+        },
+        {
+          "date": "2026-02-15",
+          "league": "Liga MX",
+          "match": "FC Juarez - Necaxa",
+          "ht": "1-1",
+          "ft": "1-2",
+          "total_ht_goals": 2,
+          "total_ft_goals": 3
+        },
+        {
+          "date": "2026-02-08",
+          "league": "Liga MX",
+          "match": "Pachuca - FC Juarez",
+          "ht": "1-0",
+          "ft": "2-0",
+          "total_ht_goals": 1,
+          "total_ft_goals": 2
+        },
+        {
+          "date": "2026-02-04",
+          "league": "Friendlies Clubs",
+          "match": "El Paso Locomotive - FC Juarez",
+          "ht": "1-2",
+          "ft": "2-4",
+          "total_ht_goals": 3,
+          "total_ft_goals": 6
+        },
+        {
+          "date": "2026-01-31",
+          "league": "Liga MX",
+          "match": "FC Juarez - Cruz Azul",
+          "ht": "1-3",
+          "ft": "3-4",
+          "total_ht_goals": 4,
+          "total_ft_goals": 7
+        }
+      ],
+      "away_last_8": [
+        {
+          "date": "2026-03-15",
+          "league": "Liga MX",
+          "match": "Tigres UANL - Club Queretaro",
+          "ht": "0-0",
+          "ft": "0-0",
+          "total_ht_goals": 0,
+          "total_ft_goals": 0
+        },
+        {
+          "date": "2026-03-13",
+          "league": "CONCACAF Champions League",
+          "match": "FC Cincinnati - Tigres UANL",
+          "ht": "1-0",
+          "ft": "3-0",
+          "total_ht_goals": 1,
+          "total_ft_goals": 3
+        },
+        {
+          "date": "2026-03-08",
+          "league": "Liga MX",
+          "match": "Tigres UANL - Monterrey",
+          "ht": "0-0",
+          "ft": "1-0",
+          "total_ht_goals": 0,
+          "total_ft_goals": 1
+        },
+        {
+          "date": "2026-03-05",
+          "league": "Liga MX",
+          "match": "Puebla - Tigres UANL",
+          "ht": "1-0",
+          "ft": "3-1",
+          "total_ht_goals": 1,
+          "total_ft_goals": 4
+        },
+        {
+          "date": "2026-03-01",
+          "league": "Liga MX",
+          "match": "Club America - Tigres UANL",
+          "ht": "0-2",
+          "ft": "1-4",
+          "total_ht_goals": 2,
+          "total_ft_goals": 5
+        },
+        {
+          "date": "2026-02-21",
+          "league": "Liga MX",
+          "match": "Tigres UANL - Pachuca",
+          "ht": "1-0",
+          "ft": "1-2",
+          "total_ht_goals": 1,
+          "total_ft_goals": 3
+        },
+        {
+          "date": "2026-02-15",
+          "league": "Liga MX",
+          "match": "Cruz Azul - Tigres UANL",
+          "ht": "0-0",
+          "ft": "2-1",
+          "total_ht_goals": 0,
+          "total_ft_goals": 3
+        },
+        {
+          "date": "2026-02-11",
+          "league": "CONCACAF Champions League",
+          "match": "Tigres UANL - Forge",
+          "ht": "1-0",
+          "ft": "4-1",
+          "total_ht_goals": 1,
+          "total_ft_goals": 5
+        }
+      ]
+    },
+    "1528800": {
+      "fixture_id": 1528800,
+      "date": "2026-03-23",
+      "time": "15:30",
+      "league": "First League",
+      "country": "Russia",
+      "match": "Chelyabinsk - Torpedo Moskva",
+      "home_team": "Chelyabinsk",
+      "away_team": "Torpedo Moskva",
+      "markets": {
+        "q1": 2.99,
+        "qx": 3.1,
+        "q2": 2.38,
+        "o25": 2.35,
+        "o05ht": 1.49,
+        "o15ht": 3.35
+      },
+      "averages": {
+        "home_avg_ft": 3.875,
+        "away_avg_ft": 2.75,
+        "home_avg_ht": 1.875,
+        "away_avg_ht": 1.375,
+        "combined_ht_avg": 1.625
+      },
+      "flags": {
+        "fav_quote": 2.38,
+        "is_gold_zone": false,
+        "home_last_2h_zero": false,
+        "away_last_2h_zero": false,
+        "drop_diff": 0.0,
+        "open_q1": 2.99,
+        "open_qx": 3.1,
+        "open_q2": 2.38,
+        "open_o25": 2.35,
+        "curr_q1": 2.99,
+        "curr_qx": 3.1,
+        "curr_q2": 2.38,
+        "curr_o25": 2.35,
+        "drop_q1": 0.0,
+        "drop_qx": 0.0,
+        "drop_q2": 0.0,
+        "drop_o25": 0.0,
+        "drop_last_q1": 0.0,
+        "drop_last_qx": 0.0,
+        "drop_last_q2": 0.0,
+        "drop_last_o25": 0.0,
+        "drop_side": "",
+        "drop_strength": "none",
+        "inversion": false,
+        "inversion_from": "2",
+        "inversion_to": "2",
+        "open_fav_side": "2",
+        "curr_fav_side": "2",
+        "open_fav_quote": 2.38,
+        "curr_fav_quote": 2.38,
+        "history_points": 1,
+        "first_seen_at": "2026-03-19T10:09:09",
+        "last_seen_at": "2026-03-19T10:09:09"
+      },
+      "scores": {
+        "pt": 4.4,
+        "over": 5.0,
+        "boost": 5.522,
+        "gold": 4.795,
+        "max": 5.522
+      },
+      "tags": [
+        "🎯PT",
+        "⚽ OVER",
+        "🐟G"
+      ],
+      "home_last_8": [
+        {
+          "date": "2026-03-15",
+          "league": "First League",
+          "match": "Volga Ulyanovsk - Chelyabinsk",
+          "ht": "0-0",
+          "ft": "2-2",
+          "total_ht_goals": 0,
+          "total_ft_goals": 4
+        },
+        {
+          "date": "2026-03-07",
+          "league": "First League",
+          "match": "Chelyabinsk - Spartak Kostroma",
+          "ht": "2-2",
+          "ft": "3-3",
+          "total_ht_goals": 4,
+          "total_ft_goals": 6
+        },
+        {
+          "date": "2026-02-28",
+          "league": "First League",
+          "match": "FK Sokol Saratov - Chelyabinsk",
+          "ht": "0-1",
+          "ft": "0-1",
+          "total_ht_goals": 1,
+          "total_ft_goals": 1
+        },
+        {
+          "date": "2026-02-20",
+          "league": "Friendlies Clubs",
+          "match": "Chelyabinsk - Rodina Moskva",
+          "ht": "None-None",
+          "ft": "1-0",
+          "total_ht_goals": 0,
+          "total_ft_goals": 1
+        },
+        {
+          "date": "2026-02-20",
+          "league": "Friendlies Clubs",
+          "match": "Chelyabinsk - Zenit 2",
+          "ht": "2-1",
+          "ft": "2-1",
+          "total_ht_goals": 3,
+          "total_ft_goals": 3
+        },
+        {
+          "date": "2026-02-17",
+          "league": "Friendlies Clubs",
+          "match": "Chelyabinsk - Krylia Sovetov",
+          "ht": "1-2",
+          "ft": "2-3",
+          "total_ht_goals": 3,
+          "total_ft_goals": 5
+        },
+        {
+          "date": "2026-02-13",
+          "league": "Friendlies Clubs",
+          "match": "Chelyabinsk - KAMAZ",
+          "ht": "0-4",
+          "ft": "2-7",
+          "total_ht_goals": 4,
+          "total_ft_goals": 9
+        },
+        {
+          "date": "2026-02-05",
+          "league": "Friendlies Clubs",
+          "match": "Chelyabinsk - Baltika",
+          "ht": "0-0",
+          "ft": "0-2",
+          "total_ht_goals": 0,
+          "total_ft_goals": 2
+        }
+      ],
+      "away_last_8": [
+        {
+          "date": "2026-03-16",
+          "league": "First League",
+          "match": "Torpedo Moskva - FK Neftekhimik",
+          "ht": "1-0",
+          "ft": "3-0",
+          "total_ht_goals": 1,
+          "total_ft_goals": 3
+        },
+        {
+          "date": "2026-03-08",
+          "league": "First League",
+          "match": "Torpedo Moskva - Rodina Moskva",
+          "ht": "0-2",
+          "ft": "0-2",
+          "total_ht_goals": 2,
+          "total_ft_goals": 2
+        },
+        {
+          "date": "2026-03-01",
+          "league": "First League",
+          "match": "Chernomorets - Torpedo Moskva",
+          "ht": "0-1",
+          "ft": "0-2",
+          "total_ht_goals": 1,
+          "total_ft_goals": 2
+        },
+        {
+          "date": "2026-02-07",
+          "league": "Friendlies Clubs",
+          "match": "Torpedo Moskva - Nizhny Novgorod",
+          "ht": "2-1",
+          "ft": "4-2",
+          "total_ht_goals": 3,
+          "total_ft_goals": 6
+        },
+        {
+          "date": "2026-02-03",
+          "league": "Friendlies Clubs",
+          "match": "Krylia Sovetov - Torpedo Moskva",
+          "ht": "None-None",
+          "ft": "2-1",
+          "total_ht_goals": 0,
+          "total_ft_goals": 3
+        },
+        {
+          "date": "2026-01-29",
+          "league": "Friendlies Clubs",
+          "match": "Volga Ulyanovsk - Torpedo Moskva",
+          "ht": "1-2",
+          "ft": "1-2",
+          "total_ht_goals": 3,
+          "total_ft_goals": 3
+        },
+        {
+          "date": "2025-11-30",
+          "league": "First League",
+          "match": "Spartak Kostroma - Torpedo Moskva",
+          "ht": "0-0",
+          "ft": "0-1",
+          "total_ht_goals": 0,
+          "total_ft_goals": 1
+        },
+        {
+          "date": "2025-11-25",
+          "league": "Cup",
+          "match": "Torpedo Moskva - Baltika",
+          "ht": "0-1",
+          "ft": "0-2",
+          "total_ht_goals": 1,
+          "total_ft_goals": 2
+        }
+      ]
+    },
+    "1451878": {
+      "fixture_id": 1451878,
+      "date": "2026-03-23",
+      "time": "17:00",
+      "league": "Second League",
+      "country": "Bulgaria",
+      "match": "Yantra 2019 - Fratria",
+      "home_team": "Yantra 2019",
+      "away_team": "Fratria",
+      "markets": {
+        "q1": 2.5,
+        "qx": 2.9,
+        "q2": 2.7,
+        "o25": 2.35,
+        "o05ht": 1.49,
+        "o15ht": 3.2
+      },
+      "averages": {
+        "home_avg_ft": 2.375,
+        "away_avg_ft": 2.75,
+        "home_avg_ht": 1.25,
+        "away_avg_ht": 1.625,
+        "combined_ht_avg": 1.438
+      },
+      "flags": {
+        "fav_quote": 2.5,
+        "is_gold_zone": false,
+        "home_last_2h_zero": true,
+        "away_last_2h_zero": true,
+        "drop_diff": 0.0,
+        "open_q1": 2.5,
+        "open_qx": 2.9,
+        "open_q2": 2.7,
+        "open_o25": 2.35,
+        "curr_q1": 2.5,
+        "curr_qx": 2.9,
+        "curr_q2": 2.7,
+        "curr_o25": 2.35,
+        "drop_q1": 0.0,
+        "drop_qx": 0.0,
+        "drop_q2": 0.0,
+        "drop_o25": 0.0,
+        "drop_last_q1": 0.0,
+        "drop_last_qx": 0.0,
+        "drop_last_q2": 0.0,
+        "drop_last_o25": 0.0,
+        "drop_side": "",
+        "drop_strength": "none",
+        "inversion": false,
+        "inversion_from": "1",
+        "inversion_to": "1",
+        "open_fav_side": "1",
+        "curr_fav_side": "1",
+        "open_fav_quote": 2.5,
+        "curr_fav_quote": 2.5,
+        "history_points": 1,
+        "first_seen_at": "2026-03-19T10:09:09",
+        "last_seen_at": "2026-03-19T10:09:09"
+      },
+      "scores": {
+        "pt": 5.6,
+        "over": 5.4,
+        "boost": 6.17,
+        "gold": 5.4,
+        "max": 6.17
+      },
+      "tags": [
+        "🎯PT",
+        "⚽ OVER",
+        "🐟G"
+      ],
+      "home_last_8": [
+        {
+          "date": "2026-03-14",
+          "league": "Second League",
+          "match": "Sevlievo - Yantra 2019",
+          "ht": "1-0",
+          "ft": "1-0",
+          "total_ht_goals": 1,
+          "total_ft_goals": 1
+        },
+        {
+          "date": "2026-03-07",
+          "league": "Second League",
+          "match": "Yantra 2019 - Sportist Svoge",
+          "ht": "0-0",
+          "ft": "2-0",
+          "total_ht_goals": 0,
+          "total_ft_goals": 2
+        },
+        {
+          "date": "2026-03-01",
+          "league": "Second League",
+          "match": "Marek - Yantra 2019",
+          "ht": "1-1",
+          "ft": "1-2",
+          "total_ht_goals": 2,
+          "total_ft_goals": 3
+        },
+        {
+          "date": "2026-02-24",
+          "league": "Second League",
+          "match": "Yantra 2019 - Etar Veliko Tarnovo",
+          "ht": "2-0",
+          "ft": "4-0",
+          "total_ht_goals": 2,
+          "total_ft_goals": 4
+        },
+        {
+          "date": "2026-02-15",
+          "league": "Second League",
+          "match": "Hebar 1918 - Yantra 2019",
+          "ht": "3-0",
+          "ft": "3-2",
+          "total_ht_goals": 3,
+          "total_ft_goals": 5
+        },
+        {
+          "date": "2026-02-07",
+          "league": "Friendlies Clubs",
+          "match": "Yantra 2019 - Lokomotiv G. Oryahovitsa",
+          "ht": "1-0",
+          "ft": "1-0",
+          "total_ht_goals": 1,
+          "total_ft_goals": 1
+        },
+        {
+          "date": "2026-02-04",
+          "league": "Friendlies Clubs",
+          "match": "Ludogorets II - Yantra 2019",
+          "ht": "1-0",
+          "ft": "2-1",
+          "total_ht_goals": 1,
+          "total_ft_goals": 3
+        },
+        {
+          "date": "2026-01-31",
+          "league": "Friendlies Clubs",
+          "match": "Yantra 2019 - Lokomotiv G. Oryahovitsa",
+          "ht": "0-0",
+          "ft": "0-0",
+          "total_ht_goals": 0,
+          "total_ft_goals": 0
+        }
+      ],
+      "away_last_8": [
+        {
+          "date": "2026-03-15",
+          "league": "Second League",
+          "match": "Ludogorets II - Fratria",
+          "ht": "1-1",
+          "ft": "1-1",
+          "total_ht_goals": 2,
+          "total_ft_goals": 2
+        },
+        {
+          "date": "2026-03-08",
+          "league": "Second League",
+          "match": "Fratria - Sevlievo",
+          "ht": "0-2",
+          "ft": "1-4",
+          "total_ht_goals": 2,
+          "total_ft_goals": 5
+        },
+        {
+          "date": "2026-02-28",
+          "league": "Second League",
+          "match": "Sportist Svoge - Fratria",
+          "ht": "0-2",
+          "ft": "0-3",
+          "total_ht_goals": 2,
+          "total_ft_goals": 3
+        },
+        {
+          "date": "2026-02-22",
+          "league": "Second League",
+          "match": "Fratria - Marek",
+          "ht": "1-0",
+          "ft": "1-1",
+          "total_ht_goals": 1,
+          "total_ft_goals": 2
+        },
+        {
+          "date": "2026-02-17",
+          "league": "Second League",
+          "match": "Etar Veliko Tarnovo - Fratria",
+          "ht": "1-1",
+          "ft": "1-1",
+          "total_ht_goals": 2,
+          "total_ft_goals": 2
+        },
+        {
+          "date": "2026-02-06",
+          "league": "Friendlies Clubs",
+          "match": "Bihor Oradea - Fratria",
+          "ht": "0-1",
+          "ft": "2-2",
+          "total_ht_goals": 1,
+          "total_ft_goals": 4
+        },
+        {
+          "date": "2026-02-02",
+          "league": "Friendlies Clubs",
+          "match": "Epitsentr Dunayivtsi - Fratria",
+          "ht": "2-0",
+          "ft": "3-0",
+          "total_ht_goals": 2,
+          "total_ft_goals": 3
+        },
+        {
+          "date": "2026-01-15",
+          "league": "Friendlies Clubs",
+          "match": "Fratria - Spartak Varna",
+          "ht": "0-1",
+          "ft": "0-1",
+          "total_ht_goals": 1,
+          "total_ft_goals": 1
+        }
+      ]
+    },
+    "1528801": {
+      "fixture_id": 1528801,
+      "date": "2026-03-23",
+      "time": "17:00",
+      "league": "First League",
+      "country": "Russia",
+      "match": "Rodina Moskva - Chayka",
+      "home_team": "Rodina Moskva",
+      "away_team": "Chayka",
+      "markets": {
+        "q1": 1.34,
+        "qx": 4.7,
+        "q2": 8.3,
+        "o25": 1.78,
+        "o05ht": 1.33,
+        "o15ht": 2.59
+      },
+      "averages": {
+        "home_avg_ft": 2.75,
+        "away_avg_ft": 3.5,
+        "home_avg_ht": 1.125,
+        "away_avg_ht": 2.0,
+        "combined_ht_avg": 1.562
+      },
+      "flags": {
+        "fav_quote": 1.34,
+        "is_gold_zone": false,
+        "home_last_2h_zero": false,
+        "away_last_2h_zero": false,
+        "drop_diff": 0.0,
+        "open_q1": 1.34,
+        "open_qx": 4.7,
+        "open_q2": 8.3,
+        "open_o25": 1.78,
+        "curr_q1": 1.34,
+        "curr_qx": 4.7,
+        "curr_q2": 8.3,
+        "curr_o25": 1.78,
+        "drop_q1": 0.0,
+        "drop_qx": 0.0,
+        "drop_q2": 0.0,
+        "drop_o25": 0.0,
+        "drop_last_q1": 0.0,
+        "drop_last_qx": 0.0,
+        "drop_last_q2": 0.0,
+        "drop_last_o25": 0.0,
+        "drop_side": "",
+        "drop_strength": "none",
+        "inversion": false,
+        "inversion_from": "1",
+        "inversion_to": "1",
+        "open_fav_side": "1",
+        "curr_fav_side": "1",
+        "open_fav_quote": 1.34,
+        "curr_fav_quote": 1.34,
+        "history_points": 1,
+        "first_seen_at": "2026-03-19T10:09:09",
+        "last_seen_at": "2026-03-19T10:09:09"
+      },
+      "scores": {
+        "pt": 6.0,
+        "over": 5.0,
+        "boost": 6.68,
+        "gold": 5.541,
+        "max": 6.68
+      },
+      "tags": [
+        "🎯PT",
+        "⚽ OVER",
+        "🚀 BOOST",
+        "🐟O"
+      ],
+      "home_last_8": [
+        {
+          "date": "2026-03-14",
+          "league": "First League",
+          "match": "Ska-khabarovsk - Rodina Moskva",
+          "ht": "0-2",
+          "ft": "2-2",
+          "total_ht_goals": 2,
+          "total_ft_goals": 4
+        },
+        {
+          "date": "2026-03-08",
+          "league": "First League",
+          "match": "Torpedo Moskva - Rodina Moskva",
+          "ht": "0-2",
+          "ft": "0-2",
+          "total_ht_goals": 2,
+          "total_ft_goals": 2
+        },
+        {
+          "date": "2026-03-02",
+          "league": "First League",
+          "match": "Rodina Moskva - Shinnik Yaroslavl",
+          "ht": "1-0",
+          "ft": "2-1",
+          "total_ht_goals": 1,
+          "total_ft_goals": 3
+        },
+        {
+          "date": "2026-02-20",
+          "league": "Friendlies Clubs",
+          "match": "Chelyabinsk - Rodina Moskva",
+          "ht": "None-None",
+          "ft": "1-0",
+          "total_ht_goals": 0,
+          "total_ft_goals": 1
+        },
+        {
+          "date": "2026-02-20",
+          "league": "Friendlies Clubs",
+          "match": "Rodina Moskva - Chernomorets",
+          "ht": "0-0",
+          "ft": "0-0",
+          "total_ht_goals": 0,
+          "total_ft_goals": 0
+        },
+        {
+          "date": "2026-02-18",
+          "league": "Friendlies Clubs",
+          "match": "Pyunik Yerevan - Rodina Moskva",
+          "ht": "None-None",
+          "ft": "2-1",
+          "total_ht_goals": 0,
+          "total_ft_goals": 3
+        },
+        {
+          "date": "2026-02-15",
+          "league": "Friendlies Clubs",
+          "match": "FC Sochi - Rodina Moskva",
+          "ht": "2-0",
+          "ft": "3-2",
+          "total_ht_goals": 2,
+          "total_ft_goals": 5
+        },
+        {
+          "date": "2026-02-11",
+          "league": "Friendlies Clubs",
+          "match": "FC UFA - Rodina Moskva",
+          "ht": "1-1",
+          "ft": "2-2",
+          "total_ht_goals": 2,
+          "total_ft_goals": 4
+        }
+      ],
+      "away_last_8": [
+        {
+          "date": "2026-03-14",
+          "league": "First League",
+          "match": "Spartak Kostroma - Chayka",
+          "ht": "0-1",
+          "ft": "1-1",
+          "total_ht_goals": 1,
+          "total_ft_goals": 2
+        },
+        {
+          "date": "2026-03-07",
+          "league": "First League",
+          "match": "Chayka - FK Sokol Saratov",
+          "ht": "1-0",
+          "ft": "1-0",
+          "total_ht_goals": 1,
+          "total_ft_goals": 1
+        },
+        {
+          "date": "2026-03-01",
+          "league": "First League",
+          "match": "Chayka - Ska-khabarovsk",
+          "ht": "1-1",
+          "ft": "1-3",
+          "total_ht_goals": 2,
+          "total_ft_goals": 4
+        },
+        {
+          "date": "2026-02-20",
+          "league": "Friendlies Clubs",
+          "match": "Chayka - Krylia Sovetov",
+          "ht": "1-3",
+          "ft": "3-5",
+          "total_ht_goals": 4,
+          "total_ft_goals": 8
+        },
+        {
+          "date": "2026-02-14",
+          "league": "Friendlies Clubs",
+          "match": "Chayka - Arsenal Tula",
+          "ht": "1-4",
+          "ft": "2-4",
+          "total_ht_goals": 5,
+          "total_ft_goals": 6
+        },
+        {
+          "date": "2026-02-11",
+          "league": "Friendlies Clubs",
+          "match": "Chayka - Altay",
+          "ht": "0-0",
+          "ft": "0-0",
+          "total_ht_goals": 0,
+          "total_ft_goals": 0
+        },
+        {
+          "date": "2026-02-06",
+          "league": "Friendlies Clubs",
+          "match": "Grafičar - Chayka",
+          "ht": "0-1",
+          "ft": "0-4",
+          "total_ht_goals": 1,
+          "total_ft_goals": 4
+        },
+        {
+          "date": "2026-02-05",
+          "league": "Friendlies Clubs",
+          "match": "Chayka - Alay",
+          "ht": "1-1",
+          "ft": "2-1",
+          "total_ht_goals": 2,
+          "total_ft_goals": 3
+        }
+      ]
+    },
+    "1531511": {
+      "fixture_id": 1531511,
+      "date": "2026-03-23",
+      "time": "19:30",
+      "league": "Liga I",
+      "country": "Romania",
+      "match": "Unirea Slobozia - Oţelul",
+      "home_team": "Unirea Slobozia",
+      "away_team": "Oţelul",
+      "markets": {
+        "q1": 3.25,
+        "qx": 3.2,
+        "q2": 2.14,
+        "o25": 2.1,
+        "o05ht": 1.42,
+        "o15ht": 2.95
+      },
+      "averages": {
+        "home_avg_ft": 2.625,
+        "away_avg_ft": 3.0,
+        "home_avg_ht": 1.375,
+        "away_avg_ht": 1.375,
+        "combined_ht_avg": 1.375
+      },
+      "flags": {
+        "fav_quote": 2.14,
+        "is_gold_zone": false,
+        "home_last_2h_zero": false,
+        "away_last_2h_zero": false,
+        "drop_diff": 0.0,
+        "open_q1": 3.25,
+        "open_qx": 3.2,
+        "open_q2": 2.14,
+        "open_o25": 2.1,
+        "curr_q1": 3.25,
+        "curr_qx": 3.2,
+        "curr_q2": 2.14,
+        "curr_o25": 2.1,
+        "drop_q1": 0.0,
+        "drop_qx": 0.0,
+        "drop_q2": 0.0,
+        "drop_o25": 0.0,
+        "drop_last_q1": 0.0,
+        "drop_last_qx": 0.0,
+        "drop_last_q2": 0.0,
+        "drop_last_o25": 0.0,
+        "drop_side": "",
+        "drop_strength": "none",
+        "inversion": false,
+        "inversion_from": "2",
+        "inversion_to": "2",
+        "open_fav_side": "2",
+        "curr_fav_side": "2",
+        "open_fav_quote": 2.14,
+        "curr_fav_quote": 2.14,
+        "history_points": 1,
+        "first_seen_at": "2026-03-19T10:09:09",
+        "last_seen_at": "2026-03-19T10:09:09"
+      },
+      "scores": {
+        "pt": 5.9,
+        "over": 5.8,
+        "boost": 6.476,
+        "gold": 5.69,
+        "max": 6.476
+      },
+      "tags": [
+        "🎯PT",
+        "⚽ OVER",
+        "🐟G"
+      ],
+      "home_last_8": [
+        {
+          "date": "2026-03-16",
+          "league": "Liga I",
+          "match": "FC Botosani - Unirea Slobozia",
+          "ht": "1-2",
+          "ft": "3-2",
+          "total_ht_goals": 3,
+          "total_ft_goals": 5
+        },
+        {
+          "date": "2026-03-08",
+          "league": "Liga I",
+          "match": "Arges Pitesti - Unirea Slobozia",
+          "ht": "0-0",
+          "ft": "0-0",
+          "total_ht_goals": 0,
+          "total_ft_goals": 0
+        },
+        {
+          "date": "2026-03-02",
+          "league": "Liga I",
+          "match": "Unirea Slobozia - Rapid",
+          "ht": "0-1",
+          "ft": "1-2",
+          "total_ht_goals": 1,
+          "total_ft_goals": 3
+        },
+        {
+          "date": "2026-02-22",
+          "league": "Liga I",
+          "match": "Unirea Slobozia - Universitatea Craiova",
+          "ht": "0-1",
+          "ft": "0-3",
+          "total_ht_goals": 1,
+          "total_ft_goals": 3
+        },
+        {
+          "date": "2026-02-16",
+          "league": "Liga I",
+          "match": "Dinamo Bucuresti - Unirea Slobozia",
+          "ht": "0-0",
+          "ft": "1-0",
+          "total_ht_goals": 0,
+          "total_ft_goals": 1
+        },
+        {
+          "date": "2026-02-07",
+          "league": "Liga I",
+          "match": "Unirea Slobozia - Farul Constanta",
+          "ht": "1-1",
+          "ft": "2-1",
+          "total_ht_goals": 2,
+          "total_ft_goals": 3
+        },
+        {
+          "date": "2026-02-03",
+          "league": "Liga I",
+          "match": "Petrolul Ploiesti - Unirea Slobozia",
+          "ht": "0-0",
+          "ft": "1-0",
+          "total_ht_goals": 0,
+          "total_ft_goals": 1
+        },
+        {
+          "date": "2026-01-31",
+          "league": "Liga I",
+          "match": "Unirea Slobozia - AFC Hermannstadt",
+          "ht": "1-3",
+          "ft": "2-3",
+          "total_ht_goals": 4,
+          "total_ft_goals": 5
+        }
+      ],
+      "away_last_8": [
+        {
+          "date": "2026-03-14",
+          "league": "Liga I",
+          "match": "Oţelul - Csikszereda",
+          "ht": "1-1",
+          "ft": "2-3",
+          "total_ht_goals": 2,
+          "total_ft_goals": 5
+        },
+        {
+          "date": "2026-03-08",
+          "league": "Liga I",
+          "match": "Oţelul - AFC Hermannstadt",
+          "ht": "0-0",
+          "ft": "0-2",
+          "total_ht_goals": 0,
+          "total_ft_goals": 2
+        },
+        {
+          "date": "2026-02-27",
+          "league": "Liga I",
+          "match": "Universitatea Cluj - Oţelul",
+          "ht": "2-0",
+          "ft": "4-0",
+          "total_ht_goals": 2,
+          "total_ft_goals": 4
+        },
+        {
+          "date": "2026-02-20",
+          "league": "Liga I",
+          "match": "Oţelul - Uta Arad",
+          "ht": "1-2",
+          "ft": "2-2",
+          "total_ht_goals": 3,
+          "total_ft_goals": 4
+        },
+        {
+          "date": "2026-02-14",
+          "league": "Liga I",
+          "match": "Metaloglobus - Oţelul",
+          "ht": "0-1",
+          "ft": "0-1",
+          "total_ht_goals": 1,
+          "total_ft_goals": 1
+        },
+        {
+          "date": "2026-02-11",
+          "league": "Cupa României",
+          "match": "Universitatea Cluj - Oţelul",
+          "ht": "0-0",
+          "ft": "2-0",
+          "total_ht_goals": 0,
+          "total_ft_goals": 2
+        },
+        {
+          "date": "2026-02-08",
+          "league": "Liga I",
+          "match": "Oţelul - FCSB",
+          "ht": "1-2",
+          "ft": "1-4",
+          "total_ht_goals": 3,
+          "total_ft_goals": 5
+        },
+        {
+          "date": "2026-02-05",
+          "league": "Liga I",
+          "match": "Universitatea Craiova - Oţelul",
+          "ht": "0-0",
+          "ft": "1-0",
+          "total_ht_goals": 0,
+          "total_ft_goals": 1
+        }
+      ]
+    },
+    "1392098": {
+      "fixture_id": 1392098,
+      "date": "2026-03-23",
+      "time": "20:30",
+      "league": "Segunda División",
+      "country": "Spain",
+      "match": "Castellón - Cultural Leonesa",
+      "home_team": "Castellón",
+      "away_team": "Cultural Leonesa",
+      "markets": {
+        "q1": 1.33,
+        "qx": 4.85,
+        "q2": 9.0,
+        "o25": 1.55,
+        "o05ht": 1.25,
+        "o15ht": 2.15
+      },
+      "averages": {
+        "home_avg_ft": 3.125,
+        "away_avg_ft": 2.375,
+        "home_avg_ht": 2.0,
+        "away_avg_ht": 0.875,
+        "combined_ht_avg": 1.438
+      },
+      "flags": {
+        "fav_quote": 1.33,
+        "is_gold_zone": false,
+        "home_last_2h_zero": false,
+        "away_last_2h_zero": false,
+        "drop_diff": 0.0,
+        "open_q1": 1.33,
+        "open_qx": 4.85,
+        "open_q2": 9.0,
+        "open_o25": 1.55,
+        "curr_q1": 1.33,
+        "curr_qx": 4.85,
+        "curr_q2": 9.0,
+        "curr_o25": 1.55,
+        "drop_q1": 0.0,
+        "drop_qx": 0.0,
+        "drop_q2": 0.0,
+        "drop_o25": 0.0,
+        "drop_last_q1": 0.0,
+        "drop_last_qx": 0.0,
+        "drop_last_q2": 0.0,
+        "drop_last_o25": 0.0,
+        "drop_side": "",
+        "drop_strength": "none",
+        "inversion": false,
+        "inversion_from": "1",
+        "inversion_to": "1",
+        "open_fav_side": "1",
+        "curr_fav_side": "1",
+        "open_fav_quote": 1.33,
+        "curr_fav_quote": 1.33,
+        "history_points": 1,
+        "first_seen_at": "2026-03-19T10:09:09",
+        "last_seen_at": "2026-03-19T10:09:09"
+      },
+      "scores": {
+        "pt": 4.4,
+        "over": 5.0,
+        "boost": 5.172,
+        "gold": 4.676,
+        "max": 5.172
+      },
+      "tags": [
+        "🎯PT",
+        "⚽ OVER",
+        "🐟O"
+      ],
+      "home_last_8": [
+        {
+          "date": "2026-03-15",
+          "league": "Segunda División",
+          "match": "Sporting Gijon - Castellón",
+          "ht": "1-1",
+          "ft": "4-1",
+          "total_ht_goals": 2,
+          "total_ft_goals": 5
+        },
+        {
+          "date": "2026-03-07",
+          "league": "Segunda División",
+          "match": "Real Sociedad II - Castellón",
+          "ht": "2-2",
+          "ft": "4-2",
+          "total_ht_goals": 4,
+          "total_ft_goals": 6
+        },
+        {
+          "date": "2026-02-28",
+          "league": "Segunda División",
+          "match": "Castellón - Racing Santander",
+          "ht": "0-3",
+          "ft": "1-3",
+          "total_ht_goals": 3,
+          "total_ft_goals": 4
+        },
+        {
+          "date": "2026-02-21",
+          "league": "Segunda División",
+          "match": "Las Palmas - Castellón",
+          "ht": "1-0",
+          "ft": "1-1",
+          "total_ht_goals": 1,
+          "total_ft_goals": 2
+        },
+        {
+          "date": "2026-02-15",
+          "league": "Segunda División",
+          "match": "Castellón - Deportivo La Coruna",
+          "ht": "1-0",
+          "ft": "2-0",
+          "total_ht_goals": 1,
+          "total_ft_goals": 2
+        },
+        {
+          "date": "2026-02-08",
+          "league": "Segunda División",
+          "match": "Valladolid - Castellón",
+          "ht": "0-3",
+          "ft": "0-4",
+          "total_ht_goals": 3,
+          "total_ft_goals": 4
+        },
+        {
+          "date": "2026-02-01",
+          "league": "Segunda División",
+          "match": "Castellón - FC Andorra",
+          "ht": "2-0",
+          "ft": "2-0",
+          "total_ht_goals": 2,
+          "total_ft_goals": 2
+        },
+        {
+          "date": "2026-01-25",
+          "league": "Segunda División",
+          "match": "Zaragoza - Castellón",
+          "ht": "0-0",
+          "ft": "0-0",
+          "total_ht_goals": 0,
+          "total_ft_goals": 0
+        }
+      ],
+      "away_last_8": [
+        {
+          "date": "2026-03-14",
+          "league": "Segunda División",
+          "match": "Cultural Leonesa - Racing Santander",
+          "ht": "0-1",
+          "ft": "1-2",
+          "total_ht_goals": 1,
+          "total_ft_goals": 3
+        },
+        {
+          "date": "2026-03-09",
+          "league": "Segunda División",
+          "match": "Almeria - Cultural Leonesa",
+          "ht": "1-0",
+          "ft": "3-0",
+          "total_ht_goals": 1,
+          "total_ft_goals": 3
+        },
+        {
+          "date": "2026-03-01",
+          "league": "Segunda División",
+          "match": "Cultural Leonesa - Las Palmas",
+          "ht": "0-0",
+          "ft": "0-3",
+          "total_ht_goals": 0,
+          "total_ft_goals": 3
+        },
+        {
+          "date": "2026-02-21",
+          "league": "Segunda División",
+          "match": "Leganes - Cultural Leonesa",
+          "ht": "0-1",
+          "ft": "1-1",
+          "total_ht_goals": 1,
+          "total_ft_goals": 2
+        },
+        {
+          "date": "2026-02-14",
+          "league": "Segunda División",
+          "match": "Cultural Leonesa - Zaragoza",
+          "ht": "0-0",
+          "ft": "0-0",
+          "total_ht_goals": 0,
+          "total_ft_goals": 0
+        },
+        {
+          "date": "2026-02-08",
+          "league": "Segunda División",
+          "match": "Malaga - Cultural Leonesa",
+          "ht": "0-1",
+          "ft": "2-1",
+          "total_ht_goals": 1,
+          "total_ft_goals": 3
+        },
+        {
+          "date": "2026-01-31",
+          "league": "Segunda División",
+          "match": "Cultural Leonesa - Deportivo La Coruna",
+          "ht": "0-0",
+          "ft": "0-1",
+          "total_ht_goals": 0,
+          "total_ft_goals": 1
+        },
+        {
+          "date": "2026-01-26",
+          "league": "Segunda División",
+          "match": "AD Ceuta FC - Cultural Leonesa",
+          "ht": "2-1",
+          "ft": "3-1",
+          "total_ht_goals": 3,
+          "total_ft_goals": 4
+        }
+      ]
+    },
+    "1511526": {
+      "fixture_id": 1511526,
+      "date": "2026-03-23",
+      "time": "22:00",
+      "league": "Primera B",
+      "country": "Chile",
+      "match": "Union San Felipe - San Marcos de Arica",
+      "home_team": "Union San Felipe",
+      "away_team": "San Marcos de Arica",
+      "markets": {
+        "q1": 2.4,
+        "qx": 3.2,
+        "q2": 2.62,
+        "o25": 2.3,
+        "o05ht": 1.42,
+        "o15ht": 3.08
+      },
+      "averages": {
+        "home_avg_ft": 2.875,
+        "away_avg_ft": 1.875,
+        "home_avg_ht": 1.25,
+        "away_avg_ht": 0.875,
+        "combined_ht_avg": 1.062
+      },
+      "flags": {
+        "fav_quote": 2.4,
+        "is_gold_zone": false,
+        "home_last_2h_zero": false,
+        "away_last_2h_zero": true,
+        "drop_diff": 0.0,
+        "open_q1": 2.4,
+        "open_qx": 3.2,
+        "open_q2": 2.62,
+        "open_o25": 2.3,
+        "curr_q1": 2.4,
+        "curr_qx": 3.2,
+        "curr_q2": 2.62,
+        "curr_o25": 2.3,
+        "drop_q1": 0.0,
+        "drop_qx": 0.0,
+        "drop_q2": 0.0,
+        "drop_o25": 0.0,
+        "drop_last_q1": 0.0,
+        "drop_last_qx": 0.0,
+        "drop_last_q2": 0.0,
+        "drop_last_o25": 0.0,
+        "drop_side": "",
+        "drop_strength": "none",
+        "inversion": false,
+        "inversion_from": "1",
+        "inversion_to": "1",
+        "open_fav_side": "1",
+        "curr_fav_side": "1",
+        "open_fav_quote": 2.4,
+        "curr_fav_quote": 2.4,
+        "history_points": 1,
+        "first_seen_at": "2026-03-19T10:09:09",
+        "last_seen_at": "2026-03-19T10:09:09"
+      },
+      "scores": {
+        "pt": 4.0,
+        "over": 4.0,
+        "boost": 3.99,
+        "gold": 3.437,
+        "max": 4.0
+      },
+      "tags": [
+        "⚽ OVER",
+        "🐟G"
+      ],
+      "home_last_8": [
+        {
+          "date": "2026-03-13",
+          "league": "Primera B",
+          "match": "Recoleta - Union San Felipe",
+          "ht": "1-0",
+          "ft": "2-0",
+          "total_ht_goals": 1,
+          "total_ft_goals": 2
+        },
+        {
+          "date": "2026-03-06",
+          "league": "Primera B",
+          "match": "Union San Felipe - Antofagasta",
+          "ht": "1-0",
+          "ft": "2-0",
+          "total_ht_goals": 1,
+          "total_ft_goals": 2
+        },
+        {
+          "date": "2026-02-28",
+          "league": "Primera B",
+          "match": "Union San Felipe - Santiago Wanderers",
+          "ht": "0-1",
+          "ft": "1-1",
+          "total_ht_goals": 1,
+          "total_ft_goals": 2
+        },
+        {
+          "date": "2026-02-21",
+          "league": "Primera B",
+          "match": "Deportes Iquique - Union San Felipe",
+          "ht": "2-0",
+          "ft": "5-0",
+          "total_ht_goals": 2,
+          "total_ft_goals": 5
+        },
+        {
+          "date": "2026-02-07",
+          "league": "Copa Chile",
+          "match": "Santiago Wanderers - Union San Felipe",
+          "ht": "2-0",
+          "ft": "3-1",
+          "total_ht_goals": 2,
+          "total_ft_goals": 4
+        },
+        {
+          "date": "2026-02-01",
+          "league": "Copa Chile",
+          "match": "Union San Felipe - Santiago Wanderers",
+          "ht": "1-1",
+          "ft": "2-1",
+          "total_ht_goals": 2,
+          "total_ft_goals": 3
+        },
+        {
+          "date": "2025-10-31",
+          "league": "Primera B",
+          "match": "Concepción - Union San Felipe",
+          "ht": "1-0",
+          "ft": "2-1",
+          "total_ht_goals": 1,
+          "total_ft_goals": 3
+        },
+        {
+          "date": "2025-10-25",
+          "league": "Primera B",
+          "match": "Union San Felipe - Santiago Morning",
+          "ht": "0-0",
+          "ft": "2-0",
+          "total_ht_goals": 0,
+          "total_ft_goals": 2
+        }
+      ],
+      "away_last_8": [
+        {
+          "date": "2026-03-16",
+          "league": "Primera B",
+          "match": "San Marcos de Arica - Santiago Wanderers",
+          "ht": "0-0",
+          "ft": "0-0",
+          "total_ht_goals": 0,
+          "total_ft_goals": 0
+        },
+        {
+          "date": "2026-03-07",
+          "league": "Primera B",
+          "match": "Deportes Iquique - San Marcos de Arica",
+          "ht": "0-0",
+          "ft": "0-0",
+          "total_ht_goals": 0,
+          "total_ft_goals": 0
+        },
+        {
+          "date": "2026-03-02",
+          "league": "Primera B",
+          "match": "Magallanes - San Marcos de Arica",
+          "ht": "0-0",
+          "ft": "1-1",
+          "total_ht_goals": 0,
+          "total_ft_goals": 2
+        },
+        {
+          "date": "2026-02-20",
+          "league": "Primera B",
+          "match": "San Marcos de Arica - Deportes Santa Cruz",
+          "ht": "1-1",
+          "ft": "1-1",
+          "total_ht_goals": 2,
+          "total_ft_goals": 2
+        },
+        {
+          "date": "2026-02-07",
+          "league": "Copa Chile",
+          "match": "San Marcos de Arica - Deportes Iquique",
+          "ht": "0-0",
+          "ft": "0-0",
+          "total_ht_goals": 0,
+          "total_ft_goals": 0
+        },
+        {
+          "date": "2026-01-31",
+          "league": "Copa Chile",
+          "match": "Deportes Iquique - San Marcos de Arica",
+          "ht": "1-0",
+          "ft": "4-0",
+          "total_ht_goals": 1,
+          "total_ft_goals": 4
+        },
+        {
+          "date": "2025-11-30",
+          "league": "Primera División",
+          "match": "Cobreloa - San Marcos de Arica",
+          "ht": "3-0",
+          "ft": "3-1",
+          "total_ht_goals": 3,
+          "total_ft_goals": 4
+        },
+        {
+          "date": "2025-11-26",
+          "league": "Primera División",
+          "match": "San Marcos de Arica - Cobreloa",
+          "ht": "1-0",
+          "ft": "2-1",
+          "total_ht_goals": 1,
+          "total_ft_goals": 3
+        }
+      ]
+    }
+  }
+}

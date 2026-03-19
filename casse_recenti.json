@@ -1,0 +1,32 @@
+[
+  {
+    "data": "2026-03-15",
+    "match": "Ballkani - Drita",
+    "signal": "GOLD TARGET",
+    "quote": "2.4",
+    "result": "3-0 ✅ CASSA",
+    "league": "Superliga (Kosovo)",
+    "time": "13:00",
+    "fixture_id": "1530091"
+  },
+  {
+    "data": "2026-03-15",
+    "match": "Twente - Utrecht",
+    "signal": "GOLD TARGET",
+    "quote": "1.6",
+    "result": "0-2 ✅ CASSA SOFT",
+    "league": "Eredivisie (Netherlands)",
+    "time": "12:15",
+    "fixture_id": "1381108"
+  },
+  {
+    "data": "2026-03-13",
+    "match": "Alemannia Aachen - Energie Cottbus",
+    "signal": "GOLD TARGET",
+    "quote": "2.6",
+    "result": "4-1 ✅ CASSA",
+    "league": "3. Liga (Germany)",
+    "time": "19:00",
+    "fixture_id": "1394333"
+  }
+]

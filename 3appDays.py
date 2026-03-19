@@ -1,7 +1,7 @@
 import streamlit as st
 import requests
 import pandas as pd
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import json
 import os
 import time
@@ -15,7 +15,7 @@ from github import Github
 # Stretta selettiva su:
 # - BOOST
 # - GOLD
-# Tutto il resto invariato
+# + rolling snapshot 5 giorni
 # ==========================================
 BASE_DIR = Path(__file__).resolve().parent
 DB_FILE = str(BASE_DIR / "arab_sniper_database.json")
@@ -25,17 +25,22 @@ DETAILS_FILE = str(BASE_DIR / "match_details.json")
 
 DEFAULT_EXCLUDED = ["Thailand", "Indonesia", "India", "Kenya", "Morocco", "Rwanda", "Nigeria", "Oman", "Algeria", "UAE"]
 LEAGUE_BLACKLIST = ["u19", "u20", "youth", "women", "friendly", "carioca", "paulista", "mineiro"]
+ROLLING_SNAPSHOT_HORIZONS = [1, 2, 3, 4, 5]
 
 REMOTE_MAIN_FILE = "data.json"
 REMOTE_DAY_FILES = {
     1: "data_day1.json",
     2: "data_day2.json",
     3: "data_day3.json",
+    4: "data_day4.json",
+    5: "data_day5.json",
 }
 REMOTE_DETAILS_FILES = {
     1: "details_day1.json",
     2: "details_day2.json",
     3: "details_day3.json",
+    4: "details_day4.json",
+    5: "details_day5.json",
 }
 
 try:
@@ -47,6 +52,33 @@ except Exception:
 
 def now_rome():
     return datetime.now(ROME_TZ) if ROME_TZ else datetime.now()
+
+
+def fixture_dt_rome(fixture_obj):
+    """
+    Converte la data fixture in Europe/Rome in modo robusto.
+    Usa timestamp se disponibile, altrimenti prova con il campo date ISO.
+    """
+    try:
+        ts = fixture_obj.get("timestamp")
+        if ts:
+            dt_utc = datetime.fromtimestamp(int(ts), tz=timezone.utc)
+            return dt_utc.astimezone(ROME_TZ) if ROME_TZ else dt_utc
+    except Exception:
+        pass
+
+    try:
+        raw = str(fixture_obj.get("date", "")).strip()
+        if raw:
+            raw = raw.replace("Z", "+00:00")
+            dt = datetime.fromisoformat(raw)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return dt.astimezone(ROME_TZ) if ROME_TZ else dt
+    except Exception:
+        pass
+
+    return None
 
 
 st.set_page_config(page_title="ARAB SNIPER V24.1 MULTI-DAY WEB", layout="wide")
@@ -282,6 +314,97 @@ def extract_elite_markets(session, fid):
     return mk
 
 
+def save_snapshot_file(payload):
+    with open(SNAP_FILE, "w", encoding="utf-8") as f:
+        json.dump(payload, f, indent=4, ensure_ascii=False)
+
+
+def load_existing_snapshot_payload():
+    if os.path.exists(SNAP_FILE):
+        try:
+            with open(SNAP_FILE, "r", encoding="utf-8") as f:
+                payload = json.load(f)
+                if isinstance(payload, dict):
+                    payload.setdefault("odds", {})
+                    return payload
+        except Exception:
+            pass
+
+    return {
+        "odds": {},
+        "timestamp": None,
+        "updated_at": None,
+        "coverage": "rolling_day1_day5"
+    }
+
+
+def build_rolling_multiday_snapshot(session):
+    """
+    Salva la baseline quote di tutti i fixture Day1+Day2+Day3+Day4+Day5.
+    Se un fixture_id esiste già, NON lo sovrascrive:
+    così il drop resta ancorato alla prima quota vista.
+    """
+    target_dates = get_target_dates()
+    existing_payload = load_existing_snapshot_payload()
+    existing_odds = existing_payload.get("odds", {}) or {}
+
+    new_odds = dict(existing_odds)
+    active_fixture_ids = set()
+
+    for horizon in ROLLING_SNAPSHOT_HORIZONS:
+        target_date = target_dates[horizon - 1]
+
+        res = api_get(session, "fixtures", {"date": target_date, "timezone": "Europe/Rome"})
+        if not res:
+            continue
+
+        fx_list = [
+            f for f in res.get("response", [])
+            if f["fixture"]["status"]["short"] == "NS"
+            and not is_blacklisted_league(f.get("league", {}).get("name", ""))
+        ]
+
+        for f in fx_list:
+            fid = str(f["fixture"]["id"])
+            active_fixture_ids.add(fid)
+
+            mk = extract_elite_markets(session, f["fixture"]["id"])
+            if not mk or mk == "SKIP":
+                continue
+
+            if fid not in new_odds:
+                new_odds[fid] = {
+                    "q1": mk["q1"],
+                    "q2": mk["q2"],
+                    "first_seen_date": target_date,
+                    "first_seen_horizon": horizon,
+                    "first_seen_ts": now_rome().strftime("%Y-%m-%d %H:%M:%S")
+                }
+            else:
+                if isinstance(new_odds[fid], dict):
+                    new_odds[fid]["last_seen_date"] = target_date
+                    new_odds[fid]["last_seen_horizon"] = horizon
+                    new_odds[fid]["last_seen_ts"] = now_rome().strftime("%Y-%m-%d %H:%M:%S")
+
+        time.sleep(0.15)
+
+    cleaned_odds = {}
+    for fid, data in new_odds.items():
+        if fid in active_fixture_ids:
+            cleaned_odds[fid] = data
+
+    payload = {
+        "odds": cleaned_odds,
+        "timestamp": now_rome().strftime("%H:%M"),
+        "updated_at": now_rome().strftime("%Y-%m-%d %H:%M:%S"),
+        "coverage": "rolling_day1_day5"
+    }
+
+    st.session_state.odds_memory = cleaned_odds
+    save_snapshot_file(payload)
+    return payload
+
+
 def get_team_last_matches(session, tid):
     cache_key = str(tid)
     if cache_key in st.session_state.team_last_matches_cache:
@@ -377,6 +500,9 @@ def compute_drop_diff(fid, mk):
         return 0.0
 
     old_data = st.session_state.odds_memory.get(fid, {})
+    if not isinstance(old_data, dict):
+        return 0.0
+
     fav_is_home = mk["q1"] <= mk["q2"]
     old_q = safe_float(old_data.get("q1") if fav_is_home else old_data.get("q2"), 0.0)
     fav_now = min(mk["q1"], mk["q2"])
@@ -448,29 +574,20 @@ def score_over_signal(mk, s_h, s_a, combined_ht_avg, fav, drop_diff):
 
 
 def score_boost_signal(mk, s_h, s_a, pt_score, over_score, drop_diff, combined_ht_avg):
-    """
-    BOOST più selettivo:
-    - pesa meno il semplice accumulo score
-    - richiede migliore convergenza HT/FT
-    - bonus più stretti
-    """
     score = 0.0
     score += pt_score * 0.38
     score += over_score * 0.48
 
-    # Bonus solo se c'è vera struttura HT
     if (s_h["avg_ht"] >= 1.30 and s_a["avg_ht"] >= 1.00) or (s_a["avg_ht"] >= 1.30 and s_h["avg_ht"] >= 1.00):
         score += 0.55
     elif s_h["avg_ht"] >= 1.15 and s_a["avg_ht"] >= 1.15:
         score += 0.35
 
-    # Bonus FT solo se c'è convergenza reale
     if s_h["avg_total"] >= 1.65 and s_a["avg_total"] >= 1.65:
         score += 0.55
     elif (s_h["avg_total"] >= 1.95 and s_a["avg_total"] >= 1.35) or (s_a["avg_total"] >= 1.95 and s_h["avg_total"] >= 1.35):
         score += 0.25
 
-    # Mercati più stretti
     if 1.60 <= mk["o25"] <= 2.12 and 1.22 <= mk["o05ht"] <= 1.36:
         score += 0.55
     elif 1.55 <= mk["o25"] <= 2.20 and 1.20 <= mk["o05ht"] <= 1.38:
@@ -480,17 +597,10 @@ def score_boost_signal(mk, s_h, s_a, pt_score, over_score, drop_diff, combined_h
         score += 0.35
 
     score += score_drop(drop_diff) * 0.45
-
     return round3(score)
 
 
 def score_gold_signal(mk, s_h, s_a, pt_score, over_score, boost_score, fav, drop_diff, is_gold_zone, combined_ht_avg):
-    """
-    GOLD più selettivo:
-    - meno bonus automatici
-    - dipende di più da BOOST forte
-    - drop pesa meno se il resto non è già buono
-    """
     score = 0.0
     score += pt_score * 0.22
     score += over_score * 0.30
@@ -526,21 +636,18 @@ def build_signal_package(fid, mk, s_h, s_a, combined_ht_avg):
     tags = []
     probe_tags = []
 
-    # Probe / contesto
     if (fav < 1.75) and (s_h["avg_total"] >= 1.0 and s_a["avg_total"] >= 1.0):
         probe_tags.append("🐟O")
 
     if (2.0 <= mk["q1"] <= 3.5) and (2.0 <= mk["q2"] <= 3.5) and (s_h["avg_total"] >= 1.0 and s_a["avg_total"] >= 1.0):
         probe_tags.append("🐟G")
 
-    # Tag primari
     if pt_score >= 4.1:
         tags.append("🎯PT")
 
     if over_score >= 4.0:
         tags.append("⚽ OVER")
 
-    # BOOST più selettivo
     boost_gate_ht = (
         (s_h["avg_ht"] >= 1.28 and s_a["avg_ht"] >= 1.00) or
         (s_a["avg_ht"] >= 1.28 and s_h["avg_ht"] >= 1.00) or
@@ -552,12 +659,13 @@ def build_signal_package(fid, mk, s_h, s_a, combined_ht_avg):
     )
     boost_gate_market = (1.58 <= mk["o25"] <= 2.18 and 1.21 <= mk["o05ht"] <= 1.37)
     ft_convergence = (
-    (s_h["avg_total"] >= 1.45 and s_a["avg_total"] >= 1.45)
-    or
-    (s_h["avg_total"] >= 1.80 and s_a["avg_total"] >= 1.20)
-    or
-    (s_a["avg_total"] >= 1.80 and s_h["avg_total"] >= 1.20)
-)
+        (s_h["avg_total"] >= 1.45 and s_a["avg_total"] >= 1.45)
+        or
+        (s_h["avg_total"] >= 1.80 and s_a["avg_total"] >= 1.20)
+        or
+        (s_a["avg_total"] >= 1.80 and s_h["avg_total"] >= 1.20)
+    )
+
     if (
         boost_score >= 5.85
         and pt_score >= 4.00
@@ -570,7 +678,6 @@ def build_signal_package(fid, mk, s_h, s_a, combined_ht_avg):
     ):
         tags.append("🚀 BOOST")
 
-    # GOLD molto più selettivo
     gold_gate_core = (
         (s_h["avg_total"] >= 1.55 and s_a["avg_total"] >= 1.50)
         and (s_h["avg_ht"] >= 1.05 and s_a["avg_ht"] >= 1.05)
@@ -601,7 +708,6 @@ def build_signal_package(fid, mk, s_h, s_a, combined_ht_avg):
     if drop_diff >= 0.05:
         tags.append(f"📉-{drop_diff:.2f}")
 
-    # Aggiungo probe dopo i tag forti
     tags.extend(probe_tags)
 
     primary_signal_count = sum(1 for t in tags if any(k in t for k in ["GOLD", "BOOST", "OVER", "PT"]))
@@ -624,11 +730,6 @@ def build_signal_package(fid, mk, s_h, s_a, combined_ht_avg):
 
 
 def should_keep_match(signal_pack):
-    """
-    Manteniamo il match se:
-    - ha almeno un tag primario
-    - oppure ha probe + score max discreto
-    """
     if signal_pack["primary_signal_count"] >= 1:
         return True
 
@@ -652,7 +753,7 @@ def save_match_details_file():
 
 
 def get_target_dates():
-    return [(now_rome().date() + timedelta(days=i)).strftime("%Y-%m-%d") for i in range(3)]
+    return [(now_rome().date() + timedelta(days=i)).strftime("%Y-%m-%d") for i in range(5)]
 
 
 def build_day_results(day_num):
@@ -793,24 +894,10 @@ def run_full_scan(horizon=None, snap=False, update_main_site=False, show_success
             )
 
             if snap and use_horizon == 1:
-                csnap = {}
-                snap_bar = st.progress(0, text="📌 SNAPSHOT IN CORSO...")
-
-                for i, f in enumerate(day_fx):
-                    snap_bar.progress((i + 1) / len(day_fx) if day_fx else 1.0)
-                    m = extract_elite_markets(s, f["fixture"]["id"])
-                    if m and m != "SKIP":
-                        csnap[str(f["fixture"]["id"])] = {"q1": m["q1"], "q2": m["q2"]}
-                    time.sleep(0.2)
-
-                st.session_state.odds_memory = csnap
-                with open(SNAP_FILE, "w", encoding="utf-8") as f:
-                    json.dump(
-                        {"odds": csnap, "timestamp": now_rome().strftime("%H:%M")},
-                        f,
-                        indent=4,
-                        ensure_ascii=False
-                    )
+                snap_bar = st.progress(0, text="📌 SNAPSHOT ROLLING DAY1+DAY2+DAY3+DAY4+DAY5...")
+                build_rolling_multiday_snapshot(s)
+                snap_bar.progress(1.0)
+                time.sleep(0.3)
                 snap_bar.empty()
 
             final_list = []
@@ -832,6 +919,9 @@ def run_full_scan(horizon=None, snap=False, update_main_site=False, show_success
                 home_team = f["teams"]["home"]
                 away_team = f["teams"]["away"]
 
+                fixture_local_dt = fixture_dt_rome(f["fixture"])
+                ora_local = fixture_local_dt.strftime("%H:%M") if fixture_local_dt else f["fixture"]["date"][11:16]
+
                 s_h = get_team_performance(s, home_team["id"])
                 s_a = get_team_performance(s, away_team["id"])
                 if not s_h or not s_a:
@@ -851,7 +941,7 @@ def run_full_scan(horizon=None, snap=False, update_main_site=False, show_success
                 is_gold_zone = signal_pack["is_gold_zone"]
 
                 row = {
-                    "Ora": f["fixture"]["date"][11:16],
+                    "Ora": ora_local,
                     "Lega": f"{f['league']['name']} ({cnt})",
                     "Match": f"{home_team['name']} - {away_team['name']}",
                     "FAV": "✅" if is_gold_zone else "❌",
@@ -862,15 +952,15 @@ def run_full_scan(horizon=None, snap=False, update_main_site=False, show_success
                     "AVG FT": f"{s_h['avg_total']:.1f}|{s_a['avg_total']:.1f}",
                     "AVG HT": f"{s_h['avg_ht']:.1f}|{s_a['avg_ht']:.1f}",
                     "Info": " ".join(tags),
-                    "Data": f["fixture"]["date"][:10],
+                    "Data": target_date,
                     "Fixture_ID": f["fixture"]["id"]
                 }
                 final_list.append(row)
 
                 details_map[fid] = {
                     "fixture_id": f["fixture"]["id"],
-                    "date": f["fixture"]["date"][:10],
-                    "time": f["fixture"]["date"][11:16],
+                    "date": target_date,
+                    "time": ora_local,
                     "league": f["league"]["name"],
                     "country": cnt,
                     "match": f"{home_team['name']} - {away_team['name']}",
@@ -955,7 +1045,7 @@ def run_full_scan(horizon=None, snap=False, update_main_site=False, show_success
                 st.rerun()
 
 # ==========================================
-# AUTO BUILD 3 GIORNI
+# AUTO BUILD 5 GIORNI
 # ==========================================
 def run_nightly_multiday_build():
     print("🚀 Avvio scan notturno multi-day...")
@@ -969,13 +1059,19 @@ def run_nightly_multiday_build():
     print("📆 DAY 3: scan statico + update data_day3/details_day3")
     run_full_scan(horizon=3, snap=False, update_main_site=False, show_success=False)
 
+    print("📆 DAY 4: scan statico + update data_day4/details_day4")
+    run_full_scan(horizon=4, snap=False, update_main_site=False, show_success=False)
+
+    print("📆 DAY 5: scan statico + update data_day5/details_day5")
+    run_full_scan(horizon=5, snap=False, update_main_site=False, show_success=False)
+
     print("✅ Build multi-day completata.")
 
 # ==========================================
 # UI SIDEBAR
 # ==========================================
 st.sidebar.header("👑 Arab Sniper V24.1 Multi-Day WEB")
-HORIZON = st.sidebar.selectbox("Orizzonte Temporale:", options=[1, 2, 3], index=0)
+HORIZON = st.sidebar.selectbox("Orizzonte Temporale:", options=[1, 2, 3, 4, 5], index=0)
 target_dates = get_target_dates()
 
 all_discovered = sorted(list(set(st.session_state.get("available_countries", []))))
@@ -1003,7 +1099,7 @@ st.sidebar.markdown("---")
 st.sidebar.caption(f"DB: {Path(DB_FILE).name}")
 st.sidebar.caption(f"SNAP: {Path(SNAP_FILE).name}")
 st.sidebar.caption(f"DETAILS: {Path(DETAILS_FILE).name}")
-st.sidebar.caption("GitHub: data.json + data_day1/2/3 + details_day1/2/3")
+st.sidebar.caption("GitHub: data.json + data_day1/2/3/4/5 + details_day1/2/3/4/5")
 
 # ==========================================
 # UI MAIN
@@ -1023,14 +1119,68 @@ if st.session_state.scan_results:
 
     if not full_view.empty:
         full_view = full_view.sort_values(by=["Ora", "Match"])
-        view = full_view.drop(columns=["Data", "Fixture_ID"])
+        view = full_view.copy()
+        def build_1x2_visual(row):
+            q1 = str(row.get("Q1_MOVE", "")).strip()
+            qx = str(row.get("QX_MOVE", "")).strip()
+            q2 = str(row.get("Q2_MOVE", "")).strip()
+
+            base_1x2 = str(row.get("1X2", "")).split("|")
+            while len(base_1x2) < 3:
+                base_1x2.append("")
+
+            left = q1 if q1 else base_1x2[0]
+            mid = qx if qx else base_1x2[1]
+            right = q2 if q2 else base_1x2[2]
+
+            return f"""
+            <div style="line-height:1.15; white-space:pre-line;">
+                <div><b>1</b> {left}</div>
+                <div><b>X</b> {mid}</div>
+                <div><b>2</b> {right}</div>
+            </div>
+            """
+
+        def build_o25_visual(row):
+            move = str(row.get("O25_MOVE", "")).strip()
+            current = str(row.get("O2.5", "")).strip()
+
+            if move:
+                return f"""
+                <div style="line-height:1.15; white-space:pre-line;">
+                    {move}
+                </div>
+                """
+            return current
+
+        view["1X2_VIS"] = view.apply(build_1x2_visual, axis=1)
+        view["O25_VIS"] = view.apply(build_o25_visual, axis=1)
+
+        # Rimuoviamo colonne tecniche che non vogliamo mostrare in tabella
+        cols_to_drop = [
+            "Data", "Fixture_ID",
+            "Q1_OPEN", "QX_OPEN", "Q2_OPEN", "O25_OPEN",
+            "Q1_CURR", "QX_CURR", "Q2_CURR", "O25_CURR",
+            "Q1_MOVE", "QX_MOVE", "Q2_MOVE", "O25_MOVE",
+            "INVERSION", "INV_FROM", "INV_TO"
+        ]
+        view = view.drop(columns=[c for c in cols_to_drop if c in view.columns], errors="ignore")
+
+        if "1X2" in view.columns:
+            view["1X2"] = view["1X2_VIS"]
+
+        if "O2.5" in view.columns:
+            view["O2.5"] = view["O25_VIS"]
+
+        view = view.drop(columns=["1X2_VIS", "O25_VIS"], errors="ignore")
 
         st.markdown("""
             <style>
                 .main-container { width: 100%; max-height: 800px; overflow: auto; border: 1px solid #444; border-radius: 8px; background-color: #0e1117; }
                 .mobile-table { width: 100%; min-width: 1000px; border-collapse: separate; border-spacing: 0; font-family: sans-serif; font-size: 11px; }
                 .mobile-table th { position: sticky; top: 0; background: #1a1c23; color: #00e5ff; z-index: 10; padding: 12px 5px; border-bottom: 2px solid #333; border-right: 1px solid #333; }
-                .mobile-table td { padding: 8px 5px; border-bottom: 1px solid #333; border-right: 1px solid #333; text-align: center; white-space: nowrap; }
+                .mobile-table td { padding: 8px 5px; border-bottom: 1px solid #333; border-right: 1px solid #333; text-align: center; white-space: nowrap; vertical-align: middle; }
+                .mobile-table td div { white-space: pre-line; }
                 .row-gold { background-color: #FFD700 !important; color: black !important; font-weight: bold; }
                 .row-boost { background-color: #006400 !important; color: white !important; font-weight: bold; }
                 .row-over { background-color: #90EE90 !important; color: black !important; font-weight: bold; }
@@ -1114,7 +1264,7 @@ if __name__ == "__main__":
         print("🚀 Avvio Scan Automatico Notturno Multi-Day...")
         HORIZON = 1
         run_nightly_multiday_build()
-        print("✅ Scan completo terminato: data.json + data_day1/2/3 + details_day1/2/3 aggiornati.")
+        print("✅ Scan completo terminato: data.json + data_day1/2/3/4/5 + details_day1/2/3/4/5 aggiornati.")
 
     elif "--fast" in sys.argv:
         HORIZON = 1
