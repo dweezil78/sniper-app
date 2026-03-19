@@ -20,6 +20,8 @@ GITHUB_REPO = "arabsniper"
 GITHUB_BRANCH = "main"
 GITHUB_API = f"https://api.github.com/repos/{GITHUB_OWNER}/{GITHUB_REPO}/contents"
 
+MIN_VALID_DAY1_ROWS = 1
+
 
 # =========================
 # FAKE STREAMLIT
@@ -176,7 +178,7 @@ spec.loader.exec_module(app)
 
 
 # =========================
-# HELPERS
+# FILES
 # =========================
 LIVE_FILES = [
     "data.json",
@@ -208,6 +210,9 @@ SYNC_FILES = [
 ]
 
 
+# =========================
+# HELPERS GENERALI
+# =========================
 def archive_live_files():
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     target = ARCHIVE_DIR / ts
@@ -228,7 +233,7 @@ def github_headers():
     token = os.getenv("GITHUB_TOKEN")
     headers = {
         "Accept": "application/vnd.github+json",
-        "User-Agent": "arabsniper-runner"
+        "User-Agent": "arabsniper-runner",
     }
     if token:
         headers["Authorization"] = f"Bearer {token}"
@@ -238,9 +243,9 @@ def github_headers():
 def fetch_github_file(path: str) -> str:
     url = f"{GITHUB_API}/{path}"
     params = {"ref": GITHUB_BRANCH}
-    r = requests.get(url, headers=github_headers(), params=params, timeout=30)
-    r.raise_for_status()
-    payload = r.json()
+    response = requests.get(url, headers=github_headers(), params=params, timeout=30)
+    response.raise_for_status()
+    payload = response.json()
 
     if "content" not in payload:
         raise RuntimeError(f"Contenuto mancante per {path}")
@@ -262,32 +267,159 @@ def expected_day1_date() -> str:
     return app.get_target_dates()[0]
 
 
-def is_day1_synced_correctly() -> bool:
-    p = BASE_DIR / "data_day1.json"
-    data = read_json_safe(p)
-    if not isinstance(data, list) or not data:
+def normalize_fixture_id(value):
+    if value is None:
+        return ""
+    text = str(value).strip()
+    if not text:
+        return ""
+    return text
+
+
+def extract_fixture_ids_from_rows(rows):
+    fixture_ids = set()
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        fid = normalize_fixture_id(row.get("Fixture_ID"))
+        if fid:
+            fixture_ids.add(fid)
+    return fixture_ids
+
+
+def extract_fixture_ids_from_details(details_payload):
+    if not isinstance(details_payload, dict):
+        return set()
+
+    details = details_payload.get("details", {})
+    if not isinstance(details, dict):
+        return set()
+
+    fixture_ids = set()
+    for key, payload in details.items():
+        key_norm = normalize_fixture_id(key)
+        if key_norm:
+            fixture_ids.add(key_norm)
+
+        if isinstance(payload, dict):
+            inner_fid = normalize_fixture_id(payload.get("fixture_id"))
+            if inner_fid:
+                fixture_ids.add(inner_fid)
+
+    return fixture_ids
+
+
+def validate_day1_pair(verbose=True):
+    """
+    Valida la coppia data_day1.json + details_day1.json in modo robusto.
+    Regole:
+    - data_day1.json deve esistere ed essere una lista non vuota
+    - tutte le righe devono avere Data coerente con la data attesa
+    - deve esserci almeno 1 fixture valido
+    - details_day1.json deve esistere
+    - details_day1.json deve avere date coerenti
+    - i fixture id devono combaciare tra day1 e details_day1
+    """
+    expected = expected_day1_date()
+
+    day1_path = BASE_DIR / "data_day1.json"
+    details_path = BASE_DIR / "details_day1.json"
+
+    day1 = read_json_safe(day1_path)
+    details_payload = read_json_safe(details_path)
+
+    if not isinstance(day1, list):
+        if verbose:
+            print("❌ data_day1.json non è una lista valida.", flush=True)
         return False
 
-    expected = expected_day1_date()
-    first = data[0]
-    actual = str(first.get("Data", "")).strip()
-    return actual == expected
+    if len(day1) < MIN_VALID_DAY1_ROWS:
+        if verbose:
+            print(f"❌ data_day1.json troppo corto: {len(day1)} righe.", flush=True)
+        return False
+
+    day1_dates = {str(row.get("Data", "")).strip() for row in day1 if isinstance(row, dict)}
+    day1_dates.discard("")
+    if not day1_dates:
+        if verbose:
+            print("❌ Nessuna data valida trovata in data_day1.json.", flush=True)
+        return False
+
+    if day1_dates != {expected}:
+        if verbose:
+            print(f"❌ data_day1.json ha date incoerenti. Attesa: {expected} | Trovate: {sorted(day1_dates)}", flush=True)
+        return False
+
+    day1_fixture_ids = extract_fixture_ids_from_rows(day1)
+    if not day1_fixture_ids:
+        if verbose:
+            print("❌ data_day1.json non contiene fixture_id validi.", flush=True)
+        return False
+
+    if not isinstance(details_payload, dict):
+        if verbose:
+            print("❌ details_day1.json non è un oggetto JSON valido.", flush=True)
+        return False
+
+    details_date = str(details_payload.get("date", "")).strip()
+    if details_date != expected:
+        if verbose:
+            print(f"❌ details_day1.json ha data incoerente. Attesa: {expected} | Trovata: {details_date or 'N/D'}", flush=True)
+        return False
+
+    details_map = details_payload.get("details", {})
+    if not isinstance(details_map, dict) or not details_map:
+        if verbose:
+            print("❌ details_day1.json non contiene dettagli validi.", flush=True)
+        return False
+
+    details_fixture_ids = extract_fixture_ids_from_details(details_payload)
+    if not details_fixture_ids:
+        if verbose:
+            print("❌ details_day1.json non contiene fixture_id validi.", flush=True)
+        return False
+
+    common_fixture_ids = day1_fixture_ids & details_fixture_ids
+    if not common_fixture_ids:
+        if verbose:
+            print("❌ Nessun fixture_id in comune tra data_day1.json e details_day1.json.", flush=True)
+            print(f"   data_day1 fixture: {len(day1_fixture_ids)} | details_day1 fixture: {len(details_fixture_ids)}", flush=True)
+        return False
+
+    if len(common_fixture_ids) < min(len(day1_fixture_ids), MIN_VALID_DAY1_ROWS):
+        if verbose:
+            print("❌ Match parziale insufficiente tra data_day1.json e details_day1.json.", flush=True)
+            print(
+                f"   Comuni: {len(common_fixture_ids)} | "
+                f"data_day1: {len(day1_fixture_ids)} | "
+                f"details_day1: {len(details_fixture_ids)}",
+                flush=True,
+            )
+        return False
+
+    if verbose:
+        print(
+            f"✅ Validazione day1 ok | data attesa: {expected} | "
+            f"righe day1: {len(day1)} | fixture comuni: {len(common_fixture_ids)}",
+            flush=True,
+        )
+    return True
 
 
 def sync_remote_outputs_to_local(max_attempts=6, wait_seconds=10):
     """
     Dopo che 3appDays.py ha scritto i file su GitHub via API,
-    li riscarichiamo tramite GitHub Contents API (non raw CDN).
-    Continuiamo a riprovare finché data_day1.json non contiene la data attesa.
+    li riscarichiamo tramite GitHub Contents API.
+    La sync è considerata valida solo se:
+    - tutti i file richiesti vengono scaricati
+    - data_day1.json e details_day1.json risultano coerenti tra loro
     """
     print("🔄 Sincronizzo i file remoti GitHub nel workspace locale...", flush=True)
-
     expected = expected_day1_date()
     print(f"📅 Attendo day1 coerente con data: {expected}", flush=True)
 
     for attempt in range(1, max_attempts + 1):
         print(f"🔁 Tentativo sync {attempt}/{max_attempts}", flush=True)
-
         all_ok = True
 
         for name in SYNC_FILES:
@@ -296,23 +428,16 @@ def sync_remote_outputs_to_local(max_attempts=6, wait_seconds=10):
                 text = fetch_github_file(name)
                 dest.write_text(text, encoding="utf-8")
                 print(f"✅ Sync locale: {name}", flush=True)
-            except Exception as e:
+            except Exception as exc:
                 all_ok = False
-                print(f"⚠️ Sync fallita per {name}: {e}", flush=True)
+                print(f"⚠️ Sync fallita per {name}: {exc}", flush=True)
 
-        if all_ok and is_day1_synced_correctly():
-            print("✅ Sync completata: data_day1.json contiene la data corretta.", flush=True)
+        if all_ok and validate_day1_pair(verbose=True):
+            print("✅ Sync completata: data_day1.json e details_day1.json sono coerenti.", flush=True)
             return True
 
-        actual = ""
-        p = BASE_DIR / "data_day1.json"
-        data = read_json_safe(p)
-        if isinstance(data, list) and data:
-            actual = str(data[0].get("Data", "")).strip()
-
-        print(f"⚠️ Data day1 non ancora coerente. Attesa: {expected} | Trovata: {actual or 'N/D'}", flush=True)
-
         if attempt < max_attempts:
+            print(f"⏳ Attendo {wait_seconds} secondi prima del nuovo tentativo...", flush=True)
             time.sleep(wait_seconds)
 
     print("❌ Sync remota fallita o day1 ancora incoerente dopo tutti i tentativi.", flush=True)
@@ -336,6 +461,9 @@ def run_quote_history(days, label):
     return result.returncode
 
 
+# =========================
+# RUN MODES
+# =========================
 def run_night():
     print("🌙 RUNNER: backup file live prima del night scan...", flush=True)
     archive_live_files()
