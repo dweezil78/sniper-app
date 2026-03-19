@@ -1,0 +1,87 @@
+name: Night Scan Guard
+
+on:
+  schedule:
+    - cron: "13 2 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: arabsniper-data-updates
+  cancel-in-progress: false
+
+jobs:
+  night-scan:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Ensure quote_history exists
+        run: |
+          test -f quote_history.json || echo "{}" > quote_history.json
+
+      - name: Run guarded night scan
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          API_SPORTS_KEY: ${{ secrets.API_SPORTS_KEY }}
+          TZ: Europe/Rome
+          PYTHONUNBUFFERED: "1"
+        run: python scan_guard.py
+
+      - name: Save generated files temporarily
+        run: |
+          mkdir -p /tmp/arabsniper_out
+          cp -f data.json /tmp/arabsniper_out/ 2>/dev/null || true
+          cp -f data_day*.json /tmp/arabsniper_out/ 2>/dev/null || true
+          cp -f details_day*.json /tmp/arabsniper_out/ 2>/dev/null || true
+          cp -f quote_history.json /tmp/arabsniper_out/ 2>/dev/null || true
+          cp -r archives /tmp/arabsniper_out/ 2>/dev/null || true
+
+      - name: Refresh repo to latest main
+        run: |
+          git fetch origin main
+          git reset --hard origin/main
+          git clean -fd
+
+      - name: Restore generated files
+        run: |
+          cp -f /tmp/arabsniper_out/data.json . 2>/dev/null || true
+          cp -f /tmp/arabsniper_out/data_day*.json . 2>/dev/null || true
+          cp -f /tmp/arabsniper_out/details_day*.json . 2>/dev/null || true
+          cp -f /tmp/arabsniper_out/quote_history.json . 2>/dev/null || true
+
+          if [ -d /tmp/arabsniper_out/archives ]; then
+            rm -rf archives
+            cp -r /tmp/arabsniper_out/archives .
+          fi
+
+      - name: Commit updated files
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add data.json data_day*.json details_day*.json quote_history.json archives/ || true
+
+          if git diff --cached --quiet; then
+            echo "Nessuna modifica da committare"
+            exit 0
+          fi
+
+          git commit -m "Night scan update"
+          git push origin main

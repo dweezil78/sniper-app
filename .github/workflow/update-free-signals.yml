@@ -1,0 +1,46 @@
+name: Update Free Signals Snapshot
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "35 1 * * *"
+    - cron: "35 13 * * *"
+
+permissions:
+  contents: write
+
+jobs:
+  snapshot-free-signals:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests
+
+      - name: Verify required files
+        run: |
+          test -f data.json || (echo "Manca data.json" && exit 1)
+          test -f snapshot_free_signals.py || (echo "Manca snapshot_free_signals.py" && exit 1)
+
+      - name: Run snapshot_free_signals.py
+        run: python snapshot_free_signals.py
+
+      - name: Commit new free_signals snapshot
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add free_signals_*.json
+          git diff --cached --quiet || git commit -m "Update free signals snapshot"
+          git push
