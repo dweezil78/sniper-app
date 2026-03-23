@@ -1,0 +1,2717 @@
+import streamlit as st
+import requests
+import pandas as pd
+from datetime import datetime, timedelta, timezone
+import json
+import os
+import time
+import sys
+from pathlib import Path
+from github import Github
+
+# ==========================================
+# CONFIGURAZIONE ARAB SNIPER V24.1 DIAGNOSI
+# Base derivata dalla V24 test
+# Stretta selettiva su:
+# - BOOST
+# - GOLD
+# + rolling snapshot 5 giorni
+# ==========================================
+BASE_DIR = Path(__file__).resolve().parent
+DB_FILE = str(BASE_DIR / "arab_sniper_database.json")
+SNAP_FILE = str(BASE_DIR / "arab_snapshot_database.json")
+CONFIG_FILE = str(BASE_DIR / "nazioni_config.json")
+DETAILS_FILE = str(BASE_DIR / "match_details.json")
+DIAG_DB_FILE = str(BASE_DIR / "diagnostic_matches.json")
+DIAG_CSV_FILE = str(BASE_DIR / "diagnostic_matches.csv")
+DIAG_DETAILS_FILE = str(BASE_DIR / "diagnostic_match_details.json")
+
+DEFAULT_EXCLUDED = ["Thailand", "Indonesia", "India", "Kenya", "Morocco", "Rwanda", "Nigeria", "Oman", "Algeria", "UAE"]
+LEAGUE_BLACKLIST = ["u19", "u20", "youth", "women", "friendly", "carioca", "paulista", "mineiro"]
+ROLLING_SNAPSHOT_HORIZONS = [1, 2, 3, 4, 5]
+
+REMOTE_MAIN_FILE = "data/data.json"
+
+REMOTE_DAY_FILES = {
+    1: "data/data_day1.json",
+    2: "data/data_day2.json",
+    3: "data/data_day3.json",
+    4: "data/data_day4.json",
+    5: "data/data_day5.json",
+}
+
+REMOTE_DETAILS_FILES = {
+    1: "data/details_day1.json",
+    2: "data/details_day2.json",
+    3: "data/details_day3.json",
+    4: "data/details_day4.json",
+    5: "data/details_day5.json",
+}
+
+try:
+    from zoneinfo import ZoneInfo
+    ROME_TZ = ZoneInfo("Europe/Rome")
+except Exception:
+    ROME_TZ = None
+
+
+def now_rome():
+    return datetime.now(ROME_TZ) if ROME_TZ else datetime.now()
+
+
+def fixture_dt_rome(fixture_obj):
+    """
+    Converte la data fixture in Europe/Rome in modo robusto.
+    Usa timestamp se disponibile, altrimenti prova con il campo date ISO.
+    """
+    try:
+        ts = fixture_obj.get("timestamp")
+        if ts:
+            dt_utc = datetime.fromtimestamp(int(ts), tz=timezone.utc)
+            return dt_utc.astimezone(ROME_TZ) if ROME_TZ else dt_utc
+    except Exception:
+        pass
+
+    try:
+        raw = str(fixture_obj.get("date", "")).strip()
+        if raw:
+            raw = raw.replace("Z", "+00:00")
+            dt = datetime.fromisoformat(raw)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return dt.astimezone(ROME_TZ) if ROME_TZ else dt
+    except Exception:
+        pass
+
+    return None
+
+
+st.set_page_config(page_title="ARAB SNIPER V24.1 DIAGNOSI", layout="wide")
+
+# ==========================================
+# GITHUB UPDATE CORE
+# ==========================================
+def github_write_json(filename, payload, commit_message):
+    try:
+        token = os.getenv("GITHUB_TOKEN")
+        if not token:
+            try:
+                token = st.secrets["GITHUB_TOKEN"]
+            except Exception:
+                token = None
+
+        if not token:
+            print("❌ GITHUB_TOKEN mancante", flush=True)
+            return "MISSING_TOKEN"
+
+        g = Github(token)
+        repo_name = "dweezil78/arabsniper2"   # <-- verifica che sia ESATTO
+        print(f"📦 Repo target: {repo_name}", flush=True)
+        print(f"📄 File target: {filename}", flush=True)
+
+        repo = g.get_repo(repo_name)
+        content_str = json.dumps(payload, indent=4, ensure_ascii=False)
+
+        # 1) provo update se il file esiste
+        try:
+            contents = repo.get_contents(filename)
+            repo.update_file(contents.path, commit_message, content_str, contents.sha)
+            print(f"✅ GitHub update OK: {filename}", flush=True)
+            return "SUCCESS"
+        except Exception as e_update:
+            print(f"⚠️ Update fallito su {filename}: {e_update}", flush=True)
+
+        # 2) se update fallisce, provo create
+        try:
+            repo.create_file(filename, commit_message, content_str)
+            print(f"✅ GitHub create OK: {filename}", flush=True)
+            return "SUCCESS"
+        except Exception as e_create:
+            print(f"❌ Create fallito su {filename}: {e_create}", flush=True)
+            return f"CREATE_FAILED: {e_create}"
+
+    except Exception as e:
+        print(f"❌ GitHub write error su {filename}: {e}", flush=True)
+        return f"GITHUB_ERROR: {e}"
+
+# ==========================================
+# WRAPPER FUNZIONI (FONDAMENTALI)
+# ==========================================
+
+def upload_to_github_main(results):
+    return github_write_json(
+        REMOTE_MAIN_FILE,
+        results,
+        "Update Arab Sniper Main Data"
+    )
+
+
+def upload_day_to_github(day_num, results):
+    return github_write_json(
+        REMOTE_DAY_FILES[day_num],
+        results,
+        f"Update Arab Sniper Day {day_num} Data"
+    )
+
+
+def upload_details_to_github(day_num, payload):
+    return github_write_json(
+        REMOTE_DETAILS_FILES[day_num],
+        payload,
+        f"Update Arab Sniper Day {day_num} Details"
+    )
+
+# ==========================================
+# SESSION STATE
+# ==========================================
+if "config" not in st.session_state:
+    if os.path.exists(CONFIG_FILE):
+        try:
+            with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+                st.session_state.config = json.load(f)
+        except Exception:
+            st.session_state.config = {"excluded": DEFAULT_EXCLUDED}
+    else:
+        st.session_state.config = {"excluded": DEFAULT_EXCLUDED}
+
+if "team_stats_cache" not in st.session_state:
+    st.session_state.team_stats_cache = {}
+
+if "team_last_matches_cache" not in st.session_state:
+    st.session_state.team_last_matches_cache = {}
+
+if "available_countries" not in st.session_state:
+    st.session_state.available_countries = []
+
+if "scan_results" not in st.session_state:
+    st.session_state.scan_results = []
+
+if "odds_memory" not in st.session_state:
+    st.session_state.odds_memory = {}
+
+if "match_details" not in st.session_state:
+    st.session_state.match_details = {}
+
+if "selected_fixture_for_modal" not in st.session_state:
+    st.session_state.selected_fixture_for_modal = None
+
+
+def save_config():
+    with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+        json.dump(st.session_state.config, f, indent=4, ensure_ascii=False)
+
+
+def load_db():
+    today = now_rome().strftime("%Y-%m-%d")
+    ts = None
+
+    if os.path.exists(DB_FILE):
+        try:
+            with open(DB_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f).get("results", [])
+                st.session_state.scan_results = [r for r in data if r.get("Data", "") >= today]
+        except Exception:
+            pass
+
+    if os.path.exists(SNAP_FILE):
+        try:
+            with open(SNAP_FILE, "r", encoding="utf-8") as f:
+                snap_data = json.load(f)
+                st.session_state.odds_memory = snap_data.get("odds", {})
+                ts = snap_data.get("timestamp", "N/D")
+        except Exception:
+            pass
+
+    if os.path.exists(DETAILS_FILE):
+        try:
+            with open(DETAILS_FILE, "r", encoding="utf-8") as f:
+                details_data = json.load(f)
+                st.session_state.match_details = details_data.get("details", {})
+        except Exception:
+            pass
+
+    return ts
+
+
+last_snap_ts = load_db()
+
+# ==========================================
+# API CORE & ROBUSTNESS
+# ==========================================
+API_KEY = os.getenv("API_SPORTS_KEY")
+
+if not API_KEY:
+    try:
+        API_KEY = st.secrets.get("API_SPORTS_KEY", None)
+    except Exception:
+        pass
+
+HEADERS = {"x-apisports-key": API_KEY} if API_KEY else {}
+
+
+def api_get(session, path, params):
+    if not API_KEY:
+        return None
+
+    for attempt in range(2):
+        try:
+            r = session.get(
+                f"https://v3.football.api-sports.io/{path}",
+                headers=HEADERS,
+                params=params,
+                timeout=20
+            )
+            if r.status_code == 200:
+                return r.json()
+            time.sleep(1)
+        except Exception:
+            if attempt == 1:
+                return None
+            time.sleep(1)
+    return None
+
+
+def _contains_ht(text):
+    t = str(text or "").lower()
+    return any(k in t for k in ["1st half", "first half", "1h", "ht", "half time", "halftime", "1° tempo"])
+
+
+def safe_float(x, default=0.0):
+    try:
+        if x is None:
+            return default
+        if isinstance(x, (int, float)):
+            return float(x)
+        s = str(x).strip().replace(",", ".")
+        if s in ("", "-", "None", "null"):
+            return default
+        return float(s)
+    except Exception:
+        return default
+
+
+def is_blacklisted_league(league_name):
+    name = str(league_name or "").lower()
+    return any(k in name for k in LEAGUE_BLACKLIST)
+
+
+def extract_elite_markets(session, fid):
+    res = api_get(session, "odds", {"fixture": fid})
+    if not res or not res.get("response"):
+        return None
+
+    mk = {"q1": 0.0, "qx": 0.0, "q2": 0.0, "o25": 0.0, "o05ht": 0.0, "o15ht": 0.0}
+
+    for bm in res["response"][0].get("bookmakers", []):
+        for b in bm.get("bets", []):
+            name = (b.get("name") or "").lower()
+            bid = b.get("id")
+
+            if bid == 1 and mk["q1"] == 0:
+                for v in b.get("values", []):
+                    vl = str(v.get("value", "")).lower()
+                    odd = safe_float(v.get("odd"), 0.0)
+                    if "home" in vl:
+                        mk["q1"] = odd
+                    elif "draw" in vl:
+                        mk["qx"] = odd
+                    elif "away" in vl:
+                        mk["q2"] = odd
+
+            if bid == 5 and mk["o25"] == 0:
+                if any(j in name for j in ["corner", "card", "booking"]):
+                    continue
+                for v in b.get("values", []):
+                    if "over 2.5" in str(v.get("value", "")).lower():
+                        mk["o25"] = safe_float(v.get("odd"), 0.0)
+
+            if _contains_ht(name) and any(k in name for k in ["total", "over/under", "ou", "goals"]):
+                if "team" in name:
+                    continue
+                for v in b.get("values", []):
+                    val_txt = str(v.get("value", "")).lower().replace(",", ".")
+                    if "over 0.5" in val_txt and mk["o05ht"] == 0:
+                        mk["o05ht"] = safe_float(v.get("odd"), 0.0)
+                    if "over 1.5" in val_txt and mk["o15ht"] == 0:
+                        mk["o15ht"] = safe_float(v.get("odd"), 0.0)
+
+        if mk["q1"] > 0 and mk["o25"] > 0 and mk["o05ht"] > 0:
+            break
+
+    if (1.01 <= mk["q1"] <= 1.10) or (1.01 <= mk["q2"] <= 1.10) or (1.01 <= mk["o25"] <= 1.30):
+        return "SKIP"
+
+    return mk
+
+
+def save_snapshot_file(payload):
+    with open(SNAP_FILE, "w", encoding="utf-8") as f:
+        json.dump(payload, f, indent=4, ensure_ascii=False)
+
+
+def load_existing_snapshot_payload():
+    if os.path.exists(SNAP_FILE):
+        try:
+            with open(SNAP_FILE, "r", encoding="utf-8") as f:
+                payload = json.load(f)
+                if isinstance(payload, dict):
+                    payload.setdefault("odds", {})
+                    return payload
+        except Exception:
+            pass
+
+    return {
+        "odds": {},
+        "timestamp": None,
+        "updated_at": None,
+        "coverage": "rolling_day1_day5"
+    }
+
+
+def build_rolling_multiday_snapshot(session):
+    """
+    Salva la baseline quote di tutti i fixture Day1+Day2+Day3+Day4+Day5.
+    Se un fixture_id esiste già, NON lo sovrascrive:
+    così il drop resta ancorato alla prima quota vista.
+    """
+    target_dates = get_target_dates()
+    existing_payload = load_existing_snapshot_payload()
+    existing_odds = existing_payload.get("odds", {}) or {}
+
+    new_odds = dict(existing_odds)
+    active_fixture_ids = set()
+
+    for horizon in ROLLING_SNAPSHOT_HORIZONS:
+        target_date = target_dates[horizon - 1]
+
+        res = api_get(session, "fixtures", {"date": target_date, "timezone": "Europe/Rome"})
+        if not res:
+            continue
+
+        fx_list = [
+            f for f in res.get("response", [])
+            if f["fixture"]["status"]["short"] == "NS"
+            and not is_blacklisted_league(f.get("league", {}).get("name", ""))
+        ]
+
+        for f in fx_list:
+            fid = str(f["fixture"]["id"])
+            active_fixture_ids.add(fid)
+
+            mk = extract_elite_markets(session, f["fixture"]["id"])
+            if not mk or mk == "SKIP":
+                continue
+
+            if fid not in new_odds:
+                new_odds[fid] = {
+                    "q1": mk["q1"],
+                    "q2": mk["q2"],
+                    "first_seen_date": target_date,
+                    "first_seen_horizon": horizon,
+                    "first_seen_ts": now_rome().strftime("%Y-%m-%d %H:%M:%S")
+                }
+            else:
+                if isinstance(new_odds[fid], dict):
+                    new_odds[fid]["last_seen_date"] = target_date
+                    new_odds[fid]["last_seen_horizon"] = horizon
+                    new_odds[fid]["last_seen_ts"] = now_rome().strftime("%Y-%m-%d %H:%M:%S")
+
+        time.sleep(0.15)
+
+    cleaned_odds = {}
+    for fid, data in new_odds.items():
+        if fid in active_fixture_ids:
+            cleaned_odds[fid] = data
+
+    payload = {
+        "odds": cleaned_odds,
+        "timestamp": now_rome().strftime("%H:%M"),
+        "updated_at": now_rome().strftime("%Y-%m-%d %H:%M:%S"),
+        "coverage": "rolling_day1_day5"
+    }
+
+    st.session_state.odds_memory = cleaned_odds
+    save_snapshot_file(payload)
+    return payload
+
+
+def get_team_last_matches(session, tid):
+    cache_key = str(tid)
+    if cache_key in st.session_state.team_last_matches_cache:
+        return st.session_state.team_last_matches_cache[cache_key]
+
+    res = api_get(session, "fixtures", {"team": tid, "last": 8, "status": "FT"})
+    fx = res.get("response", []) if res else []
+
+    last_matches = []
+    for f in fx:
+        home = f.get("teams", {}).get("home", {})
+        away = f.get("teams", {}).get("away", {})
+
+        home_id = home.get("id")
+        away_id = away.get("id")
+
+        home_name = home.get("name", "N/D")
+        away_name = away.get("name", "N/D")
+
+        gh = safe_float(f.get("goals", {}).get("home", 0), 0.0)
+        ga = safe_float(f.get("goals", {}).get("away", 0), 0.0)
+
+        hth = safe_float(f.get("score", {}).get("halftime", {}).get("home", 0), 0.0)
+        hta = safe_float(f.get("score", {}).get("halftime", {}).get("away", 0), 0.0)
+
+        # Identifica se la squadra analizzata giocava in casa o fuori
+        is_home_team = str(home_id) == str(tid)
+        is_away_team = str(away_id) == str(tid)
+
+        team_ht_scored = 0.0
+        team_ht_conceded = 0.0
+        team_ft_scored = 0.0
+        team_ft_conceded = 0.0
+
+        if is_home_team:
+            team_ht_scored = hth
+            team_ht_conceded = hta
+            team_ft_scored = gh
+            team_ft_conceded = ga
+        elif is_away_team:
+            team_ht_scored = hta
+            team_ht_conceded = hth
+            team_ft_scored = ga
+            team_ft_conceded = gh
+
+        total_ht_goals = hth + hta
+        total_ft_goals = gh + ga
+
+        second_half_scored = max(team_ft_scored - team_ht_scored, 0.0)
+        second_half_conceded = max(team_ft_conceded - team_ht_conceded, 0.0)
+
+        last_matches.append({
+            "date": str(f.get("fixture", {}).get("date", ""))[:10],
+            "league": f.get("league", {}).get("name", "N/D"),
+            "match": f"{home_name} - {away_name}",
+            "ht": f"{int(hth)}-{int(hta)}",
+            "ft": f"{int(gh)}-{int(ga)}",
+            "total_ht_goals": total_ht_goals,
+            "total_ft_goals": total_ft_goals,
+
+            # nuove metriche squadra-specifiche
+            "team_ht_scored": team_ht_scored,
+            "team_ht_conceded": team_ht_conceded,
+            "team_ft_scored": team_ft_scored,
+            "team_ft_conceded": team_ft_conceded,
+            "team_2h_scored": second_half_scored,
+            "team_2h_conceded": second_half_conceded
+        })
+
+    st.session_state.team_last_matches_cache[cache_key] = last_matches
+    return last_matches
+
+def get_team_performance(session, tid):
+    cache_key = str(tid)
+    if cache_key in st.session_state.team_stats_cache:
+        return st.session_state.team_stats_cache[cache_key]
+
+    last_matches = get_team_last_matches(session, tid)
+    if not last_matches:
+        return None
+
+    ft_list = [safe_float(m.get("total_ft_goals"), 0.0) for m in last_matches]
+    ht_list = [safe_float(m.get("total_ht_goals"), 0.0) for m in last_matches]
+
+    ht_scored_list = [safe_float(m.get("team_ht_scored"), 0.0) for m in last_matches]
+    ht_conceded_list = [safe_float(m.get("team_ht_conceded"), 0.0) for m in last_matches]
+    ft_scored_list = [safe_float(m.get("team_ft_scored"), 0.0) for m in last_matches]
+    ft_conceded_list = [safe_float(m.get("team_ft_conceded"), 0.0) for m in last_matches]
+
+    if not ft_list or not ht_list:
+        return None
+
+    act = len(ft_list)
+
+    def trimmed_mean(values):
+        vals = sorted([safe_float(v, 0.0) for v in values])
+        if not vals:
+            return 0.0
+        if len(vals) >= 5:
+            core = vals[1:-1]
+        else:
+            core = vals
+        if not core:
+            return 0.0
+        return sum(core) / len(core)
+
+    avg_total = sum(ft_list) / act
+    avg_ht = sum(ht_list) / act
+
+    avg_total_clean = trimmed_mean(ft_list)
+    avg_ht_clean = trimmed_mean(ht_list)
+
+    avg_ht_scored = sum(ht_scored_list) / act
+    avg_ht_conceded = sum(ht_conceded_list) / act
+    avg_ft_scored = sum(ft_scored_list) / act
+    avg_ft_conceded = sum(ft_conceded_list) / act
+
+    avg_ht_scored_clean = trimmed_mean(ht_scored_list)
+    avg_ht_conceded_clean = trimmed_mean(ht_conceded_list)
+    avg_ft_scored_clean = trimmed_mean(ft_scored_list)
+    avg_ft_conceded_clean = trimmed_mean(ft_conceded_list)
+
+    ft_2plus_rate = sum(1 for x in ft_list if x >= 2) / act
+    ft_3plus_rate = sum(1 for x in ft_list if x >= 3) / act
+    ft_low_rate = sum(1 for x in ft_list if x <= 1) / act
+
+    ht_1plus_rate = sum(1 for x in ht_list if x >= 1) / act
+    ht_zero_rate = sum(1 for x in ht_list if x == 0) / act
+
+    # nuove frequenze utili per PT
+    ht_scored_1plus_rate = sum(1 for x in ht_scored_list if x >= 1) / act
+    ht_scored_2plus_rate = sum(1 for x in ht_scored_list if x >= 2) / act
+    ht_conceded_1plus_rate = sum(1 for x in ht_conceded_list if x >= 1) / act
+
+    ft_peak_count = sum(1 for x in ft_list if x >= 5)
+
+    last_match = last_matches[0] if last_matches else {}
+    last_2h_scored = safe_float(last_match.get("team_2h_scored"), 0.0)
+    last_2h_conceded = safe_float(last_match.get("team_2h_conceded"), 0.0)
+
+    last_2h_zero = (last_2h_scored == 0)
+    last_2h_conceded_zero = (last_2h_conceded == 0)
+
+    stats = {
+        "avg_ht": round3(avg_ht),
+        "avg_total": round3(avg_total),
+        "avg_ht_clean": round3(avg_ht_clean),
+        "avg_total_clean": round3(avg_total_clean),
+
+        "avg_ht_scored": round3(avg_ht_scored),
+        "avg_ht_conceded": round3(avg_ht_conceded),
+        "avg_ft_scored": round3(avg_ft_scored),
+        "avg_ft_conceded": round3(avg_ft_conceded),
+
+        "avg_ht_scored_clean": round3(avg_ht_scored_clean),
+        "avg_ht_conceded_clean": round3(avg_ht_conceded_clean),
+        "avg_ft_scored_clean": round3(avg_ft_scored_clean),
+        "avg_ft_conceded_clean": round3(avg_ft_conceded_clean),
+
+        "ht_1plus_rate": round3(ht_1plus_rate),
+        "ht_zero_rate": round3(ht_zero_rate),
+        "ft_2plus_rate": round3(ft_2plus_rate),
+        "ft_3plus_rate": round3(ft_3plus_rate),
+        "ft_low_rate": round3(ft_low_rate),
+
+        "ht_scored_1plus_rate": round3(ht_scored_1plus_rate),
+        "ht_scored_2plus_rate": round3(ht_scored_2plus_rate),
+        "ht_conceded_1plus_rate": round3(ht_conceded_1plus_rate),
+
+        "ft_peak_count": int(ft_peak_count),
+        "last_2h_zero": last_2h_zero,
+        "last_2h_conceded_zero": last_2h_conceded_zero
+    }
+
+    st.session_state.team_stats_cache[cache_key] = stats
+    return stats
+
+# ==========================================
+# SCORING HELPERS V24.1
+# ==========================================
+def round3(x):
+    return round(float(x), 3)
+
+
+def symmetry_bonus(a, b, tight=0.22, medium=0.45):
+    diff = abs(float(a) - float(b))
+    if diff <= tight:
+        return 0.8
+    if diff <= medium:
+        return 0.4
+    return 0.0
+
+
+def band_score(value, core_low, core_high, soft_low=None, soft_high=None, core_pts=1.0, soft_pts=0.45):
+    v = safe_float(value, 0.0)
+    if core_low <= v <= core_high:
+        return core_pts
+    if soft_low is not None and soft_high is not None and soft_low <= v <= soft_high:
+        return soft_pts
+    return 0.0
+
+
+def compute_drop_diff(fid, mk):
+    if fid not in st.session_state.odds_memory:
+        return 0.0
+
+    old_data = st.session_state.odds_memory.get(fid, {})
+    if not isinstance(old_data, dict):
+        return 0.0
+
+    fav_is_home = mk["q1"] <= mk["q2"]
+    old_q = safe_float(old_data.get("q1") if fav_is_home else old_data.get("q2"), 0.0)
+    fav_now = min(mk["q1"], mk["q2"])
+
+    if old_q > 0 and fav_now > 0 and old_q > fav_now:
+        return round(old_q - fav_now, 3)
+    return 0.0
+
+
+def score_drop(drop_diff):
+    if drop_diff >= 0.15:
+        return 1.2
+    if drop_diff >= 0.10:
+        return 0.9
+    if drop_diff >= 0.05:
+        return 0.5
+    return 0.0
+
+def score_ptgg_signal(mk, s_h, s_a, fav, drop_diff):
+    """
+    PTGG = candidata da almeno 1 goal nel primo tempo.
+    Logica:
+    - entrambe devono avere una vera capacità di segnare PT
+    - conta anche la tendenza avversaria a concedere PT
+    - piccolo bonus da recupero 2T e da drop/inversion
+    """
+    score = 0.0
+
+    home_ht_scored = s_h["avg_ht_scored_clean"]
+    away_ht_scored = s_a["avg_ht_scored_clean"]
+
+    home_ft_scored = s_h["avg_ft_scored_clean"]
+    away_ft_scored = s_a["avg_ft_scored_clean"]
+
+    home_concede_ht = s_h["ht_conceded_1plus_rate"]
+    away_concede_ht = s_a["ht_conceded_1plus_rate"]
+
+    # base scoring capacità di segnare PT
+    score += band_score(home_ht_scored, 0.80, 1.35, 0.65, 1.50, core_pts=1.50, soft_pts=0.60)
+    score += band_score(away_ht_scored, 0.80, 1.35, 0.65, 1.50, core_pts=1.50, soft_pts=0.60)
+
+    # se entrambe hanno buona media PT segnati
+    if home_ht_scored >= 0.80 and away_ht_scored >= 0.80:
+        score += 1.20
+    elif (home_ht_scored >= 1.00 and away_ht_scored >= 0.65) or (away_ht_scored >= 1.00 and home_ht_scored >= 0.65):
+        score += 0.70
+
+    # supporto FT goal fatti
+    if home_ft_scored >= 1.50:
+        score += 0.55
+    elif home_ft_scored >= 1.30:
+        score += 0.25
+
+    if away_ft_scored >= 1.50:
+        score += 0.55
+    elif away_ft_scored >= 1.30:
+        score += 0.25
+
+    # avversari che concedono nel PT
+    if home_concede_ht >= 0.50:
+        score += 0.45
+    elif home_concede_ht >= 0.38:
+        score += 0.20
+
+    if away_concede_ht >= 0.50:
+        score += 0.45
+    elif away_concede_ht >= 0.38:
+        score += 0.20
+
+    # continuità generale HT
+    if s_h["ht_scored_1plus_rate"] >= 0.50:
+        score += 0.40
+    if s_a["ht_scored_1plus_rate"] >= 0.50:
+        score += 0.40
+
+    # mercato HT
+    score += band_score(mk["o05ht"], 1.20, 1.40, 1.15, 1.48, core_pts=1.15, soft_pts=0.45)
+
+    # bonus recupero media dal 2T
+    if s_h["last_2h_zero"]:
+        score += 0.20
+    if s_a["last_2h_zero"]:
+        score += 0.20
+
+    # se nell'ultima non ha concesso nel 2T può "scaricare" prima
+    if s_h["last_2h_conceded_zero"]:
+        score += 0.10
+    if s_a["last_2h_conceded_zero"]:
+        score += 0.10
+
+    # drop
+    if drop_diff >= 0.20:
+        score += 0.40
+    elif drop_diff >= 0.10:
+        score += 0.20
+
+    # malus favorite troppo bassa
+    if fav < 1.30:
+        score -= 0.35
+
+    # penalità rumore
+    if home_ht_scored < 0.60:
+        score -= 0.75
+    if away_ht_scored < 0.60:
+        score -= 0.75
+
+    if s_h["ht_scored_1plus_rate"] < 0.38:
+        score -= 0.55
+    if s_a["ht_scored_1plus_rate"] < 0.38:
+        score -= 0.55
+
+    if s_h["ht_zero_rate"] >= 0.50:
+        score -= 0.40
+    if s_a["ht_zero_rate"] >= 0.50:
+        score -= 0.40
+
+    return round3(max(score, 0.0))
+
+
+def score_pto15_signal(mk, s_h, s_a, fav, drop_diff):
+    """
+    PTO1.5 = candidata da 2+ goal nel primo tempo.
+    Logica:
+    - qui basta anche una squadra molto forte + una di supporto
+    - oppure entrambe spinte
+    """
+    score = 0.0
+
+    home_ht_scored = s_h["avg_ht_scored_clean"]
+    away_ht_scored = s_a["avg_ht_scored_clean"]
+
+    home_ft_scored = s_h["avg_ft_scored_clean"]
+    away_ft_scored = s_a["avg_ft_scored_clean"]
+
+    combined_ht_scored = (home_ht_scored + away_ht_scored) / 2
+
+    # base intensità PT
+    score += band_score(combined_ht_scored, 0.90, 1.45, 0.78, 1.60, core_pts=1.60, soft_pts=0.70)
+
+    # doppia via:
+    # 1) entrambe forti
+    if home_ht_scored >= 0.90 and away_ht_scored >= 0.90:
+        score += 1.35
+    # 2) una dominante + una discreta
+    elif (home_ht_scored >= 1.10 and away_ht_scored >= 0.60) or (away_ht_scored >= 1.10 and home_ht_scored >= 0.60):
+        score += 1.15
+
+    # frequenze gol fatti PT
+    if s_h["ht_scored_1plus_rate"] >= 0.62:
+        score += 0.45
+    elif s_h["ht_scored_1plus_rate"] >= 0.50:
+        score += 0.20
+
+    if s_a["ht_scored_1plus_rate"] >= 0.62:
+        score += 0.45
+    elif s_a["ht_scored_1plus_rate"] >= 0.50:
+        score += 0.20
+
+    if s_h["ht_scored_2plus_rate"] >= 0.25:
+        score += 0.25
+    if s_a["ht_scored_2plus_rate"] >= 0.25:
+        score += 0.25
+
+    # supporto FT segnati
+    if home_ft_scored >= 1.50 and away_ft_scored >= 1.50:
+        score += 0.70
+    elif (home_ft_scored >= 1.80 and away_ft_scored >= 1.20) or (away_ft_scored >= 1.80 and home_ft_scored >= 1.20):
+        score += 0.45
+
+    # avversari concedenti nel PT
+    if s_h["ht_conceded_1plus_rate"] >= 0.50:
+        score += 0.30
+    if s_a["ht_conceded_1plus_rate"] >= 0.50:
+        score += 0.30
+
+    # mercato O1.5 HT
+    score += band_score(mk["o15ht"], 2.00, 3.35, 1.85, 3.80, core_pts=1.10, soft_pts=0.40)
+
+    # bonus recupero
+    if s_h["last_2h_zero"]:
+        score += 0.15
+    if s_a["last_2h_zero"]:
+        score += 0.15
+
+    # drop forte
+    if drop_diff >= 0.20:
+        score += 0.45
+    elif drop_diff >= 0.10:
+        score += 0.20
+
+    # malus favorita estrema
+    if fav < 1.30:
+        score -= 0.25
+
+    # penalità
+    if home_ht_scored < 0.55:
+        score -= 0.85
+    if away_ht_scored < 0.55:
+        score -= 0.85
+
+    if s_h["ht_scored_1plus_rate"] < 0.38:
+        score -= 0.50
+    if s_a["ht_scored_1plus_rate"] < 0.38:
+        score -= 0.50
+
+    if mk["o15ht"] > 4.10 and mk["o15ht"] != 0:
+        score -= 0.30
+
+    return round3(max(score, 0.0))
+
+
+def score_pt_signal(mk, s_h, s_a):
+    score = 0.0
+
+    # =========================
+    # BASE: COMBINED HT CLEAN
+    # =========================
+    combined_ht_clean = (s_h["avg_ht_clean"] + s_a["avg_ht_clean"]) / 2
+
+    score += band_score(
+        combined_ht_clean,
+        1.02, 1.65,
+        0.95, 1.80,
+        core_pts=1.7,
+        soft_pts=0.8
+    )
+
+    # =========================
+    # FORZA HT PULITA DELLE DUE SQUADRE
+    # =========================
+    if s_h["avg_ht_clean"] >= 1.00 and s_a["avg_ht_clean"] >= 1.00:
+        score += 1.7
+    elif (s_h["avg_ht_clean"] >= 1.15 and s_a["avg_ht_clean"] >= 0.90) or \
+         (s_a["avg_ht_clean"] >= 1.15 and s_h["avg_ht_clean"] >= 0.90):
+        score += 1.0
+
+    score += symmetry_bonus(
+        s_h["avg_ht_clean"],
+        s_a["avg_ht_clean"],
+        tight=0.18,
+        medium=0.35
+    )
+
+    # =========================
+    # CONTINUITÀ HT
+    # =========================
+    if s_h["ht_1plus_rate"] >= 0.75 and s_a["ht_1plus_rate"] >= 0.75:
+        score += 1.2
+    elif s_h["ht_1plus_rate"] >= 0.62 and s_a["ht_1plus_rate"] >= 0.62:
+        score += 0.8
+    elif (s_h["ht_1plus_rate"] >= 0.75 and s_a["ht_1plus_rate"] >= 0.50) or \
+         (s_a["ht_1plus_rate"] >= 0.75 and s_h["ht_1plus_rate"] >= 0.50):
+        score += 0.45
+
+    # =========================
+    # MERCATO HT
+    # =========================
+    score += band_score(mk["o05ht"], 1.20, 1.38, 1.15, 1.46, core_pts=1.5, soft_pts=0.6)
+    score += band_score(mk["o15ht"], 2.00, 3.40, 1.85, 4.00, core_pts=0.7, soft_pts=0.25)
+
+    # =========================
+    # SUPPORTO FT LEGGERO
+    # =========================
+    if s_h["avg_total_clean"] >= 1.45 and s_a["avg_total_clean"] >= 1.45:
+        score += 0.45
+
+    if s_h["ft_low_rate"] <= 0.25 and s_a["ft_low_rate"] <= 0.25:
+        score += 0.25
+
+    # =========================
+    # BONUS ULTIMO MATCH SENZA GOAL 2T
+    # =========================
+    if s_h["last_2h_zero"] or s_a["last_2h_zero"]:
+        score += 0.30
+
+    # =========================
+    # PENALITÀ RUMORE HT
+    # =========================
+    if s_h["ht_zero_rate"] >= 0.38:
+        score -= 0.75
+    if s_a["ht_zero_rate"] >= 0.38:
+        score -= 0.75
+
+    if s_h["avg_ht_clean"] < 0.85:
+        score -= 0.75
+    if s_a["avg_ht_clean"] < 0.85:
+        score -= 0.75
+
+    if s_h["ht_1plus_rate"] < 0.62:
+        score -= 0.45
+    if s_a["ht_1plus_rate"] < 0.62:
+        score -= 0.45
+
+    if combined_ht_clean < 0.95:
+        score -= 0.60
+
+    return round3(max(score, 0.0))
+
+
+def score_over_signal(mk, s_h, s_a, fav, drop_diff):
+    """
+    OVER = segnale FT puro.
+    Logica:
+    - incrocio attacco/difesa tra goal fatti e goal subiti
+    - doppio controllo su media sporca + media pulita
+    - NON dipende dal PT, al massimo riceve un supporto leggero
+    """
+
+    score = 0.0
+
+    # =========================
+    # MEDIE FATTI / SUBITI
+    # =========================
+    home_scored = s_h["avg_ft_scored"]
+    away_scored = s_a["avg_ft_scored"]
+    home_conceded = s_h["avg_ft_conceded"]
+    away_conceded = s_a["avg_ft_conceded"]
+
+    home_scored_clean = s_h["avg_ft_scored_clean"]
+    away_scored_clean = s_a["avg_ft_scored_clean"]
+    home_conceded_clean = s_h["avg_ft_conceded_clean"]
+    away_conceded_clean = s_a["avg_ft_conceded_clean"]
+
+    # incroci principali
+    cross_home_dirty = home_scored + away_conceded
+    cross_away_dirty = away_scored + home_conceded
+
+    cross_home_clean = home_scored_clean + away_conceded_clean
+    cross_away_clean = away_scored_clean + home_conceded_clean
+
+    combined_cross_dirty = (cross_home_dirty + cross_away_dirty) / 2
+    combined_cross_clean = (cross_home_clean + cross_away_clean) / 2
+
+    # =========================
+    # GATE BASE PULITO
+    # =========================
+    if cross_home_clean >= 2.20:
+        score += 1.10
+    elif cross_home_clean >= 2.05:
+        score += 0.45
+
+    if cross_away_clean >= 2.20:
+        score += 1.10
+    elif cross_away_clean >= 2.05:
+        score += 0.45
+
+    if cross_home_clean >= 2.20 and cross_away_clean >= 2.20:
+        score += 1.30
+    elif (cross_home_clean >= 2.20 and cross_away_clean >= 2.00) or \
+         (cross_away_clean >= 2.20 and cross_home_clean >= 2.00):
+        score += 0.65
+
+    # =========================
+    # GATE BASE SPORCO
+    # =========================
+    if cross_home_dirty >= 2.35:
+        score += 0.90
+    elif cross_home_dirty >= 2.20:
+        score += 0.35
+
+    if cross_away_dirty >= 2.35:
+        score += 0.90
+    elif cross_away_dirty >= 2.20:
+        score += 0.35
+
+    if cross_home_dirty >= 2.35 and cross_away_dirty >= 2.35:
+        score += 1.00
+    elif (cross_home_dirty >= 2.35 and cross_away_dirty >= 2.15) or \
+         (cross_away_dirty >= 2.35 and cross_home_dirty >= 2.15):
+        score += 0.45
+
+    # =========================
+    # ATTACCHI VERI
+    # =========================
+    if home_scored_clean >= 1.25:
+        score += 0.50
+    elif home_scored_clean >= 1.05:
+        score += 0.20
+
+    if away_scored_clean >= 1.25:
+        score += 0.50
+    elif away_scored_clean >= 1.05:
+        score += 0.20
+
+    if home_scored_clean >= 1.15 and away_scored_clean >= 1.15:
+        score += 0.55
+
+    # =========================
+    # DIFESE CHE CONCEDONO
+    # =========================
+    if away_conceded_clean >= 1.10:
+        score += 0.40
+    elif away_conceded_clean >= 0.95:
+        score += 0.15
+
+    if home_conceded_clean >= 1.10:
+        score += 0.40
+    elif home_conceded_clean >= 0.95:
+        score += 0.15
+
+    if away_conceded_clean >= 1.05 and home_conceded_clean >= 1.05:
+        score += 0.40
+
+    # =========================
+    # CONTINUITÀ FT
+    # =========================
+    if s_h["ft_2plus_rate"] >= 0.75:
+        score += 0.45
+    elif s_h["ft_2plus_rate"] >= 0.62:
+        score += 0.20
+
+    if s_a["ft_2plus_rate"] >= 0.75:
+        score += 0.45
+    elif s_a["ft_2plus_rate"] >= 0.62:
+        score += 0.20
+
+    if s_h["ft_2plus_rate"] >= 0.62 and s_a["ft_2plus_rate"] >= 0.62:
+        score += 0.45
+
+    if s_h["ft_3plus_rate"] >= 0.50:
+        score += 0.22
+    if s_a["ft_3plus_rate"] >= 0.50:
+        score += 0.22
+
+    # =========================
+    # MERCATO O2.5
+    # =========================
+    score += band_score(
+        mk["o25"],
+        1.52, 2.18,
+        1.42, 2.40,
+        core_pts=1.35,
+        soft_pts=0.55
+    )
+
+    # piccola rifinitura quota favorita
+    if 1.35 <= fav <= 2.20:
+        score += 0.20
+
+    # =========================
+    # SUPPORTO HT LEGGERO
+    # =========================
+    combined_ht_scored_clean = (s_h["avg_ht_scored_clean"] + s_a["avg_ht_scored_clean"]) / 2
+    if combined_ht_scored_clean >= 0.78:
+        score += 0.15
+    if combined_ht_scored_clean >= 0.92:
+        score += 0.10
+
+    # =========================
+    # DROP
+    # =========================
+    if drop_diff >= 0.20:
+        score += 0.40
+    elif drop_diff >= 0.10:
+        score += 0.18
+    elif drop_diff >= 0.05:
+        score += 0.08
+
+    # =========================
+    # MALUS FAVORITA ESTREMA
+    # =========================
+    if fav < 1.30:
+        score -= 0.30
+
+    # =========================
+    # PENALITÀ STRUTTURALI
+    # =========================
+    if home_scored_clean < 1.00:
+        score -= 0.65
+    if away_scored_clean < 1.00:
+        score -= 0.65
+
+    if away_conceded_clean < 0.90:
+        score -= 0.45
+    if home_conceded_clean < 0.90:
+        score -= 0.45
+
+    if s_h["ft_low_rate"] >= 0.38:
+        score -= 0.65
+    if s_a["ft_low_rate"] >= 0.38:
+        score -= 0.65
+
+    if cross_home_clean < 2.00:
+        score -= 0.60
+    if cross_away_clean < 2.00:
+        score -= 0.60
+
+    if cross_home_dirty < 2.10:
+        score -= 0.30
+    if cross_away_dirty < 2.10:
+        score -= 0.30
+
+    return round3(max(score, 0.0))
+
+
+def score_boost_signal(mk, s_h, s_a, pt_score, over_score, drop_diff):
+    score = 0.0
+
+    combined_ht_clean = (s_h["avg_ht_clean"] + s_a["avg_ht_clean"]) / 2
+    combined_ft_clean = (s_h["avg_total_clean"] + s_a["avg_total_clean"]) / 2
+    
+
+    # =========================
+    # BASE: eredita da PT + OVER
+    # BOOST = over forte con supporto PT
+    # =========================
+    score += pt_score * 0.30
+    score += over_score * 0.46
+
+    # =========================
+    # CONVERGENZA HT PULITA
+    # =========================
+    if s_h["avg_ht_clean"] >= 1.00 and s_a["avg_ht_clean"] >= 1.00:
+        score += 0.95
+    elif (s_h["avg_ht_clean"] >= 1.15 and s_a["avg_ht_clean"] >= 0.90) or \
+         (s_a["avg_ht_clean"] >= 1.15 and s_h["avg_ht_clean"] >= 0.90):
+        score += 0.55
+
+    if s_h["ht_1plus_rate"] >= 0.75 and s_a["ht_1plus_rate"] >= 0.75:
+        score += 0.70
+    elif s_h["ht_1plus_rate"] >= 0.62 and s_a["ht_1plus_rate"] >= 0.62:
+        score += 0.40
+
+    # =========================
+    # CONVERGENZA FT PULITA
+    # =========================
+    if s_h["avg_total_clean"] >= 1.60 and s_a["avg_total_clean"] >= 1.60:
+        score += 0.95
+    elif (s_h["avg_total_clean"] >= 1.85 and s_a["avg_total_clean"] >= 1.35) or \
+         (s_a["avg_total_clean"] >= 1.85 and s_h["avg_total_clean"] >= 1.35):
+        score += 0.50
+
+    if s_h["ft_2plus_rate"] >= 0.75 and s_a["ft_2plus_rate"] >= 0.75:
+        score += 0.65
+    elif s_h["ft_2plus_rate"] >= 0.62 and s_a["ft_2plus_rate"] >= 0.62:
+        score += 0.35
+
+    if s_h["ft_3plus_rate"] >= 0.50 and s_a["ft_3plus_rate"] >= 0.50:
+        score += 0.25
+
+    # =========================
+    # MERCATO BOOST
+    # fascia core = match perfetto
+    # fascia soft = match buono
+    # =========================
+    if 1.55 <= mk["o25"] <= 2.10 and 1.27 <= mk["o05ht"] <= 1.37:
+        score += 0.80
+    elif 1.50 <= mk["o25"] <= 2.20 and 1.25 <= mk["o05ht"] <= 1.40:
+        score += 0.35
+
+    # =========================
+    # SUPPORTO COMBINATO
+    # =========================
+    if combined_ht_clean >= 1.05:
+        score += 0.30
+    if combined_ft_clean >= 1.75:
+        score += 0.35
+
+    # =========================
+    # DROP
+    # =========================
+    score += score_drop(drop_diff) * 0.40
+
+    # =========================
+    # PENALITÀ RUMORE
+    # =========================
+    if s_h["ft_low_rate"] >= 0.38:
+        score -= 0.75
+    if s_a["ft_low_rate"] >= 0.38:
+        score -= 0.75
+
+    if s_h["ht_zero_rate"] >= 0.38:
+        score -= 0.70
+    if s_a["ht_zero_rate"] >= 0.38:
+        score -= 0.70
+
+    if s_h["avg_ht_clean"] < 0.85:
+        score -= 0.60
+    if s_a["avg_ht_clean"] < 0.85:
+        score -= 0.60
+
+    if s_h["avg_total_clean"] < 1.35:
+        score -= 0.60
+    if s_a["avg_total_clean"] < 1.35:
+        score -= 0.60
+
+    return round3(max(score, 0.0))
+
+def score_gold_signal(mk, s_h, s_a, pt_score, over_score, fav, drop_diff, is_gold_zone):
+    score = 0.0
+
+    combined_ht_clean = (s_h["avg_ht_clean"] + s_a["avg_ht_clean"]) / 2
+    combined_ft_clean = (s_h["avg_total_clean"] + s_a["avg_total_clean"]) / 2
+
+    # =========================
+    # BASE: eredita da PT + OVER, NON da BOOST
+    # =========================
+    score += pt_score * 0.24
+    score += over_score * 0.32
+
+    # =========================
+    # QUOTE / ZONA GOLD
+    # =========================
+    if is_gold_zone:
+        score += 0.95
+
+    if 1.45 <= fav <= 1.80:
+        score += 0.40
+    elif 1.40 <= fav <= 1.86:
+        score += 0.20
+
+    # =========================
+    # CONVERGENZA HT PULITA
+    # =========================
+    if s_h["avg_ht_clean"] >= 1.00 and s_a["avg_ht_clean"] >= 1.00:
+        score += 0.75
+    elif (s_h["avg_ht_clean"] >= 1.18 and s_a["avg_ht_clean"] >= 0.92) or \
+         (s_a["avg_ht_clean"] >= 1.18 and s_h["avg_ht_clean"] >= 0.92):
+        score += 0.35
+
+    if s_h["ht_1plus_rate"] >= 0.75 and s_a["ht_1plus_rate"] >= 0.75:
+        score += 0.55
+    elif s_h["ht_1plus_rate"] >= 0.62 and s_a["ht_1plus_rate"] >= 0.62:
+        score += 0.25
+
+    # =========================
+    # CONVERGENZA FT PULITA
+    # =========================
+    if s_h["avg_total_clean"] >= 1.70 and s_a["avg_total_clean"] >= 1.65:
+        score += 0.85
+    elif (s_h["avg_total_clean"] >= 1.95 and s_a["avg_total_clean"] >= 1.45) or \
+         (s_a["avg_total_clean"] >= 1.95 and s_h["avg_total_clean"] >= 1.45):
+        score += 0.40
+
+    if s_h["ft_2plus_rate"] >= 0.75 and s_a["ft_2plus_rate"] >= 0.75:
+        score += 0.55
+    elif s_h["ft_2plus_rate"] >= 0.62 and s_a["ft_2plus_rate"] >= 0.62:
+        score += 0.25
+
+    if s_h["ft_3plus_rate"] >= 0.50 and s_a["ft_3plus_rate"] >= 0.50:
+        score += 0.35
+
+    # =========================
+    # MERCATO CONVERGENTE
+    # =========================
+    if 1.60 <= mk["o25"] <= 2.12 and 1.22 <= mk["o05ht"] <= 1.36:
+        score += 0.70
+    elif 1.54 <= mk["o25"] <= 2.22 and 1.20 <= mk["o05ht"] <= 1.39:
+        score += 0.30
+
+    if combined_ht_clean >= 1.05:
+        score += 0.30
+    if combined_ft_clean >= 1.75:
+        score += 0.30
+
+    # =========================
+    # DROP
+    # =========================
+    score += score_drop(drop_diff) * 0.45
+
+    # =========================
+    # PENALITÀ RUMORE
+    # =========================
+    if s_h["ft_low_rate"] >= 0.38:
+        score -= 0.75
+    if s_a["ft_low_rate"] >= 0.38:
+        score -= 0.75
+
+    if s_h["ht_zero_rate"] >= 0.38:
+        score -= 0.70
+    if s_a["ht_zero_rate"] >= 0.38:
+        score -= 0.70
+
+    if s_h["avg_ht_clean"] < 0.85:
+        score -= 0.60
+    if s_a["avg_ht_clean"] < 0.85:
+        score -= 0.60
+
+    if s_h["avg_total_clean"] < 1.35:
+        score -= 0.60
+    if s_a["avg_total_clean"] < 1.35:
+        score -= 0.60
+
+    return round3(max(score, 0.0))
+
+
+def build_signal_package(fid, mk, s_h, s_a):
+    fav = min(mk["q1"], mk["q2"])
+    is_gold_zone = (1.40 <= fav <= 1.90)
+    drop_diff = compute_drop_diff(fid, mk)
+
+    combined_ht_clean = (s_h["avg_ht_clean"] + s_a["avg_ht_clean"]) / 2
+    combined_ft_clean = (s_h["avg_total_clean"] + s_a["avg_total_clean"]) / 2
+    combined_ht_scored_clean = (s_h["avg_ht_scored_clean"] + s_a["avg_ht_scored_clean"]) / 2
+
+    ptgg_score = score_ptgg_signal(mk, s_h, s_a, fav, drop_diff)
+    pto15_score = score_pto15_signal(mk, s_h, s_a, fav, drop_diff)
+
+    # PT composito: il migliore guida, il secondo aggiunge supporto
+    pt_score = max(ptgg_score, pto15_score) + (min(ptgg_score, pto15_score) * 0.18)
+
+    over_score = score_over_signal(mk, s_h, s_a, fav, drop_diff)
+    boost_score = score_boost_signal(mk, s_h, s_a, pt_score, over_score, drop_diff)
+    gold_score = score_gold_signal(
+        mk, s_h, s_a, pt_score, over_score,
+        fav, drop_diff, is_gold_zone
+    )
+    tags = []
+
+    if ptgg_score >= 4.00:
+        tags.append("🎯PTGG")
+
+    if pto15_score >= 4.00:
+        tags.append("🔥PT1.5")
+
+    if over_score >= 4.00 and combined_ht_scored_clean >= 0.72:
+        tags.append("⚽ OVER")
+
+    # =========================
+    # BOOST GATES
+    # =========================
+    boost_has_pt = ("🎯PTGG" in tags or "🔥PT1.5" in tags)
+    boost_has_over = ("⚽ OVER" in tags)
+
+    boost_gate_ht = (
+        (s_h["avg_ht_clean"] >= 1.00 and s_a["avg_ht_clean"] >= 1.00) or
+        ((s_h["avg_ht_clean"] >= 1.15 and s_a["avg_ht_clean"] >= 0.90) or
+         (s_a["avg_ht_clean"] >= 1.15 and s_h["avg_ht_clean"] >= 0.90))
+    )
+
+    boost_gate_ht_rates = (
+        s_h["ht_1plus_rate"] >= 0.62 and
+        s_a["ht_1plus_rate"] >= 0.62 and
+        s_h["ht_zero_rate"] <= 0.38 and
+        s_a["ht_zero_rate"] <= 0.38
+    )
+
+    boost_gate_ft = (
+        (s_h["avg_total_clean"] >= 1.55 and s_a["avg_total_clean"] >= 1.50) or
+        (s_a["avg_total_clean"] >= 1.55 and s_h["avg_total_clean"] >= 1.50)
+    )
+
+    boost_gate_ft_rates = (
+        s_h["ft_2plus_rate"] >= 0.62 and
+        s_a["ft_2plus_rate"] >= 0.62 and
+        s_h["ft_low_rate"] <= 0.25 and
+        s_a["ft_low_rate"] <= 0.25
+    )
+
+    boost_gate_market = (
+        1.50 <= mk["o25"] <= 2.20 and
+        1.25 <= mk["o05ht"] <= 1.40
+    )
+
+    if (
+        boost_score >= 5.95
+        and boost_has_pt
+        and boost_has_over
+        and pt_score >= 4.00
+        and over_score >= 4.00
+        and combined_ht_clean >= 1.02
+        and combined_ft_clean >= 1.65
+        and boost_gate_ht
+        and boost_gate_ht_rates
+        and boost_gate_ft
+        and boost_gate_ft_rates
+        and boost_gate_market
+    ):
+        tags.append("🚀 BOOST")
+
+    # =========================
+    # GOLD GATES - INDIPENDENTE
+    # =========================
+    gold_has_pt = ("🎯PTGG" in tags or "🔥PT1.5" in tags)
+    gold_has_over = ("⚽ OVER" in tags)
+
+    gold_gate_ht = (
+        (s_h["avg_ht_clean"] >= 1.00 and s_a["avg_ht_clean"] >= 1.00) or
+        ((s_h["avg_ht_clean"] >= 1.18 and s_a["avg_ht_clean"] >= 0.92) or
+         (s_a["avg_ht_clean"] >= 1.18 and s_h["avg_ht_clean"] >= 0.92))
+    )
+
+    gold_gate_ht_rates = (
+        s_h["ht_1plus_rate"] >= 0.62 and
+        s_a["ht_1plus_rate"] >= 0.62 and
+        s_h["ht_zero_rate"] <= 0.38 and
+        s_a["ht_zero_rate"] <= 0.38
+    )
+
+    gold_gate_ft = (
+        (s_h["avg_total_clean"] >= 1.65 and s_a["avg_total_clean"] >= 1.60) or
+        (s_a["avg_total_clean"] >= 1.65 and s_h["avg_total_clean"] >= 1.60)
+    )
+
+    gold_gate_ft_rates = (
+        s_h["ft_2plus_rate"] >= 0.62 and
+        s_a["ft_2plus_rate"] >= 0.62 and
+        s_h["ft_low_rate"] <= 0.38 and
+        s_a["ft_low_rate"] <= 0.38
+    )
+
+    gold_gate_market = (
+        1.56 <= mk["o25"] <= 2.15 and
+        1.21 <= mk["o05ht"] <= 1.38
+    )
+
+    gold_extra_ok = (
+        drop_diff >= 0.05 or
+        (combined_ht_clean >= 1.02 and combined_ft_clean >= 1.72)
+    )
+
+    if (
+        gold_score >= 6.55
+        and gold_has_pt
+        and gold_has_over
+        and pt_score >= 4.05
+        and over_score >= 4.10
+        and is_gold_zone
+        and combined_ht_clean >= 1.00
+        and combined_ft_clean >= 1.68
+        and gold_gate_ht
+        and gold_gate_ht_rates
+        and gold_gate_ft
+        and gold_gate_ft_rates
+        and gold_gate_market
+        and gold_extra_ok
+    ):
+        tags.insert(0, "⚽⭐ GOLD")
+
+    # =========================
+    # PROBE
+    # =========================
+    if (
+        "⚽ OVER" not in tags
+        and "🚀 BOOST" not in tags
+        and "⚽⭐ GOLD" not in tags
+        and combined_ft_clean >= 1.48
+        and s_h["ft_2plus_rate"] >= 0.50
+        and s_a["ft_2plus_rate"] >= 0.50
+        and 1.55 <= mk["o25"] <= 2.30
+        and mk["o05ht"] <= 1.42
+        and combined_ht_clean >= 0.78
+        and over_score >= 3.60
+    ):
+        tags.append("🐟O")
+
+    if (
+        "🚀 BOOST" not in tags
+        and "⚽⭐ GOLD" not in tags
+        and not (("🎯PTGG" in tags or "🔥PT1.5" in tags) and "⚽ OVER" in tags)
+        and 1.38 <= fav <= 2.05
+        and combined_ht_clean >= 0.88
+        and combined_ft_clean >= 1.52
+        and 1.52 <= mk["o25"] <= 2.35
+        and pt_score >= 3.70
+        and over_score >= 3.70
+    ):
+        tags.append("🐟G")
+
+    if drop_diff >= 0.05:
+        tags.append(f"📉-{drop_diff:.2f}")
+
+    strong_tag_count = (
+        int("🎯PTGG" in tags) +
+        int("🔥PT1.5" in tags) +
+        int("⚽ OVER" in tags) +
+        int("🚀 BOOST" in tags) +
+        int("⚽⭐ GOLD" in tags)
+    )
+
+    max_score = max(ptgg_score, pto15_score, over_score, boost_score, gold_score)
+
+    return {
+        "tags": tags,
+        "scores": {
+            "ptgg": ptgg_score,
+            "pto15": pto15_score,
+            "pt": pt_score,   # PT composito   
+            "over": over_score,
+            "boost": boost_score,
+            "gold": gold_score,
+            "max": round3(max_score),
+        },
+        "drop_diff": round3(drop_diff),
+        "fav_quote": round3(fav),
+        "is_gold_zone": is_gold_zone,
+        "strong_tag_count": strong_tag_count
+    }
+
+
+def should_keep_match(signal_pack):
+    tags = signal_pack.get("tags", [])
+    scores = signal_pack.get("scores", {})
+
+    ptgg_score = safe_float(scores.get("ptgg"), 0.0)
+    pto15_score = safe_float(scores.get("pto15"), 0.0)
+    pt_score = safe_float(scores.get("pt"), 0.0)
+    over_score = safe_float(scores.get("over"), 0.0)
+    boost_score = safe_float(scores.get("boost"), 0.0)
+    gold_score = safe_float(scores.get("gold"), 0.0)
+    max_score = safe_float(scores.get("max"), 0.0)
+
+    has_gold = any("GOLD" in t for t in tags)
+    has_boost = any("BOOST" in t for t in tags)
+    has_ptgg = "🎯PTGG" in tags
+    has_pt15 = "🔥PT1.5" in tags
+    has_over = any("OVER" in t for t in tags)
+    has_probe_o = "🐟O" in tags
+    has_probe_g = "🐟G" in tags
+
+    if has_gold and gold_score >= 6.55:
+        return True
+
+    if has_boost and boost_score >= 5.95 and (pt_score >= 4.00 or over_score >= 4.00):
+        return True
+
+    if has_ptgg and has_over and ptgg_score >= 4.00 and over_score >= 4.00:
+        return True
+
+    if has_pt15 and has_over and pto15_score >= 4.00 and over_score >= 4.00:
+        return True
+
+    if has_ptgg and not has_over and ptgg_score >= 4.00:
+        return True
+
+    if has_pt15 and not has_over and pto15_score >= 4.00:
+        return True
+
+    if has_over and not (has_ptgg or has_pt15) and over_score >= 4.00:
+        return True
+
+    if has_probe_o and max_score >= 3.90:
+        return True
+
+    if has_probe_g and max_score >= 4.00:
+        return True
+
+    return False
+
+def diagnostic_reason(signal_pack, prefilter_out=False, kept=False):
+    tags = signal_pack.get("tags", [])
+    scores = signal_pack.get("scores", {})
+
+    ptgg_score = safe_float(scores.get("ptgg"), 0.0)
+    pto15_score = safe_float(scores.get("pto15"), 0.0)
+    pt_score = safe_float(scores.get("pt"), 0.0)
+    over_score = safe_float(scores.get("over"), 0.0)
+    boost_score = safe_float(scores.get("boost"), 0.0)
+    gold_score = safe_float(scores.get("gold"), 0.0)
+    max_score = safe_float(scores.get("max"), 0.0)
+
+    has_gold = any("GOLD" in t for t in tags)
+    has_boost = any("BOOST" in t for t in tags)
+    has_ptgg = "🎯PTGG" in tags
+    has_pt15 = "🔥PT1.5" in tags
+    has_over = any("OVER" in t for t in tags)
+    has_probe_o = "🐟O" in tags
+    has_probe_g = "🐟G" in tags
+
+    if kept:
+        if has_gold and gold_score >= 6.55:
+            return "KEPT_GOLD"
+        if has_boost and boost_score >= 5.95 and (pt_score >= 4.00 or over_score >= 4.00):
+            return "KEPT_BOOST"
+        if has_ptgg and has_over and ptgg_score >= 4.00 and over_score >= 4.00:
+            return "KEPT_PTGG_OVER"
+        if has_pt15 and has_over and pto15_score >= 4.00 and over_score >= 4.00:
+            return "KEPT_PT15_OVER"
+        if has_ptgg and not has_over and ptgg_score >= 4.00:
+            return "KEPT_PTGG"
+        if has_pt15 and not has_over and pto15_score >= 4.00:
+            return "KEPT_PT15"
+        if has_over and not (has_ptgg or has_pt15) and over_score >= 4.00:
+            return "KEPT_OVER"
+        if has_probe_o and max_score >= 3.90:
+            return "KEPT_PROBE_O"
+        if has_probe_g and max_score >= 4.00:
+            return "KEPT_PROBE_G"
+        return "KEPT_OTHER"
+
+    if prefilter_out:
+        return "PREFILTER_OUT"
+
+    if not tags:
+        return "NO_TAGS"
+
+    reasons = []
+    if has_gold and gold_score < 6.55:
+        reasons.append(f"GOLD_SCORE_{gold_score:.2f}<6.55")
+    if has_boost and boost_score < 5.95:
+        reasons.append(f"BOOST_SCORE_{boost_score:.2f}<5.95")
+    if has_ptgg and ptgg_score < 4.00:
+        reasons.append(f"PTGG_SCORE_{ptgg_score:.2f}<4.00")
+    if has_pt15 and pto15_score < 4.00:
+        reasons.append(f"PT15_SCORE_{pto15_score:.2f}<4.00")
+    if has_over and over_score < 4.00:
+        reasons.append(f"OVER_SCORE_{over_score:.2f}<4.00")
+    if has_probe_o and max_score < 3.90:
+        reasons.append(f"PROBE_O_MAX_{max_score:.2f}<3.90")
+    if has_probe_g and max_score < 4.00:
+        reasons.append(f"PROBE_G_MAX_{max_score:.2f}<4.00")
+
+    if not reasons:
+        return "FAILED_KEEP_RULES"
+
+    return " | ".join(reasons)
+
+
+# ==========================================
+# DETAILS / DAY PAYLOAD HELPERS
+# ==========================================
+def save_match_details_file():
+    payload = {
+        "updated_at": now_rome().strftime("%Y-%m-%d %H:%M:%S"),
+        "details": st.session_state.match_details
+    }
+    with open(DETAILS_FILE, "w", encoding="utf-8") as f:
+        json.dump(payload, f, indent=4, ensure_ascii=False)
+    return payload
+
+
+def get_target_dates():
+    return [(now_rome().date() + timedelta(days=i)).strftime("%Y-%m-%d") for i in range(5)]
+
+
+def build_day_results(day_num):
+    target_date = get_target_dates()[day_num - 1]
+    results = [r for r in st.session_state.scan_results if r.get("Data") == target_date]
+    results.sort(key=lambda x: x.get("Ora", "99:99"))
+    return results
+
+
+def build_day_details_payload(day_num):
+    target_date = get_target_dates()[day_num - 1]
+    details = {
+        k: v for k, v in st.session_state.match_details.items()
+        if v.get("date") == target_date
+    }
+    return {
+        "updated_at": now_rome().strftime("%Y-%m-%d %H:%M:%S"),
+        "day": day_num,
+        "date": target_date,
+        "details": details
+    }
+
+
+def sync_day_outputs_to_github(day_num, update_main=False):
+    day_results = build_day_results(day_num)
+    details_payload = build_day_details_payload(day_num)
+
+    status_day = upload_day_to_github(day_num, day_results)
+    status_details = upload_details_to_github(day_num, details_payload)
+
+    if update_main:
+        status_main = upload_to_github_main(day_results)
+    else:
+        status_main = None
+
+    return status_main, status_day, status_details
+
+# ==========================================
+# MODAL DETTAGLI MATCH
+# ==========================================
+@st.dialog("🔎 Dettagli partita", width="large")
+def show_match_modal(fixture_id: str):
+    detail = st.session_state.match_details.get(str(fixture_id))
+
+    if not detail:
+        st.warning("Dettagli non disponibili per questa partita.")
+        return
+
+    avg = detail.get("averages", {})
+    flags = detail.get("flags", {})
+    scores = detail.get("scores", {})
+
+    st.markdown(f"## {detail['match']}")
+    st.write(f"**Data:** {detail['date']}  |  **Ora:** {detail['time']}")
+    st.write(f"**Lega:** {detail['league']} ({detail['country']})")
+    st.write(f"**Tag:** {' '.join(detail.get('tags', []))}")
+
+    m1, m2, m3 = st.columns(3)
+    m1.metric("1", f"{detail['markets'].get('q1', 0):.2f}")
+    m2.metric("X", f"{detail['markets'].get('qx', 0):.2f}")
+    m3.metric("2", f"{detail['markets'].get('q2', 0):.2f}")
+
+    m4, m5, m6 = st.columns(3)
+    m4.metric("O2.5", f"{detail['markets'].get('o25', 0):.2f}")
+    m5.metric("O0.5 HT", f"{detail['markets'].get('o05ht', 0):.2f}")
+    m6.metric("O1.5 HT", f"{detail['markets'].get('o15ht', 0):.2f}")
+
+    st.markdown("---")
+    st.subheader("📊 Medie e flag")
+
+    a1, a2, a3 = st.columns(3)
+    a1.metric("AVG FT Home", f"{avg.get('home_avg_ft', 0):.2f}")
+    a2.metric("AVG FT Away", f"{avg.get('away_avg_ft', 0):.2f}")
+    a3.metric("AVG HT Combo", f"{avg.get('combined_ht_avg', 0):.2f}")
+
+    st.write(
+        f"**AVG HT Home/Away:** "
+        f"{avg.get('home_avg_ht', 0):.2f} | "
+        f"{avg.get('away_avg_ht', 0):.2f}"
+    )
+
+    cross_home_dirty = avg.get("home_avg_ft_scored", 0) + avg.get("away_avg_ft_conceded", 0)
+    cross_away_dirty = avg.get("away_avg_ft_scored", 0) + avg.get("home_avg_ft_conceded", 0)
+
+    cross_home_clean = avg.get("home_avg_ft_scored_clean", 0) + avg.get("away_avg_ft_conceded_clean", 0)
+    cross_away_clean = avg.get("away_avg_ft_scored_clean", 0) + avg.get("home_avg_ft_conceded_clean", 0)
+
+    st.write(
+        f"**CROSS FT DIRTY H/A:** "
+        f"{cross_home_dirty:.2f} | {cross_away_dirty:.2f}"
+    )
+    st.write(
+        f"**CROSS FT CLEAN H/A:** "
+        f"{cross_home_clean:.2f} | {cross_away_clean:.2f}"
+    )
+    st.markdown("### 🧪 Metriche pulite e frequenze")
+
+    b1, b2 = st.columns(2)
+
+    with b1:
+        st.write(
+            f"**AVG FT CLEAN Home/Away:** "
+            f"{avg.get('home_avg_ft_clean', 0):.2f} | "
+            f"{avg.get('away_avg_ft_clean', 0):.2f}"
+        )
+        st.write(
+            f"**FT 2+ Rate Home/Away:** "
+            f"{avg.get('home_ft_2plus_rate', 0):.2f} | "
+            f"{avg.get('away_ft_2plus_rate', 0):.2f}"
+        )
+        st.write(
+            f"**FT 3+ Rate Home/Away:** "
+            f"{avg.get('home_ft_3plus_rate', 0):.2f} | "
+            f"{avg.get('away_ft_3plus_rate', 0):.2f}"
+        )
+        st.write(
+            f"**FT LOW Rate Home/Away:** "
+            f"{avg.get('home_ft_low_rate', 0):.2f} | "
+            f"{avg.get('away_ft_low_rate', 0):.2f}"
+        )
+        st.write(
+            f"**FT Peak Count Home/Away:** "
+            f"{avg.get('home_ft_peak_count', 0)} | "
+            f"{avg.get('away_ft_peak_count', 0)}"
+        )
+
+    with b2:
+        st.write(
+            f"**AVG HT CLEAN Home/Away:** "
+            f"{avg.get('home_avg_ht_clean', 0):.2f} | "
+            f"{avg.get('away_avg_ht_clean', 0):.2f}"
+        )
+        st.write(
+            f"**HT 1+ Rate Home/Away:** "
+            f"{avg.get('home_ht_1plus_rate', 0):.2f} | "
+            f"{avg.get('away_ht_1plus_rate', 0):.2f}"
+        )
+        st.write(
+            f"**HT ZERO Rate Home/Away:** "
+            f"{avg.get('home_ht_zero_rate', 0):.2f} | "
+            f"{avg.get('away_ht_zero_rate', 0):.2f}"
+        )
+
+    st.write(
+        f"**Fav quota:** {flags.get('fav_quote', 0):.2f} | "
+        f"**Gold zone:** {'✅' if flags.get('is_gold_zone') else '❌'} | "
+        f"**Home last 2H zero:** {'✅' if flags.get('home_last_2h_zero') else '❌'} | "
+        f"**Away last 2H zero:** {'✅' if flags.get('away_last_2h_zero') else '❌'} | "
+        f"**Drop:** {flags.get('drop_diff', 0):.2f}"
+    )
+
+    if scores:
+        st.markdown("---")
+        st.subheader("🧠 Score interni V24.1")
+        s1, s2, s3, s4, s5 = st.columns(5)
+        s1.metric("PTGG", f"{scores.get('ptgg', 0):.2f}")
+        s2.metric("PT1.5", f"{scores.get('pto15', 0):.2f}")
+        s3.metric("OVER", f"{scores.get('over', 0):.2f}")
+        s4.metric("BOOST", f"{scores.get('boost', 0):.2f}")
+        s5.metric("GOLD", f"{scores.get('gold', 0):.2f}")
+
+    st.markdown("---")
+    c_home, c_away = st.columns(2)
+
+    with c_home:
+        st.markdown(f"### 🏠 Ultime 8 {detail['home_team']}")
+        df_home = pd.DataFrame(detail.get("home_last_8", []))
+        if not df_home.empty:
+            st.dataframe(df_home, use_container_width=True, hide_index=True)
+        else:
+            st.info("Nessun dato home disponibile.")
+
+    with c_away:
+        st.markdown(f"### ✈️ Ultime 8 {detail['away_team']}")
+        df_away = pd.DataFrame(detail.get("away_last_8", []))
+        if not df_away.empty:
+            st.dataframe(df_away, use_container_width=True, hide_index=True)
+        else:
+            st.info("Nessun dato away disponibile.")
+
+
+def diag_bool(value):
+    return "✅" if value else "❌"
+
+
+def build_diag_base_row(fx, target_date):
+    fixture = fx.get("fixture", {})
+    league = fx.get("league", {})
+    home_team = fx.get("teams", {}).get("home", {})
+    away_team = fx.get("teams", {}).get("away", {})
+
+    fixture_local_dt = fixture_dt_rome(fixture)
+    ora_local = fixture_local_dt.strftime("%H:%M") if fixture_local_dt else str(fixture.get("date", ""))[11:16]
+
+    status_short = fixture.get("status", {}).get("short", "")
+    status_long = fixture.get("status", {}).get("long", "")
+    league_name = league.get("name", "N/D")
+    country = league.get("country", "N/D")
+    fixture_id = fixture.get("id")
+    home_name = home_team.get("name", "N/D")
+    away_name = away_team.get("name", "N/D")
+    blacklisted = is_blacklisted_league(league_name)
+
+    return {
+        "date": target_date,
+        "time": ora_local,
+        "country": country,
+        "league": league_name,
+        "status_short": status_short,
+        "status_long": status_long,
+        "league_blacklisted": blacklisted,
+        "home": home_name,
+        "away": away_name,
+        "match": f"{home_name} - {away_name}",
+        "fixture_id": fixture_id,
+        "home_team_id": home_team.get("id"),
+        "away_team_id": away_team.get("id"),
+    }
+
+
+def append_diagnostic_row(rows, base_row, **extra):
+    row = dict(base_row)
+    row.update(extra)
+    rows.append(row)
+
+# ==========================================
+# SCAN CORE
+# ==========================================
+def run_full_scan(horizon=None, snap=False, update_main_site=False, show_success=True):
+    use_horizon = horizon if horizon is not None else HORIZON
+    target_dates = get_target_dates()
+
+    with st.spinner(f"🚀 Analisi mercati {target_dates[use_horizon - 1]}..."):
+        with requests.Session() as s:
+            target_date = target_dates[use_horizon - 1]
+
+            # ==========================================
+            # 1) CHIAMATA API PROTETTA
+            # ==========================================
+            res = api_get(s, "fixtures", {"date": target_date, "timezone": "Europe/Rome"})
+            if not res or not isinstance(res, dict):
+                print(f"❌ API non valida per day {use_horizon} ({target_date}) -> skip totale", flush=True)
+                if show_success:
+                    st.error(f"❌ API non valida per {target_date}. Nessun file aggiornato.")
+                return
+
+            api_response = res.get("response", [])
+            if not api_response or not isinstance(api_response, list):
+                print(f"❌ API vuota per day {use_horizon} ({target_date}) -> skip totale", flush=True)
+                if show_success:
+                    st.error(f"❌ API vuota per {target_date}. Nessun file aggiornato.")
+                return
+
+            st.session_state.available_countries = sorted(
+                list(set(st.session_state.available_countries) | {
+                    fx.get("league", {}).get("country", "N/D") for fx in api_response
+                })
+            )
+
+            ns_not_blacklisted = [
+                f for f in api_response
+                if f.get("fixture", {}).get("status", {}).get("short") == "NS"
+                and not is_blacklisted_league(f.get("league", {}).get("name", ""))
+            ]
+
+            if not ns_not_blacklisted:
+                print(f"❌ Nessun fixture NS valido per day {use_horizon} ({target_date}) -> skip totale", flush=True)
+                if show_success:
+                    st.error(f"❌ Nessun match pre-match valido trovato per {target_date}. Nessun file aggiornato.")
+                return
+
+            # ==========================================
+            # 2) SNAPSHOT ROLLING (solo day 1 con snap=True)
+            # ==========================================
+            if use_horizon == 1 and snap:
+                try:
+                    snapshot_fx = []
+                    all_target_dates = get_target_dates()
+                    for h in ROLLING_SNAPSHOT_HORIZONS:
+                        dt = all_target_dates[h - 1]
+                        print(f"📸 Snapshot horizon {h} -> {dt}", flush=True)
+                        rs = api_get(s, "fixtures", {"date": dt, "timezone": "Europe/Rome"})
+                        if rs and isinstance(rs, dict):
+                            rr = rs.get("response", [])
+                            if isinstance(rr, list):
+                                snapshot_fx.extend(rr)
+                    if snapshot_fx:
+                        build_snapshot_from_fixtures(snapshot_fx)
+                except Exception as e:
+                    print(f"❌ Errore snapshot rolling: {e}", flush=True)
+                    if show_success:
+                        st.error(f"❌ Errore snapshot: {e}")
+                    return
+
+            final_list = []
+            diagnostic_rows = []
+            details_map = dict(st.session_state.match_details)
+
+            pb = st.progress(0, text="🚀 ANALISI DIAGNOSTICA COMPLETA...")
+
+            # ==========================================
+            # 3) ANALISI MATCH COMPLETA CON EARLY SKIP
+            # ==========================================
+            for i, f in enumerate(api_response):
+                pb.progress((i + 1) / len(api_response) if api_response else 1.0)
+                base = build_diag_base_row(f, target_date)
+
+                try:
+                    status_short = base["status_short"]
+                    if status_short != "NS":
+                        append_diagnostic_row(
+                            diagnostic_rows,
+                            base,
+                            diagnostic_scope="ALL_FIXTURES",
+                            early_skip=True,
+                            skip_stage="FILTER_STATUS",
+                            kept=False,
+                            prefilter_out=False,
+                            reason=f"SKIP_STATUS_{status_short or 'UNKNOWN'}",
+                            tags="",
+                        )
+                        continue
+
+                    if base["league_blacklisted"]:
+                        append_diagnostic_row(
+                            diagnostic_rows,
+                            base,
+                            diagnostic_scope="ALL_FIXTURES",
+                            early_skip=True,
+                            skip_stage="FILTER_LEAGUE",
+                            kept=False,
+                            prefilter_out=False,
+                            reason="SKIP_BLACKLISTED_LEAGUE",
+                            tags="",
+                        )
+                        continue
+
+                    cnt = base["country"]
+                    if cnt in st.session_state.config["excluded"]:
+                        append_diagnostic_row(
+                            diagnostic_rows,
+                            base,
+                            diagnostic_scope="ALL_FIXTURES",
+                            early_skip=True,
+                            skip_stage="FILTER_COUNTRY",
+                            kept=False,
+                            prefilter_out=False,
+                            reason="SKIP_EXCLUDED_COUNTRY",
+                            tags="",
+                        )
+                        continue
+
+                    fid = str(base.get("fixture_id"))
+                    if not fid or fid == "None":
+                        append_diagnostic_row(
+                            diagnostic_rows,
+                            base,
+                            diagnostic_scope="ALL_FIXTURES",
+                            early_skip=True,
+                            skip_stage="INPUT_FIXTURE",
+                            kept=False,
+                            prefilter_out=False,
+                            reason="SKIP_NO_FIXTURE_ID",
+                            tags="",
+                        )
+                        continue
+
+                    mk = extract_elite_markets(s, fid)
+                    if not mk:
+                        append_diagnostic_row(
+                            diagnostic_rows,
+                            base,
+                            diagnostic_scope="ALL_FIXTURES",
+                            early_skip=True,
+                            skip_stage="INPUT_MARKETS",
+                            kept=False,
+                            prefilter_out=False,
+                            reason="SKIP_NO_MARKETS",
+                            tags="",
+                        )
+                        continue
+
+                    if mk == "SKIP":
+                        append_diagnostic_row(
+                            diagnostic_rows,
+                            base,
+                            diagnostic_scope="ALL_FIXTURES",
+                            early_skip=True,
+                            skip_stage="INPUT_MARKETS",
+                            kept=False,
+                            prefilter_out=False,
+                            reason="SKIP_MARKETS_FLAGGED",
+                            tags="",
+                        )
+                        continue
+
+                    q1 = safe_float(mk.get("q1"), 0.0)
+                    if q1 == 0:
+                        append_diagnostic_row(
+                            diagnostic_rows,
+                            base,
+                            diagnostic_scope="ALL_FIXTURES",
+                            early_skip=True,
+                            skip_stage="INPUT_MARKETS",
+                            kept=False,
+                            prefilter_out=False,
+                            reason="SKIP_Q1_ZERO",
+                            tags="",
+                            q1=0.0,
+                            qx=round(safe_float(mk.get("qx"), 0), 3),
+                            q2=round(safe_float(mk.get("q2"), 0), 3),
+                            o25=round(safe_float(mk.get("o25"), 0), 3),
+                            o05ht=round(safe_float(mk.get("o05ht"), 0), 3),
+                            o15ht=round(safe_float(mk.get("o15ht"), 0), 3),
+                        )
+                        continue
+
+                    home_team = f.get("teams", {}).get("home", {})
+                    away_team = f.get("teams", {}).get("away", {})
+                    if not home_team.get("id") or not away_team.get("id"):
+                        append_diagnostic_row(
+                            diagnostic_rows,
+                            base,
+                            diagnostic_scope="ALL_FIXTURES",
+                            early_skip=True,
+                            skip_stage="INPUT_TEAMS",
+                            kept=False,
+                            prefilter_out=False,
+                            reason="SKIP_NO_TEAM_IDS",
+                            tags="",
+                            q1=round(q1, 3),
+                            qx=round(safe_float(mk.get("qx"), 0), 3),
+                            q2=round(safe_float(mk.get("q2"), 0), 3),
+                            o25=round(safe_float(mk.get("o25"), 0), 3),
+                            o05ht=round(safe_float(mk.get("o05ht"), 0), 3),
+                            o15ht=round(safe_float(mk.get("o15ht"), 0), 3),
+                        )
+                        continue
+
+                    s_h = get_team_performance(s, home_team["id"])
+                    s_a = get_team_performance(s, away_team["id"])
+                    if not s_h and not s_a:
+                        append_diagnostic_row(
+                            diagnostic_rows,
+                            base,
+                            diagnostic_scope="ALL_FIXTURES",
+                            early_skip=True,
+                            skip_stage="INPUT_STATS",
+                            kept=False,
+                            prefilter_out=False,
+                            reason="SKIP_NO_STATS_BOTH",
+                            tags="",
+                            q1=round(q1, 3),
+                            qx=round(safe_float(mk.get("qx"), 0), 3),
+                            q2=round(safe_float(mk.get("q2"), 0), 3),
+                            o25=round(safe_float(mk.get("o25"), 0), 3),
+                            o05ht=round(safe_float(mk.get("o05ht"), 0), 3),
+                            o15ht=round(safe_float(mk.get("o15ht"), 0), 3),
+                        )
+                        continue
+                    if not s_h:
+                        append_diagnostic_row(
+                            diagnostic_rows,
+                            base,
+                            diagnostic_scope="ALL_FIXTURES",
+                            early_skip=True,
+                            skip_stage="INPUT_STATS",
+                            kept=False,
+                            prefilter_out=False,
+                            reason="SKIP_NO_HOME_STATS",
+                            tags="",
+                            q1=round(q1, 3),
+                            qx=round(safe_float(mk.get("qx"), 0), 3),
+                            q2=round(safe_float(mk.get("q2"), 0), 3),
+                            o25=round(safe_float(mk.get("o25"), 0), 3),
+                            o05ht=round(safe_float(mk.get("o05ht"), 0), 3),
+                            o15ht=round(safe_float(mk.get("o15ht"), 0), 3),
+                        )
+                        continue
+                    if not s_a:
+                        append_diagnostic_row(
+                            diagnostic_rows,
+                            base,
+                            diagnostic_scope="ALL_FIXTURES",
+                            early_skip=True,
+                            skip_stage="INPUT_STATS",
+                            kept=False,
+                            prefilter_out=False,
+                            reason="SKIP_NO_AWAY_STATS",
+                            tags="",
+                            q1=round(q1, 3),
+                            qx=round(safe_float(mk.get("qx"), 0), 3),
+                            q2=round(safe_float(mk.get("q2"), 0), 3),
+                            o25=round(safe_float(mk.get("o25"), 0), 3),
+                            o05ht=round(safe_float(mk.get("o05ht"), 0), 3),
+                            o15ht=round(safe_float(mk.get("o15ht"), 0), 3),
+                        )
+                        continue
+
+                    combined_ht_avg = (s_h["avg_ht"] + s_a["avg_ht"]) / 2
+                    combined_ht_clean = (s_h["avg_ht_clean"] + s_a["avg_ht_clean"]) / 2
+                    combined_ft_clean = (s_h["avg_total_clean"] + s_a["avg_total_clean"]) / 2
+                    combined_ht_scored_clean = (s_h["avg_ht_scored_clean"] + s_a["avg_ht_scored_clean"]) / 2
+                    combined_ht_conceded_clean = (s_h["avg_ht_conceded_clean"] + s_a["avg_ht_conceded_clean"]) / 2
+
+                    prefilter_out = False
+                    if (
+                        combined_ht_clean < 0.72
+                        and combined_ft_clean < 1.20
+                        and s_h["ht_1plus_rate"] < 0.38
+                        and s_a["ht_1plus_rate"] < 0.38
+                        and s_h["ft_2plus_rate"] < 0.38
+                        and s_a["ft_2plus_rate"] < 0.38
+                    ):
+                        prefilter_out = True
+
+                    signal_pack = build_signal_package(fid, mk, s_h, s_a)
+                    tags = signal_pack["tags"]
+                    kept = should_keep_match(signal_pack)
+                    scores = signal_pack["scores"]
+                    fav = signal_pack["fav_quote"]
+                    is_gold_zone = signal_pack["is_gold_zone"]
+                    reason = diagnostic_reason(signal_pack, prefilter_out=prefilter_out, kept=kept)
+
+                    has_gold = any("GOLD" in t for t in tags)
+                    has_boost = any("BOOST" in t for t in tags)
+                    has_ptgg = "🎯PTGG" in tags
+                    has_pt15 = "🔥PT1.5" in tags
+                    has_over = any("OVER" in t for t in tags)
+                    has_probe_o = "🐟O" in tags
+                    has_probe_g = "🐟G" in tags
+
+                    analysis_bucket = "KEPT" if kept else ("PREFILTER_OUT" if prefilter_out else "SCARTATA_KEEP")
+                    skip_stage = "KEPT" if kept else ("PREFILTER" if prefilter_out else "KEEP_RULES")
+
+                    row = {
+                        "Ora": base["time"],
+                        "Lega": f"{base['league']} ({cnt})",
+                        "Match": base["match"],
+                        "FAV": "✅" if is_gold_zone else "❌",
+                        "1X2": f"{safe_float(mk.get('q1'), 0):.1f}|{safe_float(mk.get('qx'), 0):.1f}|{safe_float(mk.get('q2'), 0):.1f}",
+                        "O2.5": f"{safe_float(mk.get('o25'), 0):.2f}",
+                        "O0.5H": f"{safe_float(mk.get('o05ht'), 0):.2f}",
+                        "O1.5H": f"{safe_float(mk.get('o15ht'), 0):.2f}",
+                        "AVG FT": f"{s_h['avg_total']:.1f}|{s_a['avg_total']:.1f}",
+                        "AVG HT": f"{s_h['avg_ht']:.1f}|{s_a['avg_ht']:.1f}",
+                        "Info": " ".join(tags),
+                        "Data": target_date,
+                        "Fixture_ID": f.get("fixture", {}).get("id"),
+                        "Kept": "✅" if kept else "❌",
+                        "Prefilter": "🚫" if prefilter_out else "✅",
+                        "Reason": reason,
+                        "PTGG": round(scores.get("ptgg", 0), 2),
+                        "PT15": round(scores.get("pto15", 0), 2),
+                        "PT": round(scores.get("pt", 0), 2),
+                        "OVER_SCORE": round(scores.get("over", 0), 2),
+                        "BOOST": round(scores.get("boost", 0), 2),
+                        "GOLD": round(scores.get("gold", 0), 2),
+                        "MAX": round(scores.get("max", 0), 2),
+                        "Drop": round(signal_pack.get("drop_diff", 0), 2),
+                        "HT Clean": round(combined_ht_clean, 2),
+                        "FT Clean": round(combined_ft_clean, 2),
+                        "HT1+ H": round(s_h["ht_1plus_rate"], 2),
+                        "HT1+ A": round(s_a["ht_1plus_rate"], 2),
+                        "FT2+ H": round(s_h["ft_2plus_rate"], 2),
+                        "FT2+ A": round(s_a["ft_2plus_rate"], 2),
+                    }
+                    final_list.append(row)
+
+                    append_diagnostic_row(
+                        diagnostic_rows,
+                        base,
+                        diagnostic_scope="ALL_FIXTURES",
+                        early_skip=False,
+                        analyzed=True,
+                        analysis_bucket=analysis_bucket,
+                        skip_stage=skip_stage,
+                        kept=kept,
+                        prefilter_out=prefilter_out,
+                        reason=reason,
+                        tags=" ".join(tags),
+                        strong_tag_count=signal_pack.get("strong_tag_count", 0),
+                        has_gold=has_gold,
+                        has_boost=has_boost,
+                        has_ptgg=has_ptgg,
+                        has_pt15=has_pt15,
+                        has_over=has_over,
+                        has_probe_o=has_probe_o,
+                        has_probe_g=has_probe_g,
+                        fav_quote=round(fav, 3),
+                        is_gold_zone=is_gold_zone,
+                        drop_diff=round(signal_pack.get("drop_diff", 0), 3),
+                        q1=round(safe_float(mk.get("q1"), 0), 3),
+                        qx=round(safe_float(mk.get("qx"), 0), 3),
+                        q2=round(safe_float(mk.get("q2"), 0), 3),
+                        o25=round(safe_float(mk.get("o25"), 0), 3),
+                        o05ht=round(safe_float(mk.get("o05ht"), 0), 3),
+                        o15ht=round(safe_float(mk.get("o15ht"), 0), 3),
+                        combined_ht_avg=round(combined_ht_avg, 3),
+                        combined_ht_clean=round(combined_ht_clean, 3),
+                        combined_ft_clean=round(combined_ft_clean, 3),
+                        combined_ht_scored_clean=round(combined_ht_scored_clean, 3),
+                        combined_ht_conceded_clean=round(combined_ht_conceded_clean, 3),
+                        home_avg_total=round(s_h["avg_total"], 3),
+                        away_avg_total=round(s_a["avg_total"], 3),
+                        home_avg_ht=round(s_h["avg_ht"], 3),
+                        away_avg_ht=round(s_a["avg_ht"], 3),
+                        home_avg_total_clean=round(s_h["avg_total_clean"], 3),
+                        away_avg_total_clean=round(s_a["avg_total_clean"], 3),
+                        home_avg_ht_clean=round(s_h["avg_ht_clean"], 3),
+                        away_avg_ht_clean=round(s_a["avg_ht_clean"], 3),
+                        home_avg_ht_scored_clean=round(s_h["avg_ht_scored_clean"], 3),
+                        away_avg_ht_scored_clean=round(s_a["avg_ht_scored_clean"], 3),
+                        home_avg_ht_conceded_clean=round(s_h["avg_ht_conceded_clean"], 3),
+                        away_avg_ht_conceded_clean=round(s_a["avg_ht_conceded_clean"], 3),
+                        home_ft_2plus_rate=round(s_h["ft_2plus_rate"], 3),
+                        away_ft_2plus_rate=round(s_a["ft_2plus_rate"], 3),
+                        home_ft_3plus_rate=round(s_h["ft_3plus_rate"], 3),
+                        away_ft_3plus_rate=round(s_a["ft_3plus_rate"], 3),
+                        home_ft_low_rate=round(s_h["ft_low_rate"], 3),
+                        away_ft_low_rate=round(s_a["ft_low_rate"], 3),
+                        home_ht_1plus_rate=round(s_h["ht_1plus_rate"], 3),
+                        away_ht_1plus_rate=round(s_a["ht_1plus_rate"], 3),
+                        home_ht_zero_rate=round(s_h["ht_zero_rate"], 3),
+                        away_ht_zero_rate=round(s_a["ht_zero_rate"], 3),
+                        ptgg_score=round(scores.get("ptgg", 0), 3),
+                        pt15_score=round(scores.get("pto15", 0), 3),
+                        pt_score=round(scores.get("pt", 0), 3),
+                        over_score=round(scores.get("over", 0), 3),
+                        boost_score=round(scores.get("boost", 0), 3),
+                        gold_score=round(scores.get("gold", 0), 3),
+                        max_score=round(scores.get("max", 0), 3),
+                    )
+
+                    details_map[fid] = {
+                        "fixture_id": f.get("fixture", {}).get("id"),
+                        "date": target_date,
+                        "time": base["time"],
+                        "league": base["league"],
+                        "country": cnt,
+                        "match": base["match"],
+                        "home_team": home_team.get("name", "N/D"),
+                        "away_team": away_team.get("name", "N/D"),
+                        "markets": {
+                            "q1": safe_float(mk.get("q1"), 0),
+                            "qx": safe_float(mk.get("qx"), 0),
+                            "q2": safe_float(mk.get("q2"), 0),
+                            "o25": safe_float(mk.get("o25"), 0),
+                            "o05ht": safe_float(mk.get("o05ht"), 0),
+                            "o15ht": safe_float(mk.get("o15ht"), 0)
+                        },
+                        "averages": {
+                            "home_avg_total": s_h["avg_total"],
+                            "away_avg_total": s_a["avg_total"],
+                            "home_avg_ht": s_h["avg_ht"],
+                            "away_avg_ht": s_a["avg_ht"],
+                            "combined_ht_clean": combined_ht_clean,
+                            "combined_ft_clean": combined_ft_clean,
+                            "combined_ht_scored_clean": combined_ht_scored_clean,
+                            "combined_ht_conceded_clean": combined_ht_conceded_clean,
+                        },
+                        "rates": {
+                            "home_ft_2plus": s_h["ft_2plus_rate"],
+                            "away_ft_2plus": s_a["ft_2plus_rate"],
+                            "home_ft_low": s_h["ft_low_rate"],
+                            "away_ft_low": s_a["ft_low_rate"],
+                            "home_ht_1plus": s_h["ht_1plus_rate"],
+                            "away_ht_1plus": s_a["ht_1plus_rate"],
+                            "home_ht_zero": s_h["ht_zero_rate"],
+                            "away_ht_zero": s_a["ht_zero_rate"],
+                        },
+                        "scores": {
+                            "ptgg": scores.get("ptgg", 0),
+                            "pt15": scores.get("pto15", 0),
+                            "pt": scores.get("pt", 0),
+                            "over": scores.get("over", 0),
+                            "boost": scores.get("boost", 0),
+                            "gold": scores.get("gold", 0),
+                            "max": scores.get("max", 0),
+                        },
+                        "tags": tags,
+                        "kept": kept,
+                        "prefilter_out": prefilter_out,
+                        "reason": reason,
+                    }
+
+                except Exception as e:
+                    append_diagnostic_row(
+                        diagnostic_rows,
+                        base,
+                        diagnostic_scope="ALL_FIXTURES",
+                        early_skip=True,
+                        analyzed=False,
+                        skip_stage="ERROR",
+                        kept=False,
+                        prefilter_out=False,
+                        reason=f"TECH_ERROR: {e}",
+                        tags="",
+                    )
+                    print(f"❌ Errore match {base.get('match', 'N/D')}: {e}", flush=True)
+                    continue
+
+            # ==========================================
+            # 4) SALVATAGGI DIAGNOSTICI LOCALI
+            # ==========================================
+            try:
+                with open(DIAG_DB_FILE, "w", encoding="utf-8") as f:
+                    json.dump(final_list, f, indent=4, ensure_ascii=False)
+            except Exception as e:
+                print(f"❌ Errore salvataggio diagnostico DB: {e}", flush=True)
+                if show_success:
+                    st.error(f"❌ Errore salvataggio diagnostico DB: {e}")
+                return
+
+            try:
+                with open(DIAG_DETAILS_FILE, "w", encoding="utf-8") as f:
+                    json.dump({
+                        "updated_at": now_rome().strftime("%Y-%m-%d %H:%M:%S"),
+                        "details": details_map
+                    }, f, indent=4, ensure_ascii=False)
+            except Exception as e:
+                print(f"❌ Errore salvataggio diagnostico details: {e}", flush=True)
+                if show_success:
+                    st.error(f"❌ Errore salvataggio diagnostico details: {e}")
+                return
+
+            try:
+                df_diag = pd.DataFrame(diagnostic_rows)
+                if not df_diag.empty:
+                    priority = {
+                        "KEPT": 0,
+                        "SCARTATA_KEEP": 1,
+                        "PREFILTER_OUT": 2,
+                        "INPUT_STATS": 3,
+                        "INPUT_MARKETS": 4,
+                        "INPUT_TEAMS": 5,
+                        "INPUT_FIXTURE": 6,
+                        "FILTER_COUNTRY": 7,
+                        "FILTER_LEAGUE": 8,
+                        "FILTER_STATUS": 9,
+                        "ERROR": 10,
+                    }
+                    df_diag["sort_priority"] = df_diag["skip_stage"].map(priority).fillna(99)
+                    df_diag = df_diag.sort_values(
+                        by=["date", "sort_priority", "league", "time", "match"],
+                        ascending=[True, True, True, True, True],
+                        na_position="last"
+                    ).drop(columns=["sort_priority"])
+                df_diag.to_csv(DIAG_CSV_FILE, index=False, encoding="utf-8-sig")
+            except Exception as e:
+                print(f"❌ Errore salvataggio diagnostico CSV: {e}", flush=True)
+                if show_success:
+                    st.error(f"❌ Errore salvataggio diagnostico CSV: {e}")
+                return
+
+            st.session_state.scan_results = final_list
+            st.session_state.match_details = details_map
+
+            if show_success:
+                kept_count = len([r for r in diagnostic_rows if r.get("kept")])
+                prefilter_count = len([r for r in diagnostic_rows if r.get("prefilter_out")])
+                early_skip_count = len([r for r in diagnostic_rows if r.get("early_skip")])
+                st.success(f"✅ Diagnosi completata: {len(final_list)} match analizzati con score/tag")
+                st.success(f"✅ CSV diagnostico salvato: {Path(DIAG_CSV_FILE).name}")
+                st.info(
+                    f"Totale fixture API: {len(api_response)} | Analizzati: {len(final_list)} | "
+                    f"Tenuti: {kept_count} | Prefilter out: {prefilter_count} | Early skip: {early_skip_count}"
+                )
+
+            if "--auto" not in sys.argv and "--fast" not in sys.argv and "--day2-refresh" not in sys.argv:
+                time.sleep(2)
+                st.rerun()
+
+# ==========================================
+# AUTO BUILD 5 GIORNI
+# ==========================================
+def run_nightly_multiday_build():
+    print("🚀 Avvio scan notturno multi-day...")
+
+    print("📌 DAY 1: SNAP + SCAN + update data.json/data_day1/details_day1")
+    run_full_scan(horizon=1, snap=True, update_main_site=True, show_success=False)
+
+    print("📆 DAY 2: scan statico + update data_day2/details_day2")
+    run_full_scan(horizon=2, snap=False, update_main_site=False, show_success=False)
+
+    print("📆 DAY 3: scan statico + update data_day3/details_day3")
+    run_full_scan(horizon=3, snap=False, update_main_site=False, show_success=False)
+
+    print("📆 DAY 4: scan statico + update data_day4/details_day4")
+    run_full_scan(horizon=4, snap=False, update_main_site=False, show_success=False)
+
+    print("📆 DAY 5: scan statico + update data_day5/details_day5")
+    run_full_scan(horizon=5, snap=False, update_main_site=False, show_success=False)
+
+    print("✅ Build multi-day completata.")
+
+# ==========================================
+# UI SIDEBAR
+# ==========================================
+st.sidebar.header("🧪 Arab Sniper V24.1 Diagnosi")
+HORIZON = st.sidebar.selectbox("Orizzonte Temporale:", options=[1, 2, 3, 4, 5], index=0)
+target_dates = get_target_dates()
+
+all_discovered = sorted(list(set(st.session_state.get("available_countries", []))))
+if st.session_state.scan_results:
+    historical_cnt = {r["Lega"].split("(")[-1].replace(")", "") for r in st.session_state.scan_results}
+    all_discovered = sorted(list(set(all_discovered) | historical_cnt))
+
+if all_discovered:
+    new_ex = st.sidebar.multiselect(
+        "Escludi Nazioni:",
+        options=all_discovered,
+        default=[c for c in st.session_state.config.get("excluded", []) if c in all_discovered]
+    )
+    if st.sidebar.button("💾 SALVA CONFIG"):
+        st.session_state.config["excluded"] = new_ex
+        save_config()
+        st.rerun()
+
+if last_snap_ts:
+    st.sidebar.success(f"✅ SNAPSHOT: {last_snap_ts}")
+else:
+    st.sidebar.warning("⚠️ SNAPSHOT ASSENTE")
+
+st.sidebar.markdown("---")
+st.sidebar.caption(f"DB DIAGNOSI: {Path(DIAG_DB_FILE).name}")
+st.sidebar.caption(f"SNAP: {Path(SNAP_FILE).name}")
+st.sidebar.caption(f"DETAILS DIAGNOSI: {Path(DIAG_DETAILS_FILE).name}")
+st.sidebar.caption("Diagnosi locale: JSON + CSV, nessun upload GitHub")
+
+# ==========================================
+# UI MAIN
+# ==========================================
+c1, c2 = st.columns(2)
+if c1.button("🧪 SNAP + DIAGNOSI"):
+    run_full_scan(horizon=HORIZON, snap=(HORIZON == 1), update_main_site=(HORIZON == 1))
+if c2.button("🧪 DIAGNOSI VELOCE"):
+    run_full_scan(horizon=HORIZON, snap=False, update_main_site=(HORIZON == 1))
+
+if st.session_state.selected_fixture_for_modal:
+    show_match_modal(st.session_state.selected_fixture_for_modal)
+
+if st.session_state.scan_results:
+    df = pd.DataFrame(st.session_state.scan_results)
+    full_view = df[df["Data"] == target_dates[HORIZON - 1]]
+
+    if not full_view.empty:
+        full_view = full_view.sort_values(by=["Ora", "Match"])
+        view = full_view.copy()
+        def build_1x2_visual(row):
+            q1 = str(row.get("Q1_MOVE", "")).strip()
+            qx = str(row.get("QX_MOVE", "")).strip()
+            q2 = str(row.get("Q2_MOVE", "")).strip()
+
+            base_1x2 = str(row.get("1X2", "")).split("|")
+            while len(base_1x2) < 3:
+                base_1x2.append("")
+
+            left = q1 if q1 else base_1x2[0]
+            mid = qx if qx else base_1x2[1]
+            right = q2 if q2 else base_1x2[2]
+
+            return f"""
+            <div style="line-height:1.15; white-space:pre-line;">
+                <div><b>1</b> {left}</div>
+                <div><b>X</b> {mid}</div>
+                <div><b>2</b> {right}</div>
+            </div>
+            """
+
+        def build_o25_visual(row):
+            move = str(row.get("O25_MOVE", "")).strip()
+            current = str(row.get("O2.5", "")).strip()
+
+            if move:
+                return f"""
+                <div style="line-height:1.15; white-space:pre-line;">
+                    {move}
+                </div>
+                """
+            return current
+
+        view["1X2_VIS"] = view.apply(build_1x2_visual, axis=1)
+        view["O25_VIS"] = view.apply(build_o25_visual, axis=1)
+
+        # Rimuoviamo colonne tecniche che non vogliamo mostrare in tabella
+        cols_to_drop = [
+            "Data", "Fixture_ID",
+            "Q1_OPEN", "QX_OPEN", "Q2_OPEN", "O25_OPEN",
+            "Q1_CURR", "QX_CURR", "Q2_CURR", "O25_CURR",
+            "Q1_MOVE", "QX_MOVE", "Q2_MOVE", "O25_MOVE",
+            "INVERSION", "INV_FROM", "INV_TO"
+        ]
+        view = view.drop(columns=[c for c in cols_to_drop if c in view.columns], errors="ignore")
+
+        if "1X2" in view.columns:
+            view["1X2"] = view["1X2_VIS"]
+
+        if "O2.5" in view.columns:
+            view["O2.5"] = view["O25_VIS"]
+
+        view = view.drop(columns=["1X2_VIS", "O25_VIS"], errors="ignore")
+
+        st.markdown("""
+            <style>
+                .main-container { width: 100%; max-height: 800px; overflow: auto; border: 1px solid #444; border-radius: 8px; background-color: #0e1117; }
+                .mobile-table { width: 100%; min-width: 1000px; border-collapse: separate; border-spacing: 0; font-family: sans-serif; font-size: 11px; }
+                .mobile-table th { position: sticky; top: 0; background: #1a1c23; color: #00e5ff; z-index: 10; padding: 12px 5px; border-bottom: 2px solid #333; border-right: 1px solid #333; }
+                .mobile-table td { padding: 8px 5px; border-bottom: 1px solid #333; border-right: 1px solid #333; text-align: center; white-space: nowrap; vertical-align: middle; }
+                .mobile-table td div { white-space: pre-line; }
+                .row-gold {
+                    background: linear-gradient(90deg, #FFD700, #FFC300) !important;
+                    color: #000000 !important;
+                    font-weight: 700;
+                    border-left: 5px solid #ff9900;
+                }
+
+                .row-gold td {
+                    box-shadow: inset 0 0 6px rgba(255, 200, 0, 0.6);
+                }
+
+                .row-boost {
+                    background: linear-gradient(90deg, #0f5132, #198754) !important;
+                    color: #ffffff !important;
+                    font-weight: 600;
+                    border-left: 5px solid #00ff88;
+                }
+
+                .row-over {
+                    background-color: #d1f7e3 !important;
+                    color: #003d2e !important;
+                    font-weight: 500;
+                }
+
+                .row-pt {
+                    background-color: #d6e4ff !important;
+                    color: #002b5c !important;
+                    font-weight: 500;
+                }
+
+                .row-probe {
+                    background-color: #f3e8ff !important;
+                    color: #4b0082 !important;
+                    font-style: italic;
+                    opacity: 0.92;
+                }
+
+                .row-std {
+                    background-color: #ffffff !important;
+                    color: #000000 !important;
+                }
+            </style>
+        """, unsafe_allow_html=True)
+
+        def get_row_class(info):
+            if "GOLD" in info:
+                return "row-gold"
+            if "BOOST" in info:
+                return "row-boost"
+            if "OVER" in info:
+                return "row-over"
+            if "PT" in info:
+                return "row-pt"
+            if "🐟" in info:
+                return "row-probe"
+            return "row-std"
+
+        html = '<div class="main-container"><table class="mobile-table"><thead><tr>'
+        html += ''.join(f'<th>{c}</th>' for c in view.columns)
+        html += '</tr></thead><tbody>'
+
+        for _, row in view.iterrows():
+            cls = get_row_class(row["Info"])
+            html += f'<tr class="{cls}">' + ''.join(f'<td>{v}</td>' for v in row) + '</tr>'
+
+        html += '</tbody></table></div>'
+        st.markdown(html, unsafe_allow_html=True)
+
+        st.markdown("---")
+        st.subheader("🔎 Dettagli partite")
+
+        for _, row in full_view.iterrows():
+            fid = str(row["Fixture_ID"])
+            c_btn, c_ora, c_match, c_lega = st.columns([1, 1.3, 4, 3])
+
+            with c_btn:
+                if st.button("🔎", key=f"open_modal_{fid}", help="Apri dettagli match"):
+                    st.session_state.selected_fixture_for_modal = fid
+                    st.rerun()
+
+            with c_ora:
+                st.write(row["Ora"])
+
+            with c_match:
+                st.write(row["Match"])
+
+            with c_lega:
+                st.write(row["Lega"])
+
+        st.markdown("---")
+        d1, d2, d3 = st.columns(3)
+        d1.download_button(
+            "💾 CSV",
+            full_view.to_csv(index=False).encode("utf-8"),
+            f"arab_{target_dates[HORIZON - 1]}.csv"
+        )
+        d2.download_button(
+            "🌐 HTML",
+            html.encode("utf-8"),
+            f"arab_{target_dates[HORIZON - 1]}.html"
+        )
+        d3.download_button(
+            "🧠 DETAILS JSON",
+            json.dumps(
+                {
+                    k: v for k, v in st.session_state.match_details.items()
+                    if v.get("date") == target_dates[HORIZON - 1]
+                },
+                indent=4,
+                ensure_ascii=False
+            ).encode("utf-8"),
+            f"details_{target_dates[HORIZON - 1]}.json"
+        )
+else:
+    st.info("Esegui uno scan.")
+
+# ==========================================
+# LOGICA ESECUZIONE AUTOMATICA GITHUB ACTIONS
+# ==========================================
+if __name__ == "__main__":
+    if "--auto" in sys.argv:
+        print("🚀 Avvio Scan Automatico Notturno Multi-Day...")
+        HORIZON = 1
+        run_nightly_multiday_build()
+        print("✅ Scan completo terminato: data.json + data_day1/2/3/4/5 + details_day1/2/3/4/5 aggiornati.")
+
+    elif "--fast" in sys.argv:
+        HORIZON = 1
+        print("⚡ Avvio Scan Veloce Automatico (solo Day 1)...")
+        run_full_scan(horizon=1, snap=False, update_main_site=True, show_success=False)
+        print("✅ Scan veloce terminato: data.json + data_day1 + details_day1 aggiornati.")
+
+    elif "--day2-refresh" in sys.argv:
+        HORIZON = 2
+        print("🌙 Avvio Refresh Serale Day 2...")
+        run_full_scan(horizon=2, snap=False, update_main_site=False, show_success=False)
+        print("✅ Refresh Day 2 terminato: data_day2 + details_day2 aggiornati.")
